@@ -4,8 +4,8 @@ A fast, native macOS chess GUI for opening preparation, written in C++20 with Qt
 It opens instantly, keeps your PGN files as the source of truth, and focuses on building
 and training opening repertoires.
 
-> Status: **M0, project skeleton.** The window opens with a placeholder layout; real features
-> arrive milestone by milestone (see the spec).
+> Status: **M1, chess core.** Positions, FEN, SAN and the game tree with variations and
+> annotations work and are tested. The window still shows a placeholder layout; the board UI is M2.
 
 ## Requirements (macOS)
 
@@ -59,7 +59,7 @@ In CLion or VS Code (CMake Tools + clangd), just open the folder: both pick up t
 ## Layout
 
 ```
-core/     Pure C++ chess logic (board, move generation, later the game tree). No Qt.
+core/     Pure C++ chess logic: positions, FEN, SAN, game tree, annotations. No Qt.
 app/      Qt Widgets application (main window, board view, panels).
 tests/    GoogleTest unit tests (perft-verified move generation, ...).
 bench/    Google Benchmark micro-benchmarks.

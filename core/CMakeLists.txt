@@ -1,7 +1,13 @@
 # chessgui_core: pure C++ chess logic. Must never depend on Qt.
 
 add_library(chessgui_core
+    src/annotations.cpp
+    src/fen.cpp
+    src/fen.hpp
+    src/game.cpp
     src/perft.cpp
+    src/position.cpp
+    src/types.cpp
     src/version.cpp)
 add_library(chessgui::core ALIAS chessgui_core)
 
