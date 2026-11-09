@@ -1,0 +1,109 @@
+{
+  "version": 6,
+  "cmakeMinimumRequired": { "major": 3, "minor": 25, "patch": 0 },
+  "configurePresets": [
+    {
+      "name": "base",
+      "hidden": true,
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build/${presetName}",
+      "cacheVariables": {
+        "CMAKE_EXPORT_COMPILE_COMMANDS": "ON"
+      }
+    },
+    {
+      "name": "debug",
+      "displayName": "Debug + ASan/UBSan",
+      "description": "Day-to-day debugging; sanitizers catch memory and UB bugs immediately.",
+      "inherits": "base",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "CHESSGUI_SANITIZE": "ON"
+      }
+    },
+    {
+      "name": "dev",
+      "displayName": "Dev (RelWithDebInfo)",
+      "description": "Optimised but debuggable; use this to run the app and judge its speed.",
+      "inherits": "base",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "RelWithDebInfo"
+      }
+    },
+    {
+      "name": "release",
+      "displayName": "Release + benchmarks",
+      "description": "Fully optimised with LTO; builds the benchmarks.",
+      "inherits": "base",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "CMAKE_INTERPROCEDURAL_OPTIMIZATION": "ON",
+        "CHESSGUI_BUILD_BENCH": "ON"
+      }
+    },
+    {
+      "name": "core-only",
+      "displayName": "Core only (no Qt)",
+      "description": "Fastest loop for core work; also proves core never depends on Qt.",
+      "inherits": "base",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "CHESSGUI_BUILD_APP": "OFF"
+      }
+    },
+    {
+      "name": "ci",
+      "displayName": "CI",
+      "inherits": "base",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "CHESSGUI_BUILD_BENCH": "ON",
+        "CHESSGUI_WARNINGS_AS_ERRORS": "ON"
+      }
+    },
+    {
+      "name": "ci-core",
+      "displayName": "CI (core only, sanitizers)",
+      "inherits": "base",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "CHESSGUI_BUILD_APP": "OFF",
+        "CHESSGUI_SANITIZE": "ON",
+        "CHESSGUI_WARNINGS_AS_ERRORS": "ON"
+      }
+    }
+  ],
+  "buildPresets": [
+    { "name": "debug", "configurePreset": "debug" },
+    { "name": "dev", "configurePreset": "dev" },
+    { "name": "release", "configurePreset": "release" },
+    { "name": "core-only", "configurePreset": "core-only" },
+    { "name": "ci", "configurePreset": "ci" },
+    { "name": "ci-core", "configurePreset": "ci-core" }
+  ],
+  "testPresets": [
+    {
+      "name": "base",
+      "hidden": true,
+      "output": { "outputOnFailure": true },
+      "execution": { "noTestsAction": "error", "stopOnFailure": false }
+    },
+    { "name": "debug", "inherits": "base", "configurePreset": "debug" },
+    { "name": "dev", "inherits": "base", "configurePreset": "dev" },
+    { "name": "release", "inherits": "base", "configurePreset": "release" },
+    { "name": "core-only", "inherits": "base", "configurePreset": "core-only" },
+    { "name": "ci", "inherits": "base", "configurePreset": "ci" },
+    { "name": "ci-core", "inherits": "base", "configurePreset": "ci-core" }
+  ],
+  "workflowPresets": [
+    {
+      "name": "dev",
+      "displayName": "Configure, build and test (dev)",
+      "steps": [
+        { "type": "configure", "name": "dev" },
+        { "type": "build", "name": "dev" },
+        { "type": "test", "name": "dev" }
+      ]
+    }
+  ]
+}

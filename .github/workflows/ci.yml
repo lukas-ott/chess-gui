@@ -1,0 +1,65 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  macos:
+    name: macOS app (Release)
+    runs-on: macos-15
+    env:
+      CCACHE_DIR: ${{ github.workspace }}/.ccache
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: brew install ninja ccache qt
+
+      - name: Cache ccache
+        uses: actions/cache@v4
+        with:
+          path: .ccache
+          key: macos-${{ hashFiles('cmake/Dependencies.cmake') }}-${{ github.sha }}
+          restore-keys: macos-${{ hashFiles('cmake/Dependencies.cmake') }}-
+
+      - name: Configure
+        run: cmake --preset ci
+
+      - name: Build
+        run: cmake --build --preset ci
+
+      - name: Test
+        run: ctest --preset ci
+
+      - name: Benchmark (move generation)
+        run: ./build/ci/bench/chessgui_bench --benchmark_min_time=0.2s
+
+      - name: Startup time
+        env:
+          QT_QPA_PLATFORM: offscreen
+          CHESSGUI_STARTUP_LIMIT_MS: "2000" # CI runners are slower than a local Mac
+        run: bash scripts/measure_startup.sh build/ci 3
+
+  core-linux:
+    name: Core on Linux (sanitizers, no Qt)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: sudo apt-get update && sudo apt-get install -y ninja-build
+
+      - name: Configure
+        run: cmake --preset ci-core
+
+      - name: Build
+        run: cmake --build --preset ci-core
+
+      - name: Test
+        run: ctest --preset ci-core

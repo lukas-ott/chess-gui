@@ -1,0 +1,17 @@
+BasedOnStyle: LLVM
+IndentWidth: 4
+ColumnLimit: 100
+PointerAlignment: Left
+AccessModifierOffset: -4
+AllowShortFunctionsOnASingleLine: Inline
+AllowShortIfStatementsOnASingleLine: Never
+AllowShortLambdasOnASingleLine: Inline
+FixNamespaceComments: true
+IncludeBlocks: Regroup
+IncludeCategories:
+  - Regex: '^"'                # own headers
+    Priority: 1
+  - Regex: '^<(Q|gtest|benchmark|chess\.hpp)'  # Qt and third party
+    Priority: 2
+  - Regex: '^<'                # standard library
+    Priority: 3
