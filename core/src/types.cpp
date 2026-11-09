@@ -39,12 +39,12 @@ std::string Square::name() const {
 std::string Move::uci() const {
     std::string text = from.name() + to.name();
     if (promotion != PieceType::None) {
-        text += static_cast<char>(Piece{promotion, Color::Black}.fenChar());
+        text += Piece{promotion, Color::Black}.fenChar();
     }
     return text;
 }
 
-std::optional<Move> Move::fromUci(std::string_view uci) noexcept {
+std::optional<Move> Move::fromUci(std::string_view uci) {
     if (uci.size() != 4 && uci.size() != 5) {
         return std::nullopt;
     }

@@ -68,7 +68,7 @@ struct Move {
     /// UCI notation: "e2e4", "e7e8q".
     [[nodiscard]] std::string uci() const;
     /// Parses UCI notation. Says nothing about legality; see Position::parseUci().
-    [[nodiscard]] static std::optional<Move> fromUci(std::string_view uci) noexcept;
+    [[nodiscard]] static std::optional<Move> fromUci(std::string_view uci);
 
     friend constexpr bool operator==(const Move&, const Move&) noexcept = default;
 };

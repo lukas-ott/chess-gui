@@ -12,7 +12,7 @@ constexpr std::string_view kKiwipete =
     "r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - 0 1";
 
 Square sq(std::string_view name) {
-    return *Square::parse(name);
+    return Square::parse(name).value();
 }
 
 TEST(Fen, StartPosition) {
@@ -113,6 +113,6 @@ INSTANTIATE_TEST_SUITE_P(
         BadFen{"BadHalfmoveClock", "4k3/8/8/8/8/8/8/4K3 w - - a 1", "halfmove clock"},
         BadFen{"NegativeMoveNumber", "4k3/8/8/8/8/8/8/4K3 w - - 0 -1", "move number"},
         BadFen{"OpponentInCheck", "4k3/8/8/8/8/8/8/4R1K1 w - - 0 1", "not to move is in check"}),
-    [](const auto& info) { return std::string(info.param.name); });
+    [](const auto& testInfo) { return std::string(testInfo.param.name); });
 
 } // namespace

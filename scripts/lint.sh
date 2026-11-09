@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Checks formatting (clang-format) and lint rules (clang-tidy) on every C++ file in git.
+# Checks formatting (clang-format) and lint rules (clang-tidy) on every C++ file in the repo,
+# including new files not yet added to git (but not ignored ones like build/).
 # Fails on any difference or warning. CI runs this too.
 #
 # Usage: scripts/lint.sh [build-dir]
@@ -7,7 +8,7 @@
 #   files Qt generates). Defaults to build/dev.
 #
 # Fix formatting in place with:
-#   git ls-files -z '*.cpp' '*.hpp' | xargs -0 clang-format -i
+#   git ls-files -z --cached --others --exclude-standard '*.cpp' '*.hpp' | xargs -0 clang-format -i
 set -euo pipefail
 
 BUILD_DIR="${1:-build/dev}"
@@ -19,7 +20,7 @@ if [[ ! -f "$BUILD_DIR/compile_commands.json" ]]; then
 fi
 
 echo "clang-format: $(clang-format --version)"
-git ls-files -z '*.cpp' '*.hpp' | xargs -0 clang-format --dry-run --Werror
+git ls-files -z --cached --others --exclude-standard '*.cpp' '*.hpp' | xargs -0 clang-format --dry-run --Werror
 echo "Formatting OK"
 
 # A clang-tidy that isn't Apple's or Homebrew's (e.g. from pip) can't find the macOS SDK
@@ -31,6 +32,6 @@ fi
 
 echo "clang-tidy: $(clang-tidy --version | grep -i version)"
 jobs="$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 4)"
-git ls-files -z '*.cpp' | xargs -0 -n 1 -P "$jobs" \
+git ls-files -z --cached --others --exclude-standard '*.cpp' | xargs -0 -n 1 -P "$jobs" \
     clang-tidy -p "$BUILD_DIR" --quiet --warnings-as-errors='*' "${extra_args[@]}"
 echo "Lint OK"

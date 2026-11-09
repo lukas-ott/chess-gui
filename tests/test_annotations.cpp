@@ -7,7 +7,7 @@ namespace {
 using namespace chessgui::core;
 
 Square sq(std::string_view name) {
-    return *Square::parse(name);
+    return Square::parse(name).value();
 }
 
 TEST(Comment, ExtractsArrowsAndSquares) {

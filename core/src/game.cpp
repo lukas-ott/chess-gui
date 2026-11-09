@@ -111,11 +111,12 @@ Color Game::mover(NodeId id) const {
 }
 
 std::vector<NodeId> Game::path(NodeId id) const {
-    std::vector<NodeId> result;
-    for (NodeId current = id; current != kNoNode; current = at(current).m_parent) {
-        result.push_back(current);
+    std::vector<NodeId> result(static_cast<std::size_t>(ply(id)) + 1);
+    NodeId current = id;
+    for (std::size_t i = result.size(); i-- > 0;) { // fill from the end: node, parent, ...
+        result[i] = current;
+        current = at(current).m_parent;
     }
-    std::reverse(result.begin(), result.end());
     return result;
 }
 
@@ -193,7 +194,7 @@ Result<NodeId> Game::addLine(NodeId parent, std::span<const std::string_view> sa
     for (const auto san : sans) {
         auto move = position.parseSan(san);
         if (!move) {
-            const auto dots = position.sideToMove() == Color::White ? ". " : "... ";
+            const char* const dots = position.sideToMove() == Color::White ? ". " : "... ";
             return Error{std::to_string(position.fullmoveNumber()) + dots + move.error().message};
         }
         current = addMove(current, position, *move);
@@ -264,7 +265,7 @@ void Game::promote(NodeId id) {
         return;
     }
     const NodeId parentId = at(id).m_parent;
-    NodeId first = at(parentId).m_firstChild;
+    const NodeId first = at(parentId).m_firstChild;
     if (first == id) {
         return;
     }

@@ -19,8 +19,11 @@ struct Error {
 ///     use(*pos);
 template <typename T> class Result {
 public:
-    Result(T value) : m_data(std::move(value)) {}     // NOLINT(*-explicit-constructor): implicit on purpose
-    Result(Error error) : m_data(std::move(error)) {} // NOLINT(*-explicit-constructor): implicit on purpose
+    // Implicit on purpose, so functions can `return value;` or `return Error{"..."};`.
+    // NOLINTBEGIN(*-explicit-constructor)
+    Result(T value) : m_data(std::move(value)) {}
+    Result(Error error) : m_data(std::move(error)) {}
+    // NOLINTEND(*-explicit-constructor)
 
     [[nodiscard]] bool ok() const noexcept { return std::holds_alternative<T>(m_data); }
     explicit operator bool() const noexcept { return ok(); }

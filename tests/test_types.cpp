@@ -40,7 +40,7 @@ TEST(Move, Uci) {
     EXPECT_EQ(move->to.name(), "e8");
     EXPECT_EQ(move->promotion, PieceType::Queen);
     EXPECT_EQ(move->uci(), "e7e8q");
-    EXPECT_EQ(Move::fromUci("g1f3")->uci(), "g1f3");
+    EXPECT_EQ(Move::fromUci("g1f3").value().uci(), "g1f3");
     for (const char* text : {"", "e2", "e2e9", "e7e8k", "e7e8p", "e7e8qq"}) {
         EXPECT_FALSE(Move::fromUci(text).has_value()) << text;
     }

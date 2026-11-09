@@ -1,0 +1,6 @@
+# Same rules as the project root, minus one check that doesn't fit tests: test data such as
+# Square::parse("e4") is known to be valid, and if it weren't, .value() throwing would fail the
+# test loudly, which is what a test should do.
+InheritParentConfig: true
+Checks: >
+  -bugprone-unchecked-optional-access

@@ -8,7 +8,7 @@ Checks: >
   cppcoreguidelines-*,
   -cppcoreguidelines-avoid-magic-numbers,
   -cppcoreguidelines-owning-memory,
-  -cppcoreguidelines-pro-bounds-array-to-pointer-decay,
+  -cppcoreguidelines-pro-bounds-*,
   -cppcoreguidelines-pro-type-vararg,
   misc-*,
   -misc-include-cleaner,
@@ -16,12 +16,19 @@ Checks: >
   -misc-non-private-member-variables-in-classes,
   modernize-*,
   -modernize-use-trailing-return-type,
+  -modernize-use-designated-initializers,
   performance-*,
   readability-*,
   -readability-magic-numbers,
   -readability-identifier-length,
-  -readability-function-cognitive-complexity
+  -readability-function-cognitive-complexity,
+  -readability-trailing-comma
 WarningsAsErrors: ''
+# cppcoreguidelines-pro-bounds-* flag every [] index and pointer step. Chess code indexes
+# 64-square arrays constantly, and .at() everywhere would cost speed in hot loops; ASan in the
+# ci-core job catches real out-of-bounds access instead.
+# modernize-use-designated-initializers and readability-trailing-comma are style rules that
+# would make small tables ({1, "!"}) and test data much longer without catching bugs.
 # The two clang-analyzer checks are off because they report false positives inside
 # chess-library (chess.hpp guards those paths with asserts), and analyzer findings in a
 # header can't be filtered by location. ASan in the ci-core job covers real out-of-bounds bugs.

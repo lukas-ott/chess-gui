@@ -14,7 +14,7 @@ namespace chessgui::core {
 namespace {
 
 chess::Square toLib(Square square) {
-    return chess::Square(square.index());
+    return {square.index()};
 }
 
 Square fromLib(chess::Square square) {
@@ -351,7 +351,7 @@ Result<Move> Position::parseSan(std::string_view san) const {
         ++matches;
     }
 
-    if (matches == 0) {
+    if (matches == 0 || !found) {
         return Error{quoted + " is not a legal move here."};
     }
     if (matches > 1) {

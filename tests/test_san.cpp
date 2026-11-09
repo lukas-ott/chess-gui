@@ -15,7 +15,7 @@ Position fromFen(std::string_view fen) {
 }
 
 Move uci(std::string_view text) {
-    return *Move::fromUci(text);
+    return Move::fromUci(text).value();
 }
 
 /// SAN of every legal move must parse back to the same move, two plies deep. These positions

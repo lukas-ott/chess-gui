@@ -19,6 +19,7 @@ NodeId line(Game& game, NodeId parent, std::initializer_list<std::string_view> s
 
 std::vector<std::string> sansOf(const Game& game, const std::vector<NodeId>& ids) {
     std::vector<std::string> result;
+    result.reserve(ids.size());
     for (const NodeId id : ids) {
         result.push_back(game.node(id).san);
     }
@@ -175,8 +176,9 @@ TEST(Game, Annotations) {
     game.setComment(e4, "Best by test");
     game.setCommentBefore(e4, "The main line:");
     game.setNags(e4, {nag::kGood});
-    game.setArrows(e4, {{*Square::parse("e2"), *Square::parse("e4"), MarkColor::Green}});
-    game.setSquareMarks(e4, {{*Square::parse("d5"), MarkColor::Red}});
+    game.setArrows(e4,
+                   {{Square::parse("e2").value(), Square::parse("e4").value(), MarkColor::Green}});
+    game.setSquareMarks(e4, {{Square::parse("d5").value(), MarkColor::Red}});
 
     const Node& node = game.node(e4);
     EXPECT_EQ(node.comment, "Best by test");

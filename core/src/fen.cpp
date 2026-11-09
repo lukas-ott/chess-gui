@@ -4,7 +4,6 @@
 
 #include <algorithm>
 #include <array>
-#include <charconv>
 #include <optional>
 #include <vector>
 
@@ -29,12 +28,18 @@ std::vector<std::string_view> splitFields(std::string_view text) {
     return fields;
 }
 
+/// A non-negative whole number ("0", "42"). Nothing for signs, other characters or overflow.
 std::optional<int> parseCount(std::string_view text) {
-    int value = 0;
-    const auto* end = text.data() + text.size();
-    const auto [ptr, ec] = std::from_chars(text.data(), end, value);
-    if (ec != std::errc{} || ptr != end || value < 0) {
+    constexpr int kMax = 1'000'000;
+    if (text.empty()) {
         return std::nullopt;
+    }
+    int value = 0;
+    for (const char c : text) {
+        if (c < '0' || c > '9' || value > kMax) {
+            return std::nullopt;
+        }
+        value = (value * 10) + (c - '0');
     }
     return value;
 }
@@ -76,8 +81,8 @@ Result<Board> parseBoard(std::string_view field) {
     return board;
 }
 
-Piece at(const Board& board, std::string_view square) {
-    return board[static_cast<std::size_t>(Square::parse(square)->index())];
+Piece at(const Board& board, int file, int rank) {
+    return board[static_cast<std::size_t>(Square::at(file, rank).index())];
 }
 
 } // namespace
@@ -113,7 +118,7 @@ Result<std::string> validateFen(std::string_view fen) {
 
     // 2. Side to move
     if (fields[1] != "w" && fields[1] != "b") {
-        return Error{"The side to move must be \"w\" or \"b\", not \"" + std::string(fields[1]) +
+        return Error{R"(The side to move must be "w" or "b", not ")" + std::string(fields[1]) +
                      "\"."};
     }
     const bool whiteToMove = fields[1] == "w";
@@ -125,7 +130,7 @@ Result<std::string> validateFen(std::string_view fen) {
             const bool known = std::string_view("KQkq").find(c) != std::string_view::npos;
             const bool repeated = castling.find(c) != std::string::npos;
             if (!known || repeated) {
-                return Error{"The castling field must be \"-\" or letters from KQkq, not \"" +
+                return Error{R"(The castling field must be "-" or letters from KQkq, not ")" +
                              std::string(fields[2]) + "\"."};
             }
             castling += c;
@@ -138,10 +143,10 @@ Result<std::string> validateFen(std::string_view fen) {
     std::string allowed;
     for (const char c : castling) {
         const bool ok =
-            (c == 'K' && at(*board, "e1") == whiteKing && at(*board, "h1") == whiteRook) ||
-            (c == 'Q' && at(*board, "e1") == whiteKing && at(*board, "a1") == whiteRook) ||
-            (c == 'k' && at(*board, "e8") == blackKing && at(*board, "h8") == blackRook) ||
-            (c == 'q' && at(*board, "e8") == blackKing && at(*board, "a8") == blackRook);
+            (c == 'K' && at(*board, 4, 0) == whiteKing && at(*board, 7, 0) == whiteRook) ||
+            (c == 'Q' && at(*board, 4, 0) == whiteKing && at(*board, 0, 0) == whiteRook) ||
+            (c == 'k' && at(*board, 4, 7) == blackKing && at(*board, 7, 7) == blackRook) ||
+            (c == 'q' && at(*board, 4, 7) == blackKing && at(*board, 0, 7) == blackRook);
         if (ok) {
             allowed += c;
         }
