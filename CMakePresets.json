@@ -14,11 +14,14 @@
     {
       "name": "debug",
       "displayName": "Debug + ASan/UBSan",
-      "description": "Day-to-day debugging; sanitizers catch memory and UB bugs immediately.",
+      "description": "Day-to-day debugging; sanitizers catch memory and UB bugs immediately. Uses Homebrew's clang (brew install llvm): Apple's ASan hangs at startup on macOS 26.",
       "inherits": "base",
+      "condition": { "type": "equals", "lhs": "${hostSystemName}", "rhs": "Darwin" },
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Debug",
-        "CHESSGUI_SANITIZE": "ON"
+        "CHESSGUI_SANITIZE": "ON",
+        "CMAKE_C_COMPILER": "/opt/homebrew/opt/llvm/bin/clang",
+        "CMAKE_CXX_COMPILER": "/opt/homebrew/opt/llvm/bin/clang++"
       }
     },
     {

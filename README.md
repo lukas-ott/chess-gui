@@ -11,7 +11,7 @@ and training opening repertoires.
 
 ```bash
 xcode-select --install                     # or full Xcode (adds Instruments for profiling)
-brew install cmake ninja ccache qt llvm    # llvm only for clang-format / clang-tidy / clangd
+brew install cmake ninja ccache qt llvm    # llvm: clang-format/-tidy, clangd, debug-preset compiler
 ```
 
 All other dependencies (chess-library, GoogleTest, Google Benchmark) are fetched by CMake
@@ -26,7 +26,7 @@ open build/dev/app/ChessGui.app
 
 | Preset      | Use it for                                                       |
 | ----------- | ---------------------------------------------------------------- |
-| `debug`     | Debugging, with AddressSanitizer + UBSan                         |
+| `debug`     | Debugging, with AddressSanitizer + UBSan (built with Homebrew's clang) |
 | `dev`       | Daily running of the app (optimised, still debuggable)           |
 | `release`   | Speed measurements and benchmarks (LTO)                          |
 | `core-only` | Fast loop on chess logic without building Qt code                |
@@ -53,6 +53,9 @@ to the run as a download.
 
 The app is signed ad hoc, not with an Apple Developer ID, so on another Mac the first launch
 needs right-click → Open. Proper signing and notarisation need a paid Apple Developer account.
+
+The `debug` preset compiles with Homebrew's clang (`/opt/homebrew/opt/llvm`) because Apple's
+AddressSanitizer hangs at startup on macOS 26. All other presets use Apple's compiler.
 
 In CLion or VS Code (CMake Tools + clangd), just open the folder: both pick up the presets.
 

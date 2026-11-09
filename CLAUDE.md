@@ -13,7 +13,7 @@ Spec: https://claude.ai/artifact/72UYJmxrxkknmn2oTY4o3C
 ```bash
 cmake --workflow --preset dev                    # configure + build + test
 cmake --preset core-only && cmake --build --preset core-only && ctest --preset core-only
-cmake --preset debug && cmake --build --preset debug && ctest --preset debug   # ASan/UBSan
+cmake --preset debug && cmake --build --preset debug && ctest --preset debug   # ASan/UBSan, Homebrew clang
 ./build/release/bench/chessgui_bench
 bash scripts/measure_startup.sh build/release
 bash scripts/lint.sh [build-dir]                 # clang-format + clang-tidy, must pass in CI
