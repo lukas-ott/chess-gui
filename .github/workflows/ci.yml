@@ -37,6 +37,13 @@ jobs:
       - name: Test
         run: ctest --preset ci
 
+      # Versions pinned to match the Homebrew llvm used locally; bump them together.
+      - name: Format and lint
+        run: |
+          pipx install clang-format==23.1.5
+          pipx install clang-tidy==23.1.4
+          bash scripts/lint.sh build/ci
+
       - name: Benchmark (move generation)
         run: ./build/ci/bench/chessgui_bench --benchmark_min_time=0.2s
 
@@ -45,6 +52,16 @@ jobs:
           QT_QPA_PLATFORM: offscreen
           CHESSGUI_STARTUP_LIMIT_MS: "2000" # CI runners are slower than a local Mac
         run: bash scripts/measure_startup.sh build/ci 3
+
+      - name: Package (self-contained app + DMG)
+        run: bash scripts/package_macos.sh --no-build build/ci
+
+      - name: Upload DMG
+        uses: actions/upload-artifact@v4
+        with:
+          name: ChessGui-macOS
+          path: build/ci/package/*.dmg
+          if-no-files-found: error
 
   core-linux:
     name: Core on Linux (sanitizers, no Qt)

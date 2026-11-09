@@ -37,7 +37,22 @@ cmake --preset debug && cmake --build --preset debug && ctest --preset debug
 cmake --preset release && cmake --build --preset release
 ./build/release/bench/chessgui_bench       # move generation speed
 bash scripts/measure_startup.sh build/release   # startup time vs. the 1 s target
+bash scripts/lint.sh                       # clang-format + clang-tidy (CI runs this too)
 ```
+
+## Packaging
+
+```bash
+bash scripts/package_macos.sh              # → build/release/package/ChessGui-<version>.dmg
+```
+
+This builds the release preset and copies Qt and every library it needs into `ChessGui.app`,
+so the app runs on a Mac without Homebrew or Qt (macOS 14.4+). The script fails if anything
+in the bundle still loads from outside it. CI builds the same DMG on every push and attaches it
+to the run as a download.
+
+The app is signed ad hoc, not with an Apple Developer ID, so on another Mac the first launch
+needs right-click → Open. Proper signing and notarisation need a paid Apple Developer account.
 
 In CLion or VS Code (CMake Tools + clangd), just open the folder: both pick up the presets.
 

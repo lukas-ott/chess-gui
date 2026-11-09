@@ -9,10 +9,10 @@
 
 namespace {
 
-void BM_PerftStartPosition(benchmark::State& state) {
+void perftStartPosition(benchmark::State& state) {
     const auto depth = static_cast<int>(state.range(0));
     std::uint64_t nodes = 0;
-    for (auto _ : state) {
+    for ([[maybe_unused]] const auto _ : state) {
         nodes = chessgui::core::perft(chessgui::core::kStartFen, depth);
         benchmark::DoNotOptimize(nodes);
     }
@@ -21,6 +21,8 @@ void BM_PerftStartPosition(benchmark::State& state) {
                            benchmark::Counter::kIsRate);
 }
 
-BENCHMARK(BM_PerftStartPosition)->Arg(4)->Arg(5)->Unit(benchmark::kMillisecond);
+// The BENCHMARK macro registers through a global variable, which is how the library works.
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+BENCHMARK(perftStartPosition)->Arg(4)->Arg(5)->Unit(benchmark::kMillisecond);
 
 } // namespace

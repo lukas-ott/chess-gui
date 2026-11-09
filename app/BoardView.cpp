@@ -29,7 +29,7 @@ void BoardView::paintEvent(QPaintEvent* /*event*/) {
     QPainter painter(this);
 
     // Largest square board that fits, snapped to whole pixels per square for crisp edges.
-    const int available = std::min(width(), height()) - 2 * kMargin;
+    const int available = std::min(width(), height()) - (2 * kMargin);
     const int squareSize = std::max(available / 8, 1);
     const int boardSize = squareSize * 8;
     const int left = (width() - boardSize) / 2;
@@ -38,7 +38,7 @@ void BoardView::paintEvent(QPaintEvent* /*event*/) {
     for (int rank = 0; rank < 8; ++rank) {
         for (int file = 0; file < 8; ++file) {
             const bool light = (rank + file) % 2 == 0;
-            painter.fillRect(left + file * squareSize, top + rank * squareSize, squareSize,
+            painter.fillRect(left + (file * squareSize), top + (rank * squareSize), squareSize,
                              squareSize, light ? kLightSquare : kDarkSquare);
         }
     }

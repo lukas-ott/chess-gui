@@ -16,6 +16,8 @@ cmake --preset core-only && cmake --build --preset core-only && ctest --preset c
 cmake --preset debug && cmake --build --preset debug && ctest --preset debug   # ASan/UBSan
 ./build/release/bench/chessgui_bench
 bash scripts/measure_startup.sh build/release
+bash scripts/lint.sh [build-dir]                 # clang-format + clang-tidy, must pass in CI
+bash scripts/package_macos.sh                    # self-contained .app + .dmg
 ```
 
 ## Rules
@@ -28,6 +30,8 @@ bash scripts/measure_startup.sh build/release
 - Nothing slow at startup. Load lazily; engines start on demand.
 - Every new chess-logic feature gets unit tests. Move generation is verified with perft.
 - Performance-sensitive code gets a benchmark in `bench/`.
+- New Qt plugins the app needs (e.g. image formats) go into the `PLUGINS` list in
+  `scripts/package_macos.sh`, or the packaged app won't have them.
 - Warnings are errors in CI (`-Wall -Wextra -Wpedantic -Wshadow ...`); keep builds clean.
 - Third-party code is pinned in `cmake/Dependencies.cmake`; bump versions deliberately.
 

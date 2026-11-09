@@ -3,6 +3,8 @@ Checks: >
   bugprone-*,
   -bugprone-easily-swappable-parameters,
   clang-analyzer-*,
+  -clang-analyzer-security.ArrayBound,
+  -clang-analyzer-optin.core.EnumCastOutOfRange,
   cppcoreguidelines-*,
   -cppcoreguidelines-avoid-magic-numbers,
   -cppcoreguidelines-owning-memory,
@@ -10,6 +12,7 @@ Checks: >
   -cppcoreguidelines-pro-type-vararg,
   misc-*,
   -misc-include-cleaner,
+  -misc-no-recursion,
   -misc-non-private-member-variables-in-classes,
   modernize-*,
   -modernize-use-trailing-return-type,
@@ -19,7 +22,13 @@ Checks: >
   -readability-identifier-length,
   -readability-function-cognitive-complexity
 WarningsAsErrors: ''
+# The two clang-analyzer checks are off because they report false positives inside
+# chess-library (chess.hpp guards those paths with asserts), and analyzer findings in a
+# header can't be filtered by location. ASan in the ci-core job covers real out-of-bounds bugs.
+# misc-no-recursion is off because chess code walks trees (perft, game tree, PGN variations),
+# where recursion is the natural fit.
 HeaderFilterRegex: '(core|app|tests|bench)/.*'
+ExcludeHeaderFilterRegex: '.*/_deps/.*'
 FormatStyle: file
 CheckOptions:
   - key: readability-identifier-naming.NamespaceCase
