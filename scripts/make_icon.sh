@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Builds app/resources/icon/Kiebitz.icns from Kiebitz.svg (macOS draws the SVG; iconutil packs
-# the sizes). Run after changing the SVG, and commit both files.
+# the sizes). The 16 and 32 pt sizes use Kiebitz-small.svg, a simpler drawing that stays readable
+# when tiny. Run after changing either SVG, and commit the results.
 set -euo pipefail
 cd "$(git rev-parse --show-toplevel)/app/resources/icon"
 work="$(mktemp -d)"
@@ -21,8 +22,10 @@ NSGraphicsContext.restoreGraphicsState()
 try! rep.representation(using: .png, properties: [:])!.write(to: URL(fileURLWithPath: args[2]))
 SWIFT
 for base in 16 32 128 256 512; do
-    swift "$work/render.swift" Kiebitz.svg "$work/Kiebitz.iconset/icon_${base}x${base}.png" "$base"
-    swift "$work/render.swift" Kiebitz.svg "$work/Kiebitz.iconset/icon_${base}x${base}@2x.png" \
+    art=Kiebitz.svg
+    if [ "$base" -le 32 ]; then art=Kiebitz-small.svg; fi
+    swift "$work/render.swift" "$art" "$work/Kiebitz.iconset/icon_${base}x${base}.png" "$base"
+    swift "$work/render.swift" "$art" "$work/Kiebitz.iconset/icon_${base}x${base}@2x.png" \
         "$((base * 2))"
 done
 iconutil -c icns "$work/Kiebitz.iconset" -o Kiebitz.icns
