@@ -258,6 +258,9 @@ void BoardView::updateCursor(QPoint point) {
 // ---- Mouse and keyboard ------------------------------------------------------------------------
 
 void BoardView::mousePressEvent(QMouseEvent* event) {
+    if (!m_interactive) {
+        return;
+    }
     const QPoint point = event->position().toPoint();
     const auto square = m_geometry.squareAt(point);
     m_mousePoint = point;
@@ -314,6 +317,9 @@ void BoardView::mousePressEvent(QMouseEvent* event) {
 }
 
 void BoardView::mouseMoveEvent(QMouseEvent* event) {
+    if (!m_interactive) {
+        return;
+    }
     const QPoint point = event->position().toPoint();
     m_mousePoint = point;
 
@@ -336,6 +342,9 @@ void BoardView::mouseMoveEvent(QMouseEvent* event) {
 }
 
 void BoardView::mouseReleaseEvent(QMouseEvent* event) {
+    if (!m_interactive) {
+        return;
+    }
     const QPoint point = event->position().toPoint();
     const auto square = m_geometry.squareAt(point);
 

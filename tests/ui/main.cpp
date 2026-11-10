@@ -16,6 +16,10 @@ int main(int argc, char** argv) {
                        QDir::temp().filePath(QStringLiteral("chessgui-ui-tests")));
     QApplication::setOrganizationName(QStringLiteral("ChessGuiTests"));
     const QApplication app(argc, argv);
+    // A throwaway library folder too: tests must never touch ~/Documents/ChessGui.
+    const QString library = QDir::temp().filePath(QStringLiteral("chessgui-ui-tests-library"));
+    QDir(library).removeRecursively();
+    QSettings().setValue(QStringLiteral("library/folder"), library);
     ::testing::InitGoogleTest(&argc, argv);
     return RUN_ALL_TESTS();
 }

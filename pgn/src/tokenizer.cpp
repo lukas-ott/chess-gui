@@ -71,6 +71,9 @@ Token Tokenizer::next() {
         default:
             break;
         }
+        if (m_text.substr(start).starts_with("0.5-0.5")) { // a draw, not move number "0."
+            return readWord(start);
+        }
         if (isDigit(c)) {
             // "12." / "12..." is a move number (possibly glued to the move: "12.Nf3").
             std::size_t p = m_pos;
@@ -135,7 +138,9 @@ Token Tokenizer::readWord(std::size_t start) {
     }
     m_pos = p;
     const std::string_view word = m_text.substr(start, p - start);
-    const bool result = word == "1-0" || word == "0-1" || word == "1/2-1/2" || word == "*";
+    // Also the non-standard draws some tools write: "0.5-0.5" and "½-½".
+    const bool result = word == "1-0" || word == "0-1" || word == "1/2-1/2" || word == "*" ||
+                        word == "0.5-0.5" || word == "\xC2\xBD-\xC2\xBD";
     return {result ? TokenType::Result : TokenType::Move, word, {}, start, p};
 }
 

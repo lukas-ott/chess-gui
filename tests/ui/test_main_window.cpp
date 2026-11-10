@@ -9,8 +9,10 @@
 #include <QMenuBar>
 #include <QPushButton>
 #include <QSettings>
+#include <QTabBar>
 #include <QTest>
 #include <QTextBrowser>
+#include <QToolButton>
 #include <gtest/gtest.h>
 
 #include <algorithm>
@@ -38,6 +40,8 @@ protected:
         ASSERT_TRUE(QTest::qWaitForWindowExposed(&window));
         board = window.findChild<BoardView*>();
         ASSERT_NE(board, nullptr);
+        // The app starts in the Library; the game tests work in the first game tab.
+        window.findChild<QTabBar*>(QStringLiteral("documentTabs"))->setCurrentIndex(1);
     }
     void play(std::string_view san) {
         const Move move = board->position().parseSan(san).value();
@@ -82,10 +86,32 @@ TEST_F(MainWindowTest, DrawingsStayWithTheirMove) {
     EXPECT_EQ(board->arrows().size(), 1U); // back on 1. e4: its arrow is shown again
 }
 
-TEST_F(MainWindowTest, NewGameResetsTheBoard) {
+TEST_F(MainWindowTest, FirstLaunchFillsTheScreen) {
+    // No saved window geometry (the tests' settings are empty): zoomed, but not full screen.
+    EXPECT_TRUE(window.windowState().testFlag(Qt::WindowMaximized));
+    EXPECT_FALSE(window.windowState().testFlag(Qt::WindowFullScreen));
+}
+
+TEST_F(MainWindowTest, TabsAreNeverSqueezedByASmallWindow) {
+    auto* tabs = window.findChild<QTabBar*>(QStringLiteral("documentTabs"));
+    ASSERT_NE(tabs, nullptr);
+    window.setWindowState(Qt::WindowNoState);
+    window.resize(200, 200); // far too small: the window stops at its minimum size
+    QApplication::processEvents();
+    EXPECT_GE(window.width(), 960);
+    EXPECT_GE(tabs->width(), tabs->sizeHint().width()); // every tab in full, no scroll arrows
+}
+
+TEST_F(MainWindowTest, NewTabStartsAFreshGame) {
     play("d4");
-    action(window, QStringLiteral("New Game"))->trigger();
+    const auto* tabs = window.findChild<QTabBar*>(QStringLiteral("documentTabs"));
+    const int before = tabs->count();
+    action(window, QStringLiteral("New Tab"))->trigger();
+    EXPECT_EQ(tabs->count(), before + 1);
     EXPECT_EQ(fen(), std::string(kStartFen));
+    // An untouched new game is reused instead of piling up empty tabs.
+    action(window, QStringLiteral("New Tab"))->trigger();
+    EXPECT_EQ(tabs->count(), before + 1);
 }
 
 TEST_F(MainWindowTest, FlipActionFlipsTheBoard) {
@@ -105,7 +131,8 @@ TEST_F(MainWindowTest, MoveListShowsMovesVariationsAndNumbers) {
     auto* list = window.findChild<QTextBrowser*>(QStringLiteral("moveList"));
     ASSERT_NE(list, nullptr);
     const QString text = list->toPlainText().simplified().replace(QChar(0xA0), QLatin1Char(' '));
-    EXPECT_EQ(text, QStringLiteral("1. e4 e5 (1… c5 2. Nf3 )"));
+    // First-level variations get their own indented line, so no brackets here.
+    EXPECT_EQ(text, QStringLiteral("1. e4 e5 1… c5 2. Nf3"));
 }
 
 TEST_F(MainWindowTest, ClickingAMoveInTheListGoesThere) {

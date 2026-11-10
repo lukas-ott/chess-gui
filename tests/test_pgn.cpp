@@ -100,6 +100,26 @@ TEST(PgnRead, NagsAndSuffixes) {
     EXPECT_EQ(game.node(main[3]).san, "Nf3"); // the suffix isn't part of the move
 }
 
+TEST(PgnRead, GluedAndListedAnnotations) {
+    // Seen in real files: evaluation marks glued to the move, comma lists, repeats, junk.
+    const Game game =
+        parse("1. d4 Nf6 2. Bf4!,+- d5 3. e3 e6± 4. Nd2?,?,?!,?!?,?,?! c5 5. c3!,!?!,!? *");
+    const auto main = game.mainLine();
+    EXPECT_EQ(game.node(main[3]).san, "Bf4");
+    EXPECT_EQ(game.node(main[3]).nags, (std::vector<std::uint8_t>{1, 18}));
+    EXPECT_EQ(game.node(main[6]).nags, (std::vector<std::uint8_t>{16}));
+    EXPECT_EQ(game.node(main[7]).nags, (std::vector<std::uint8_t>{2, 6}));
+    EXPECT_EQ(game.node(main[9]).nags, (std::vector<std::uint8_t>{1, 5}));
+}
+
+TEST(PgnRead, NonStandardDraws) {
+    const Game game = parse("[Result \"0.5-0.5\"]\n\n1. d4 d5 0.5-0.5");
+    EXPECT_EQ(game.header("Result"), "1/2-1/2");
+    EXPECT_EQ(mainLine(game).size(), 2U);
+    const auto games = pgn::indexGames("1. e4 e5 0.5-0.5\n1. d4 d5 \xC2\xBD-\xC2\xBD\n");
+    EXPECT_EQ(games.size(), 2U);
+}
+
 TEST(PgnRead, MessyMovetext) {
     // Glued numbers, missing numbers, "1..." after comments, zeros for castling, no "x".
     const Game game =

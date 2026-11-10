@@ -1,4 +1,4 @@
-find_package(Qt6 6.5 REQUIRED COMPONENTS Svg Widgets)
+find_package(Qt6 6.5 REQUIRED COMPONENTS Concurrent Svg Widgets)
 qt_standard_project_setup()
 
 # The UI as a library, so UI tests and benchmarks can use it without the app's main().
@@ -13,12 +13,24 @@ qt_add_library(chessgui_ui STATIC
     board/BoardView.hpp
     board/PieceSet.cpp
     board/PieceSet.hpp
+    document/GameDocument.cpp
+    document/GameDocument.hpp
+    document/PgnIo.cpp
+    document/PgnIo.hpp
+    library/Library.cpp
+    library/Library.hpp
+    library/LibraryView.cpp
+    library/LibraryView.hpp
+    notation/NotationView.cpp
+    notation/NotationView.hpp
+    panels/GameInfoPanel.cpp
+    panels/GameInfoPanel.hpp
     style/AppStyle.cpp
     style/AppStyle.hpp
     style/Icons.cpp
     style/Icons.hpp)
 target_include_directories(chessgui_ui PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")
-target_link_libraries(chessgui_ui PUBLIC Qt6::Widgets Qt6::Svg chessgui::core)
+target_link_libraries(chessgui_ui PUBLIC Qt6::Widgets Qt6::Svg Qt6::Concurrent chessgui::pgn)
 chessgui_set_warnings(chessgui_ui)
 
 # Piece SVGs are compiled into the binary (":/pieces/<set>/wK.svg"), so the app has no loose

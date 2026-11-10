@@ -10,6 +10,7 @@ Checks: >
   -cppcoreguidelines-owning-memory,
   -cppcoreguidelines-pro-bounds-*,
   -cppcoreguidelines-pro-type-vararg,
+  -cppcoreguidelines-prefer-member-initializer,
   misc-*,
   -misc-include-cleaner,
   -misc-no-recursion,
@@ -28,6 +29,8 @@ WarningsAsErrors: ''
 # cppcoreguidelines-pro-bounds-* flag every [] index and pointer step. Chess code indexes
 # 64-square arrays constantly, and .at() everywhere would cost speed in hot loops; ASan in the
 # ci-core job catches real out-of-bounds access instead.
+# cppcoreguidelines-prefer-member-initializer is off because Qt widget code builds its child
+# widgets (and their layouts) step by step in the constructor body.
 # modernize-use-ranges is off because Apple's libc++ (AppleClang 17) lacks most std::ranges
 # algorithms (ranges::reverse, ranges::any_of, views::reverse), so its suggestions don't compile.
 # modernize-use-designated-initializers and readability-trailing-comma are style rules that

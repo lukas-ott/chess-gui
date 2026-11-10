@@ -3,16 +3,22 @@
 // Run from the release preset:  ./build/release/bench/chessgui_bench_ui
 
 #include "board/BoardView.hpp"
+#include "chessgui/core/game.hpp"
+#include "notation/NotationView.hpp"
+#include "style/AppStyle.hpp"
 
 #include <QApplication>
 #include <QImage>
 #include <QPainter>
 #include <benchmark/benchmark.h>
 
+#include <functional>
+
 namespace {
 
 using chessgui::app::BoardView;
 using namespace chessgui::core;
+namespace core = chessgui::core;
 
 Square sq(std::string_view name) {
     return Square::parse(name).value();
@@ -37,10 +43,70 @@ void boardRepaint(benchmark::State& state) {
     }
 }
 
+/// A repertoire-sized game: a main line with a two-move variation and a comment at every
+/// move, then the same again inside the first variations, about 5,000 positions in all.
+core::Game bigGame() {
+    core::Game game;
+    std::uint32_t seed = 7;
+    const std::function<void(core::NodeId, core::Position, int, int)> grow =
+        [&](core::NodeId at, core::Position position, int plies, int depth) {
+            for (int ply = 0; ply < plies; ++ply) {
+                const auto moves = position.legalMoves();
+                if (moves.size() < 2) {
+                    return;
+                }
+                seed = (seed * 1103515245U) + 12345U;
+                const core::Move main = moves[(seed >> 16U) % moves.size()];
+                const core::Move alt = moves[((seed >> 16U) + 1) % moves.size()];
+                const core::NodeId next = game.addMove(at, position, main);
+                game.setComment(next, "A plan worth knowing in this structure");
+                core::Position altPosition = position;
+                const core::NodeId altNode = game.addMove(at, altPosition, alt);
+                altPosition.play(alt);
+                if (depth > 0) {
+                    grow(altNode, altPosition, 12, depth - 1);
+                }
+                position.play(main);
+                at = next;
+            }
+        };
+    grow(core::Game::root(), core::Position(), 200, 1);
+    return game;
+}
+
+void notationRender(benchmark::State& state) {
+    const chessgui::app::AppStyle style(*qApp);
+    chessgui::app::NotationView view(style);
+    view.resize(400, 600);
+    const core::Game game = bigGame();
+    for ([[maybe_unused]] const auto _ : state) {
+        view.setGame(&game, core::Game::root());
+    }
+    state.counters["positions"] = static_cast<double>(game.nodeCount());
+}
+
+void notationStep(benchmark::State& state) {
+    // Moving the highlight one move, as ← → do: must stay far below one frame.
+    const chessgui::app::AppStyle style(*qApp);
+    chessgui::app::NotationView view(style);
+    view.resize(400, 600);
+    const core::Game game = bigGame();
+    view.setGame(&game, core::Game::root());
+    const auto line = game.mainLine();
+    std::size_t i = 0;
+    for ([[maybe_unused]] const auto _ : state) {
+        view.setCurrent(line[i]);
+        i = (i + 1) % line.size();
+    }
+}
+
 } // namespace
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+// NOLINTBEGIN(cppcoreguidelines-avoid-non-const-global-variables)
 BENCHMARK(boardRepaint)->Arg(480)->Arg(960)->Unit(benchmark::kMillisecond);
+BENCHMARK(notationRender)->Unit(benchmark::kMillisecond);
+BENCHMARK(notationStep)->Unit(benchmark::kMicrosecond);
+// NOLINTEND(cppcoreguidelines-avoid-non-const-global-variables)
 
 int main(int argc, char** argv) {
     if (qEnvironmentVariableIsEmpty("QT_QPA_PLATFORM")) {

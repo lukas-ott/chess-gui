@@ -39,6 +39,23 @@ void draw(QPainter& painter, IconKind kind, const QColor& color, int size) {
         painter.drawLine(QPointF(12.0, 3.5), QPointF(12.0, 12.5));
         chevron(6.5, true);
         break;
+    case IconKind::Close:
+        painter.drawLine(QPointF(4.5, 4.5), QPointF(11.5, 11.5));
+        painter.drawLine(QPointF(11.5, 4.5), QPointF(4.5, 11.5));
+        break;
+    case IconKind::Folder: { // a folder outline with a tab
+        painter.setPen(QPen(color, 1.4, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
+        QPainterPath path;
+        path.moveTo(2.0, 4.5);
+        path.lineTo(6.0, 4.5);
+        path.lineTo(7.5, 6.0);
+        path.lineTo(14.0, 6.0);
+        path.lineTo(14.0, 12.5);
+        path.lineTo(2.0, 12.5);
+        path.closeSubpath();
+        painter.drawPath(path);
+        break;
+    }
     }
 }
 

@@ -60,6 +60,8 @@ public:
     void setTheme(const BoardTheme& theme);
     [[nodiscard]] const BoardTheme& theme() const noexcept { return m_theme; }
     void setPieceSet(const QString& name);
+    /// A read-only board (e.g. a preview) ignores the mouse: no moves, no drawings.
+    void setInteractive(bool interactive) { m_interactive = interactive; }
     [[nodiscard]] QString pieceSetName() const { return m_pieces.name(); }
 
     [[nodiscard]] QSize sizeHint() const override;
@@ -129,6 +131,7 @@ private:
     BoardGeometry m_geometry;
     bool m_flipped = false;
     bool m_showCoordinates = true;
+    bool m_interactive = true;
 
     // Interaction state
     std::optional<core::Square> m_selected;

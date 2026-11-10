@@ -2,6 +2,7 @@
 #include "chessgui/pgn/pgn.hpp"
 #include "tokenizer.hpp"
 
+#include <algorithm>
 #include <optional>
 
 namespace chessgui::pgn {
@@ -37,16 +38,43 @@ std::string unescape(std::string_view value) {
     return result;
 }
 
-/// Splits "Nf3!?" into the move and the NAG its suffix stands for.
-std::pair<std::string_view, std::optional<std::uint8_t>> splitSuffix(std::string_view move) {
-    std::size_t end = move.size();
-    while (end > 0 && (move[end - 1] == '!' || move[end - 1] == '?')) {
-        --end;
+/// Splits a move token into the move and the NAGs written straight after it: "Nf3!?" → $5,
+/// "Bd6±" → $16, and the comma lists some tools write, "h5!,+-" → $1 $18. Marks nobody knows
+/// ("!?!") are skipped and repeats are kept once ("h3?,?,?!,?!" → $2 $6).
+std::pair<std::string_view, std::vector<std::uint8_t>> splitAnnotations(std::string_view token) {
+    std::size_t end = token.find_first_of("!?,");
+    for (std::size_t i = 0; i < std::min(end, token.size()); ++i) {
+        if (static_cast<unsigned char>(token[i]) >= 0x80) { // a glyph like ± glued to the move
+            end = i;
+            break;
+        }
     }
-    if (end == move.size()) {
-        return {move, std::nullopt};
+    if (end == std::string_view::npos || end >= token.size()) {
+        return {token, {}};
     }
-    return {move.substr(0, end), core::nagFromSymbol(move.substr(end))};
+    std::vector<std::uint8_t> nags;
+    std::string_view rest = token.substr(end);
+    while (!rest.empty()) {
+        const auto comma = rest.find(',');
+        const auto part = rest.substr(0, comma);
+        if (const auto nag = core::nagFromSymbol(part);
+            nag && std::find(nags.begin(), nags.end(), *nag) == nags.end()) {
+            nags.push_back(*nag);
+        }
+        if (comma == std::string_view::npos) {
+            break;
+        }
+        rest.remove_prefix(comma + 1);
+    }
+    return {token.substr(0, end), nags};
+}
+
+/// "0.5-0.5" and "½-½" are draws written the non-standard way.
+std::string normalizeResult(std::string value) {
+    if (value == "0.5-0.5" || value == "\xC2\xBD-\xC2\xBD") {
+        return "1/2-1/2";
+    }
+    return value;
 }
 
 /// Adds a comment's text and drawings to what a node already has (a move can have several).
@@ -118,7 +146,7 @@ private:
 
     std::optional<Error> move(const Token& token) {
         Level& level = m_levels.back();
-        const auto [san, suffixNag] = splitSuffix(token.text);
+        const auto [san, suffixNags] = splitAnnotations(token.text);
         if (san == "--" || san == "Z0") {
             return at(token, "null moves (\"--\") are not supported yet.");
         }
@@ -133,8 +161,8 @@ private:
         level.position.play(*parsed);
         level.current = node;
         level.lastMove = node;
-        if (suffixNag) {
-            appendNag(node, *suffixNag);
+        for (const auto nag : suffixNags) {
+            appendNag(node, nag);
         }
         if (!m_pendingBefore.empty()) {
             m_game->setCommentBefore(node, std::move(m_pendingBefore));
@@ -221,7 +249,11 @@ core::Result<Game> parseGame(std::string_view text) {
 
     Headers headers;
     for (; token.type == TokenType::Tag; token = tokens.next()) {
-        headers.emplace_back(std::string(token.text), unescape(token.value));
+        std::string value = unescape(token.value);
+        if (token.text == "Result") {
+            value = normalizeResult(std::move(value));
+        }
+        headers.emplace_back(std::string(token.text), std::move(value));
     }
 
     std::optional<Position> start;

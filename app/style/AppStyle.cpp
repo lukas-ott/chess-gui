@@ -134,6 +134,7 @@ QFrame[card="true"] {
     border: 1px solid @border;
     border-radius: 8px;
 }
+QFrame[card="true"][focused="true"] { border-color: @accent; }
 QLabel[role="cardTitle"] {
     color: @muted;
     font-size: 11px;
@@ -156,6 +157,15 @@ QTabBar#documentTabs::tab {
 }
 QTabBar#documentTabs::tab:selected { color: @text; background: @surface; border-color: @border; }
 QTabBar#documentTabs::tab:hover:!selected { color: @text; background: @raised; }
+/* The arrows that appear when there are more tabs than fit */
+QTabBar#documentTabs::scroller { width: 26px; }
+QTabBar#documentTabs QToolButton {
+    background: @window;
+    border: none;
+    border-radius: 6px;
+    margin: 6px 0 0 0;
+}
+QTabBar#documentTabs QToolButton:hover { background: @raised; }
 
 /* Panel tabs: text with an accent underline */
 QTabWidget#panels::pane { border: none; }
@@ -169,6 +179,8 @@ QTabWidget#panels > QTabBar::tab {
 }
 QTabWidget#panels > QTabBar::tab:selected { color: @text; border-bottom-color: @accent; }
 QTabWidget#panels > QTabBar::tab:hover:!selected { color: @text; }
+
+QScrollArea#infoScroll, QScrollArea#infoScroll > QWidget > QWidget { background: transparent; }
 
 /* Move list */
 QTextBrowser#moveList { background: transparent; border: none; color: @text; }
@@ -212,6 +224,103 @@ QScrollBar::add-line, QScrollBar::sub-line { width: 0; height: 0; }
 QScrollBar::add-page, QScrollBar::sub-page { background: transparent; }
 
 QToolTip { background: @raised; color: @text; border: 1px solid @border; padding: 4px 6px; }
+
+/* Page titles (Library) */
+QLabel[role="pageTitle"] { color: @text; font-size: 20px; font-weight: 700; }
+
+QLabel[role="sectionTitle"] { color: @text; font-size: 15px; font-weight: 600; }
+QLabel[role="previewPlayers"] { color: @text; font-size: 14px; font-weight: 600; }
+
+/* The main action on a page: one per screen, in the accent colour */
+QPushButton[role="primary"] {
+    background: @accent;
+    color: @accentText;
+    border: none;
+    border-radius: 6px;
+    padding: 7px 16px;
+    min-height: 18px;
+    font-weight: 600;
+}
+QPushButton[role="primary"]:hover { background: @accentHover; }
+
+/* Quiet buttons (Library header) */
+QPushButton[role="secondary"] {
+    background: @surface;
+    color: @text;
+    border: 1px solid @border;
+    border-radius: 6px;
+    padding: 6px 12px;
+    min-height: 18px;
+}
+QPushButton[role="secondary"]:hover { background: @raised; }
+QPushButton[role="secondary"]:pressed { background: @border; }
+
+/* Text fields: search, comment box, header fields */
+QLineEdit, QPlainTextEdit#commentBox, QComboBox {
+    background: @window;
+    color: @text;
+    border: 1px solid @border;
+    border-radius: 6px;
+    padding: 4px 8px;
+    selection-background-color: @accent;
+    selection-color: @accentText;
+}
+QLineEdit:focus, QPlainTextEdit#commentBox:focus, QComboBox:focus { border-color: @accent; }
+QLineEdit:disabled { color: @dimmed; }
+QComboBox::drop-down { border: none; width: 18px; }
+QComboBox QAbstractItemView {
+    background: @surface; color: @text; border: 1px solid @border;
+    selection-background-color: @accentTint; selection-color: @accent;
+}
+
+/* Library: file list and games table */
+QTreeWidget#libraryFiles {
+    background: transparent;
+    color: @text;
+    outline: none;
+    show-decoration-selected: 0; /* keep Qt's own fold arrows: styling the branch hides them */
+}
+QTreeWidget#libraryFiles::item { padding: 5px 2px; border: none; }
+QTreeWidget#libraryFiles::item:hover { background: @raised; }
+QTreeWidget#libraryFiles::item:selected { background: @accentTint; color: @accent; }
+QTableView#libraryGames {
+    background: transparent;
+    color: @text;
+    alternate-background-color: @raised;
+    outline: none;
+    selection-background-color: @accentTint;
+    selection-color: @accent;
+}
+QTableView#libraryGames::item { padding: 0 6px; border: none; }
+QHeaderView::section {
+    background: transparent;
+    color: @muted;
+    border: none;
+    border-bottom: 1px solid @border;
+    padding: 6px;
+    font-size: 11px;
+    font-weight: 600;
+}
+
+/* Document tabs: close buttons and the "+" button */
+QToolButton#tabClose { background: transparent; border: none; border-radius: 4px; padding: 2px; }
+QToolButton#tabClose:hover { background: @border; }
+QToolButton#newTabButton {
+    color: @muted;
+    background: transparent;
+    border: none;
+    border-radius: 6px;
+    font-size: 18px;
+    padding: 0 8px;
+    margin-top: 6px;
+}
+QToolButton#newTabButton:hover { background: @raised; color: @text; }
+QWidget#tabRow { background: @window; }
+
+/* Status bar: a quiet line at the bottom */
+QStatusBar { background: @window; color: @muted; font-size: 12px; }
+QStatusBar::item { border: none; }
+
 )");
     // Placeholders instead of %1..%9: easier to read than positional arguments.
     // The accent mixed 18 % into the card colour: a soft background for chosen items.
@@ -221,7 +330,8 @@ QToolTip { background: @raised; color: @text; border: 1px solid @border; padding
                                 (a.blueF() * t) + (b.blueF() * (1 - t)));
     };
     const QColor tint = mix(colors.accent, colors.surface, 0.18F);
-    const std::array<std::pair<const char*, QColor>, 10> names{{
+    const QColor hover = mix(colors.accent, colors.text, 0.85F);
+    const std::array<std::pair<const char*, QColor>, 11> names{{
         {"@window", colors.window},
         {"@surface", colors.surface},
         {"@raised", colors.raised},
@@ -231,6 +341,7 @@ QToolTip { background: @raised; color: @text; border: 1px solid @border; padding
         {"@dimmed", colors.dimmed},
         {"@accentText", colors.accentText}, // before @accent: it starts with the same letters
         {"@accentTint", tint},
+        {"@accentHover", hover},
         {"@accent", colors.accent},
     }};
     for (const auto& [name, color] : names) {

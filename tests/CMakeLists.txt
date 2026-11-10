@@ -20,6 +20,7 @@ if(CHESSGUI_BUILD_APP)
         ui/main.cpp
         ui/test_board_geometry.cpp
         ui/test_board_view.cpp
+        ui/test_documents.cpp
         ui/test_main_window.cpp
         ui/test_piece_set.cpp)
     find_package(Qt6 REQUIRED COMPONENTS Test)
