@@ -17,22 +17,22 @@
 namespace chessgui::app {
 namespace {
 
-struct ScanResult {
+struct Listing {
     std::vector<LibraryFile> files;
     qint64 milliseconds = 0;
 };
 
-/// Runs on a worker thread: lists the folder, then reads and indexes every new or changed file,
-/// several at a time. `known` are the files from the last scan; unchanged ones are reused.
-ScanResult scan(const QString& folder, const std::vector<LibraryFile>& known) {
+/// Runs on a worker thread: lists the folder (names, sizes, dates; no file is read, so it is
+/// quick even when iCloud has moved the files off the Mac). Unchanged files keep their index
+/// from `known`; the others get none yet.
+Listing list(const QString& folder, const std::vector<LibraryFile>& known) {
     QElapsedTimer timer;
     timer.start();
     std::unordered_map<QString, const LibraryFile*> previous;
     for (const auto& file : known) {
         previous.emplace(file.path, &file);
     }
-
-    ScanResult result;
+    Listing result;
     QDirIterator it(folder, {QStringLiteral("*.pgn"), QStringLiteral("*.PGN")}, QDir::Files,
                     QDirIterator::Subdirectories);
     while (it.hasNext()) {
@@ -49,29 +49,41 @@ ScanResult scan(const QString& folder, const std::vector<LibraryFile>& known) {
     std::sort(result.files.begin(), result.files.end(), [](const auto& a, const auto& b) {
         return QString::localeAwareCompare(a.name, b.name) < 0;
     });
-
-    // Read and index the files that need it, in parallel.
-    QtConcurrent::blockingMap(result.files, [](LibraryFile& file) {
-        if (file.pgn) {
-            return;
-        }
-        auto pgnFile = std::make_shared<PgnFile>();
-        pgnFile->path = file.path;
-        QFile in(file.path);
-        if (in.open(QIODevice::ReadOnly)) {
-            const QByteArray bytes = in.readAll();
-            pgnFile->text.assign(bytes.constData(), static_cast<std::size_t>(bytes.size()));
-            pgnFile->games = pgn::indexGames(pgnFile->text);
-        }
-        file.pgn = std::move(pgnFile);
-    });
     result.milliseconds = timer.elapsed();
     return result;
 }
 
+/// One file read and indexed (on a worker thread, several at a time).
+struct ReadFile {
+    QString path;
+    std::shared_ptr<PgnFile> pgn;
+};
+
+ReadFile readFile(const QString& path, const std::atomic<bool>& cancel) {
+    if (cancel) {
+        return {path, nullptr};
+    }
+    auto pgnFile = std::make_shared<PgnFile>();
+    pgnFile->path = path;
+    QFile in(path);
+    if (in.open(QIODevice::ReadOnly)) {
+        const QByteArray bytes = in.readAll();
+        pgnFile->text.assign(bytes.constData(), static_cast<std::size_t>(bytes.size()));
+        pgnFile->games = pgn::indexGames(pgnFile->text);
+    }
+    return {path, std::move(pgnFile)};
+}
+
 } // namespace
 
+Library::~Library() {
+    *m_cancel = true;
+}
+
 Library::Library(QObject* parent) : QObject(parent) {
+    m_progressTimer.setSingleShot(true);
+    m_progressTimer.setInterval(200);
+    connect(&m_progressTimer, &QTimer::timeout, this, &Library::progress);
     m_debounce.setSingleShot(true);
     m_debounce.setInterval(250);
     connect(&m_debounce, &QTimer::timeout, this, &Library::rescan);
@@ -110,29 +122,53 @@ void Library::startScan() {
     const int generation = m_generation;
     // Owned by this Library and deleted when done (deleteLater); see MainWindow's whenReady().
     auto* watcher =
-        new QFutureWatcher<ScanResult>(this); // NOLINT(clang-analyzer-cplusplus.NewDeleteLeaks)
-    connect(watcher, &QFutureWatcher<ScanResult>::finished, this, [this, watcher, generation] {
+        new QFutureWatcher<Listing>(this); // NOLINT(clang-analyzer-cplusplus.NewDeleteLeaks)
+    connect(watcher, &QFutureWatcher<Listing>::finished, this, [this, watcher, generation] {
         watcher->deleteLater();
-        m_scanning = false;
         if (generation != m_generation) { // the folder was changed meanwhile
+            m_scanning = false;
             rescan();
             return;
         }
-        ScanResult result = watcher->result();
+        Listing listing = watcher->result();
         // Nothing new (the watcher also fires for changes that aren't PGN files): leave the
         // views alone, so nothing is rebuilt under the user's hands.
         const bool same = m_reportedGeneration == generation &&
-                          std::equal(m_files.begin(), m_files.end(), result.files.begin(),
-                                     result.files.end(), [](const auto& a, const auto& b) {
+                          std::equal(m_files.begin(), m_files.end(), listing.files.begin(),
+                                     listing.files.end(), [](const auto& a, const auto& b) {
                                          return a.path == b.path && a.pgn == b.pgn;
                                      });
-        m_files = std::move(result.files);
+        m_files = std::move(listing.files);
         watch();
         if (same) {
+            m_scanning = false;
             if (m_rescanQueued) {
                 m_rescanQueued = false;
                 rescan();
             }
+            return;
+        }
+        readFiles(generation, listing.milliseconds);
+    });
+    watcher->setFuture(
+        QtConcurrent::run([folder = m_folder, known = m_files] { return list(folder, known); }));
+} // NOLINT(clang-analyzer-cplusplus.NewDeleteLeaks)
+
+void Library::readFiles(int generation, qint64 listedAfterMs) {
+    QStringList toRead;
+    for (const auto& file : m_files) {
+        if (!file.pgn) {
+            toRead << file.path;
+        }
+    }
+    QElapsedTimer timer;
+    timer.start();
+    const auto finish = [this, generation, listedAfterMs, timer] {
+        m_reading = 0;
+        m_progressTimer.stop();
+        m_scanning = false;
+        if (generation != m_generation) {
+            rescan();
             return;
         }
         m_reportedGeneration = generation;
@@ -140,14 +176,45 @@ void Library::startScan() {
         for (const auto& file : m_files) {
             games += static_cast<int>(file.pgn ? file.pgn->games.size() : 0);
         }
-        emit scanned(static_cast<int>(m_files.size()), games, result.milliseconds);
+        emit scanned(static_cast<int>(m_files.size()), games, listedAfterMs + timer.elapsed());
         if (m_rescanQueued) {
             m_rescanQueued = false;
             rescan();
         }
+    };
+    if (toRead.isEmpty()) {
+        finish();
+        return;
+    }
+    // The list first, so the Library shows the files at once; their games follow as each file
+    // is read (iCloud may have to download them first).
+    m_reading = static_cast<int>(toRead.size());
+    emit progress();
+    auto* watcher =
+        new QFutureWatcher<ReadFile>(this); // NOLINT(clang-analyzer-cplusplus.NewDeleteLeaks)
+    connect(watcher, &QFutureWatcher<ReadFile>::resultReadyAt, this,
+            [this, watcher, generation](int index) {
+                if (generation != m_generation) {
+                    return;
+                }
+                const ReadFile read = watcher->resultAt(index);
+                for (auto& file : m_files) {
+                    if (file.path == read.path && !file.pgn) {
+                        file.pgn = read.pgn;
+                        --m_reading;
+                        break;
+                    }
+                }
+                if (!m_progressTimer.isActive()) {
+                    m_progressTimer.start();
+                }
+            });
+    connect(watcher, &QFutureWatcher<ReadFile>::finished, this, [watcher, finish] {
+        watcher->deleteLater();
+        finish();
     });
-    watcher->setFuture(
-        QtConcurrent::run([folder = m_folder, known = m_files] { return scan(folder, known); }));
+    watcher->setFuture(QtConcurrent::mapped(
+        toRead, [cancel = m_cancel](const QString& path) { return readFile(path, *cancel); }));
 } // NOLINT(clang-analyzer-cplusplus.NewDeleteLeaks)
 
 void Library::watch() {

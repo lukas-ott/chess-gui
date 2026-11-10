@@ -153,6 +153,17 @@ TEST(Uci, ParsesLegalMovesOnly) {
     EXPECT_FALSE(start.parseUci("hello").ok());
 }
 
+TEST(Uci, CastlingAsKingTakesRook) {
+    // The Lichess cloud and Chess960 engines write castling as the king taking its rook.
+    const Position white = fromFen("r3k2r/8/8/8/8/8/8/R3K2R w KQkq - 0 1");
+    EXPECT_EQ(*white.parseUci("e1h1"), uci("e1g1"));
+    EXPECT_EQ(*white.parseUci("e1a1"), uci("e1c1"));
+    const Position black = fromFen("r3k2r/8/8/8/8/8/8/R3K2R b KQkq - 0 1");
+    EXPECT_EQ(*black.parseUci("e8h8"), uci("e8g8"));
+    // Without the right to castle it stays illegal.
+    EXPECT_FALSE(fromFen("r3k2r/8/8/8/8/8/8/R3K2R w - - 0 1").parseUci("e1h1").ok());
+}
+
 TEST(PositionState, StalemateAndInsufficientMaterial) {
     EXPECT_TRUE(fromFen("7k/5Q2/6K1/8/8/8/8/8 b - - 0 1").isStalemate());
     EXPECT_TRUE(fromFen("7k/8/6K1/8/8/8/8/8 w - - 0 1").isInsufficientMaterial());

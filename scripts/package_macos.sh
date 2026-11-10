@@ -31,6 +31,7 @@ cd "$(git rev-parse --show-toplevel)"
 PLUGINS=(
     platforms/libqcocoa.dylib
     styles/libqmacstyle.dylib
+    tls/libqsecuretransportbackend.dylib # HTTPS (Stockfish download, Lichess cloud) via macOS
 )
 
 QTPATHS="${QTPATHS:-$(command -v qtpaths6 || command -v qtpaths)}"

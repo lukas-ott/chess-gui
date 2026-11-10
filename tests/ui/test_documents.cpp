@@ -25,6 +25,7 @@
 #include <QTableView>
 #include <QTemporaryDir>
 #include <QTest>
+#include <QToolButton>
 #include <QTreeWidget>
 #include <gtest/gtest.h>
 
@@ -135,16 +136,33 @@ protected:
 };
 
 TEST_F(DocumentsTest, StartsInTheLibraryWithAnEmptyGameTab) {
-    EXPECT_EQ(tabs->currentIndex(), 0);
-    EXPECT_EQ(tabs->tabText(0), QStringLiteral("Library"));
-    EXPECT_EQ(tabs->count(), 2);
+    EXPECT_EQ(window.section(), MainWindow::Section::Library);
+    EXPECT_EQ(tabs->count(), 1); // the board's tab bar holds only games
+    EXPECT_EQ(tabs->tabText(0), QStringLiteral("New game"));
+}
+
+TEST_F(DocumentsTest, TheSidebarSwitchesSectionsAndTheBoardAlwaysHasAGame) {
+    auto* board = window.findChild<QToolButton*>(QStringLiteral("sideBoard"));
+    auto* engines = window.findChild<QToolButton*>(QStringLiteral("sideEngines"));
+    ASSERT_NE(board, nullptr);
+    ASSERT_NE(engines, nullptr);
+    QTest::mouseClick(engines, Qt::LeftButton);
+    EXPECT_EQ(window.section(), MainWindow::Section::Engines);
+    EXPECT_TRUE(window.findChild<QWidget*>(QStringLiteral("enginesView"))->isVisible());
+    QTest::mouseClick(board, Qt::LeftButton);
+    EXPECT_EQ(window.section(), MainWindow::Section::Board);
+    EXPECT_TRUE(board->isChecked());
+    // Closing the last game leaves a fresh one, never an empty board page.
+    action(window, QStringLiteral("Close Tab"))->trigger();
+    EXPECT_EQ(tabs->count(), 1);
+    EXPECT_EQ(tabs->tabText(0), QStringLiteral("New game"));
 }
 
 TEST_F(DocumentsTest, OpenEditAndSaveAFile) {
     writeFile(path("game.pgn"), kOneGame);
     open(path("game.pgn"));
     EXPECT_EQ(tabs->tabText(tabs->currentIndex()), QStringLiteral("Alice – Bob"));
-    EXPECT_EQ(tabs->count(), 2); // replaced the untouched empty game
+    EXPECT_EQ(tabs->count(), 1); // replaced the untouched empty game
 
     action(window, QStringLiteral("Go to End"))->trigger();
     play("Nc6");
@@ -176,7 +194,7 @@ TEST_F(DocumentsTest, LibraryListsFilesAndOpensAnyGame) {
 
     // Opening the same game again switches to its tab instead of opening another.
     const int count = tabs->count();
-    tabs->setCurrentIndex(0);
+    window.showSection(MainWindow::Section::Library);
     window.openGame(three.pgn, 1);
     EXPECT_EQ(tabs->count(), count);
     EXPECT_EQ(tabs->tabText(tabs->currentIndex()), QStringLiteral("Second – Y"));
@@ -199,7 +217,7 @@ protected:
         games = window.findChild<QTableView*>(QStringLiteral("libraryGames"));
         ASSERT_NE(tree, nullptr);
         ASSERT_NE(games, nullptr);
-        tabs->setCurrentIndex(0);
+        window.showSection(MainWindow::Section::Library);
     }
     [[nodiscard]] QTreeWidgetItem* item(const QString& text) const {
         const auto found = tree->findItems(text, Qt::MatchExactly | Qt::MatchRecursive);
@@ -209,14 +227,26 @@ protected:
     QTableView* games = nullptr;
 };
 
-TEST_F(LibraryTreeTest, FoldersFormATreeAndListAllTheirGames) {
+TEST_F(LibraryTreeTest, AFolderListsOnlyItsOwnFiles) {
     ASSERT_EQ(tree->topLevelItemCount(), 2); // the OTB folder, then top.pgn
     QTreeWidgetItem* otb = item(QStringLiteral("OTB"));
     ASSERT_NE(otb, nullptr);
     EXPECT_EQ(otb->childCount(), 2);              // Black, White
     EXPECT_EQ(otb->text(1), QStringLiteral("4")); // 1 + 3 games inside
+    // OTB holds only folders: its own list is empty; the games are a level further down.
     tree->setCurrentItem(otb);
-    EXPECT_EQ(games->model()->rowCount(), 4); // every game below the folder
+    EXPECT_EQ(games->model()->rowCount(), 0);
+    const auto* count = window.findChild<QLabel*>(QStringLiteral("libraryListCount"));
+    ASSERT_NE(count, nullptr);
+    EXPECT_EQ(count->text(), QStringLiteral("0 games  ·  0 files  ·  2 folders"));
+    tree->setCurrentItem(item(QStringLiteral("Black")));
+    EXPECT_EQ(games->model()->rowCount(), 3); // b.pgn's games
+    // The top level holds top.pgn (and the OTB folder, whose games stay inside it).
+    writeFile(path("OTB/notes.pgn"), kOneGame);
+    QSignalSpy scanned(&window.library(), &Library::scanned);
+    ASSERT_TRUE(scanned.wait(5000));
+    tree->setCurrentItem(item(QStringLiteral("OTB")));
+    EXPECT_EQ(games->model()->rowCount(), 1); // notes.pgn only, not Black/ or White/
 }
 
 TEST_F(LibraryTreeTest, FoldingIsRemembered) {
@@ -308,8 +338,8 @@ TEST_F(LibraryTreeTest, ALongFileNameDoesNotWidenTheWindow) {
     QApplication::processEvents();
     EXPECT_GE(tabs->width(), tabs->sizeHint().width());
     EXPECT_LT(tabs->sizeHint().width(), 500);
-    EXPECT_TRUE(tabs->tabText(1).endsWith(QStringLiteral("…")));
-    EXPECT_EQ(tabs->tabToolTip(1), name);
+    EXPECT_TRUE(tabs->tabText(tabs->currentIndex()).endsWith(QStringLiteral("…")));
+    EXPECT_EQ(tabs->tabToolTip(tabs->currentIndex()), name);
 }
 
 TEST_F(LibraryTreeTest, ArrowKeysActOnWhatWasClicked) {
@@ -384,6 +414,32 @@ TEST_F(DocumentsTest, SavingOneGameLeavesTheOthersAlone) {
     EXPECT_EQ((*games)[2].header("White"), "Third");
 }
 
+TEST_F(DocumentsTest, LibraryListsFilesBeforeReadingThem) {
+    // The file list comes first (instant even for files iCloud has to download), the games as
+    // each file is read; the Library never says "empty" in between.
+    writeFile(path("one.pgn"), kOneGame);
+    writeFile(path("three.pgn"), kThreeGames);
+    std::size_t listed = 0;
+    bool sawUnread = false;
+    QObject::connect(&window.library(), &Library::progress, &window, [&] {
+        if (listed == 0) {
+            listed = window.library().files().size();
+            for (const auto& file : window.library().files()) {
+                sawUnread = sawUnread || !file.pgn;
+            }
+        }
+    });
+    QSignalSpy scanned(&window.library(), &Library::scanned);
+    window.library().setFolder(folder.path());
+    ASSERT_TRUE(scanned.wait(5000));
+    EXPECT_EQ(listed, 2U);  // both files known before any was read
+    EXPECT_TRUE(sawUnread); // ... and before their games were
+    EXPECT_FALSE(window.library().isReading());
+    for (const auto& file : window.library().files()) {
+        ASSERT_TRUE(file.pgn);
+    }
+}
+
 TEST_F(DocumentsTest, LibraryNoticesNewFiles) {
     writeFile(path("one.pgn"), kOneGame);
     scanLibrary();
@@ -395,7 +451,7 @@ TEST_F(DocumentsTest, LibraryNoticesNewFiles) {
 }
 
 TEST_F(DocumentsTest, SaveAsWritesANewFile) {
-    tabs->setCurrentIndex(1);
+    window.showSection(MainWindow::Section::Board);
     play("e4");
     QSignalSpy saved(&window, &MainWindow::fileSaved);
     window.saveCurrentAs(path("new.pgn"));
@@ -403,11 +459,11 @@ TEST_F(DocumentsTest, SaveAsWritesANewFile) {
     const auto game = pgn::parseGame(readFile(path("new.pgn")));
     ASSERT_TRUE(game.ok());
     EXPECT_EQ(game->mainLine().size(), 2U);
-    EXPECT_EQ(tabs->tabText(1), QStringLiteral("new")); // named after the file now
+    EXPECT_EQ(tabs->tabText(0), QStringLiteral("new")); // named after the file now
 }
 
 TEST_F(DocumentsTest, NotationEditing) {
-    tabs->setCurrentIndex(1);
+    window.showSection(MainWindow::Section::Board);
     play("e4");
     play("e5");
     action(window, QStringLiteral("Back"))->trigger();
@@ -431,7 +487,7 @@ TEST_F(DocumentsTest, NotationEditing) {
 }
 
 TEST_F(DocumentsTest, NagsAreExclusivePerGroup) {
-    tabs->setCurrentIndex(1);
+    window.showSection(MainWindow::Section::Board);
     play("e4");
     const auto id = core::NodeId{1};
     emit notation->nagToggled(id, core::nag::kGood);
@@ -444,7 +500,7 @@ TEST_F(DocumentsTest, NagsAreExclusivePerGroup) {
 }
 
 TEST_F(DocumentsTest, CommentBoxEditsTheCurrentMoveAndKeepsItsArrowKeys) {
-    tabs->setCurrentIndex(1);
+    window.showSection(MainWindow::Section::Board);
     play("e4");
     auto* box = window.findChild<QPlainTextEdit*>(QStringLiteral("commentBox"));
     ASSERT_NE(box, nullptr);
@@ -461,7 +517,7 @@ TEST_F(DocumentsTest, CommentBoxEditsTheCurrentMoveAndKeepsItsArrowKeys) {
 TEST_F(DocumentsTest, MenuShortcutsLeaveTheCommentBoxAlone) {
     // macOS's menu bar takes ⌘⌫ before the comment box sees it; it must still edit the text
     // there rather than delete the move.
-    tabs->setCurrentIndex(1);
+    window.showSection(MainWindow::Section::Board);
     play("e4");
     auto* box = window.findChild<QPlainTextEdit*>(QStringLiteral("commentBox"));
     box->setFocus();
@@ -478,16 +534,16 @@ TEST_F(DocumentsTest, MenuShortcutsLeaveTheCommentBoxAlone) {
 }
 
 TEST_F(DocumentsTest, HeadersFromTheInfoPanel) {
-    tabs->setCurrentIndex(1);
+    window.showSection(MainWindow::Section::Board);
     auto* info = window.findChild<chessgui::app::GameInfoPanel*>();
     ASSERT_NE(info, nullptr);
     emit info->headerEdited(QStringLiteral("White"), QStringLiteral("Carlsen"));
     emit info->headerEdited(QStringLiteral("Black"), QStringLiteral("Nepomniachtchi"));
-    EXPECT_EQ(tabs->tabText(1), QStringLiteral("• Carlsen – Nepomniachtchi"));
+    EXPECT_EQ(tabs->tabText(0), QStringLiteral("• Carlsen – Nepomniachtchi"));
 }
 
 TEST_F(DocumentsTest, CopyAndPaste) {
-    tabs->setCurrentIndex(1);
+    window.showSection(MainWindow::Section::Board);
     play("d4");
     action(window, QStringLiteral("Copy Game as PGN"))->trigger();
     EXPECT_TRUE(QApplication::clipboard()->text().contains(QStringLiteral("1. d4 *")));
@@ -524,7 +580,7 @@ TEST_F(DocumentsTest, Snapshots) {
         QDir(folder.path()).mkdir(QStringLiteral("empty"));
         window.library().setFolder(folder.filePath(QStringLiteral("empty")));
         ASSERT_TRUE(emptyScan.wait(10000));
-        tabs->setCurrentIndex(0);
+        window.showSection(MainWindow::Section::Library);
         save(QStringLiteral("library-empty"));
     }
     writeFile(path("three.pgn"), kThreeGames);
@@ -532,7 +588,7 @@ TEST_F(DocumentsTest, Snapshots) {
     QSignalSpy scanned(&window.library(), &Library::scanned);
     window.library().setFolder(review.isEmpty() ? folder.path() : review);
     ASSERT_TRUE(scanned.wait(10000));
-    tabs->setCurrentIndex(0);
+    window.showSection(MainWindow::Section::Library);
     QTest::qWait(300); // let the preview's background parse finish
     save(QStringLiteral("library"));
 

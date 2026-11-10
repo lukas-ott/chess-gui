@@ -5,11 +5,13 @@
 #include <QMainWindow>
 #include <QTimer>
 
+#include <cstdint>
 #include <memory>
 #include <vector>
 
 class QAction;
 class QActionGroup;
+class QButtonGroup;
 class QKeySequence;
 class QLabel;
 class QMenu;
@@ -26,6 +28,10 @@ namespace chessgui::app {
 
 class AppStyle;
 class BoardView;
+class EnginePanel;
+class EngineRegistry;
+class EnginesView;
+class EvalBar;
 class GameInfoPanel;
 class Library;
 class LibraryView;
@@ -41,6 +47,9 @@ class MainWindow : public QMainWindow {
     Q_OBJECT
 
 public:
+    /// The sidebar's sections: the board with its game tabs, the Library, the Engines page.
+    enum class Section : std::uint8_t { Board, Library, Engines };
+
     explicit MainWindow(AppStyle& style, QWidget* parent = nullptr);
     ~MainWindow() override;
     MainWindow(const MainWindow&) = delete;
@@ -55,6 +64,11 @@ public:
     /// Saves the current game to a path (for "Save As" and tests).
     void saveCurrentAs(const QString& path);
     [[nodiscard]] Library& library() { return *m_library; }
+    [[nodiscard]] EngineRegistry& engines() { return *m_engineRegistry; }
+    void showSection(Section section);
+    [[nodiscard]] Section section() const noexcept { return m_section; }
+    /// Keeps the eval bar beside the board when the board's size changes.
+    bool eventFilter(QObject* watched, QEvent* event) override;
 
 signals:
     /// A file was opened or saved (or failed): for tests and the status bar.
@@ -82,6 +96,8 @@ private:
     [[nodiscard]] QWidget* buildPanelsCard();
     void restoreState();
     void fitBoardColumn();
+    /// Puts the eval bar beside the board: as tall as its squares, centred in the gap.
+    void placeEvalBar();
     void showAbout();
     void chooseCustomColors();
     void chooseLibraryFolder();
@@ -90,7 +106,9 @@ private:
     [[nodiscard]] GameDocument* doc() const;
     [[nodiscard]] GameDocument* docAt(int tab) const;
     void addDocument(std::unique_ptr<GameDocument> document);
-    void onTabChanged(int tab);
+    /// Shows what the current section and tab say: the game, the Library or the Engines page.
+    void updatePage();
+    void updateSidebarIcons();
     void closeTab(int tab);
     /// Asks to save a modified game. False if the user cancelled.
     bool maybeSave(GameDocument& document);
@@ -115,6 +133,9 @@ private:
     void showDocument();
     void refreshNotation(); ///< after the tree changed
     void onMoveMade(core::Move move);
+    /// Plays moves from the current position (a line clicked in the engine panel), as a new
+    /// variation where they aren't in the game yet.
+    void playMoves(const std::vector<core::Move>& moves);
     void goBack();
     void goForward();
     void goToStart();
@@ -143,7 +164,13 @@ private:
     QTabBar* m_tabs = nullptr;
     QStackedWidget* m_pages = nullptr; ///< 0 = Library, 1 = a game
     LibraryView* m_libraryView = nullptr;
+    Section m_section = Section::Board;
+    QButtonGroup* m_sidebar = nullptr; ///< one button per section, ids = Section
+    EngineRegistry* m_engineRegistry = nullptr;
+    EnginesView* m_enginesView = nullptr;
     BoardView* m_board = nullptr;
+    EvalBar* m_evalBar = nullptr; ///< beside the board while the engine runs
+    EnginePanel* m_enginePanel = nullptr;
     NotationView* m_notation = nullptr;
     QPlainTextEdit* m_commentBox = nullptr;
     QLabel* m_commentTitle = nullptr;

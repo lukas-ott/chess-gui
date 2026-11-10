@@ -255,6 +255,104 @@ QPushButton[role="secondary"] {
 QPushButton[role="secondary"]:hover { background: @raised; }
 QPushButton[role="secondary"]:pressed { background: @border; }
 
+/* Engine panel */
+QPushButton[role="engineToggle"] {
+    background: @raised;
+    color: @text;
+    border: 1px solid @border;
+    border-radius: 6px;
+    padding: 5px 14px;
+    min-height: 18px;
+    font-weight: 600;
+}
+QPushButton[role="engineToggle"]:hover { background: @border; }
+QPushButton[role="engineToggle"]:checked { background: @accent; color: @accentText; border-color: @accent; }
+QPushButton[role="engineToggle"]:checked:hover { background: @accentHover; }
+QSpinBox#engineLines {
+    background: @window;
+    color: @text;
+    border: 1px solid @border;
+    border-radius: 6px;
+    padding: 4px 6px;
+    min-height: 18px;
+}
+QToolButton#engineMore {
+    background: transparent;
+    color: @muted;
+    border: none;
+    border-radius: 6px;
+    padding: 4px 8px;
+    font-size: 16px;
+}
+QToolButton#engineMore:hover { background: @raised; color: @text; }
+QToolButton#engineMore::menu-indicator { image: none; }
+QLabel[role="engineStatus"] { color: @muted; font-size: 12px; }
+QLabel[role="pvLine"] { color: @text; font-size: 14px; }
+/* A score chip in the colours of the side that is better, as Lichess shows it */
+QLabel[role="scorePill"] {
+    border-radius: 4px;
+    padding: 2px 0;
+    font-size: 13px;
+    font-weight: 600;
+    background: #F0F0F0;
+    color: #2B2926;
+}
+QLabel[role="scorePill"][side="black"] { background: #403D39; color: #F0F0F0; }
+QLabel[role="error"] { color: #E5534B; }
+QProgressBar#downloadBar { background: @raised; border: none; border-radius: 3px; }
+QProgressBar#downloadBar::chunk { background: @accent; border-radius: 3px; }
+
+/* Sidebar: one icon per section; the current one has an accent bar on its left edge */
+QFrame#sidebar { background: @window; border-right: 1px solid @border; }
+QToolButton[role="sideNav"] {
+    background: transparent;
+    border: none;
+    border-left: 3px solid transparent;
+    border-radius: 0;
+}
+QToolButton[role="sideNav"]:hover { background: @raised; }
+QToolButton[role="sideNav"]:checked { border-left-color: @accent; }
+
+/* Engines page */
+QFrame[engineCard="true"] { background: @raised; }
+QFrame[engineCard="true"]:hover { border-color: @muted; }
+QFrame[engineCard="true"][selected="true"] { border-color: @accent; }
+QLabel[role="cardName"] { color: @text; font-size: 15px; font-weight: 600; }
+QLabel[role="statTitle"] { color: @muted; font-size: 11px; font-weight: 600; }
+QLabel[role="statValue"] { color: @text; font-size: 15px; font-weight: 600; }
+QScrollArea#engineCards, QWidget#engineCardsContent { background: transparent; }
+QScrollArea#engineSections, QWidget#engineSectionsContent { background: transparent; }
+QWidget#engineSection { border-bottom: 1px solid @border; }
+QLabel#emptyEngineIcon { background: @raised; border-radius: 32px; }
+QToolButton#addEngine, QToolButton#enginesFolder, QToolButton#manageEngines {
+    background: transparent;
+    border: 1px solid transparent;
+    border-radius: 6px;
+    padding: 5px;
+}
+QToolButton#addEngine { border-color: @border; background: @surface; }
+QToolButton#addEngine:hover, QToolButton#enginesFolder:hover, QToolButton#manageEngines:hover {
+    background: @raised;
+}
+QToolButton#addEngine::menu-indicator { image: none; }
+QSpinBox#engineThreads, QSpinBox#engineHash {
+    background: @window;
+    color: @text;
+    border: 1px solid @border;
+    border-radius: 6px;
+    padding: 4px 6px;
+    min-width: 90px;
+}
+/* A button that reads as a link */
+QPushButton[role="link"] {
+    background: transparent;
+    border: none;
+    color: @accent;
+    padding: 0;
+    font-weight: 600;
+}
+QPushButton[role="link"]:hover { color: @accentHover; }
+
 /* Text fields: search, comment box, header fields */
 QLineEdit, QPlainTextEdit#commentBox, QComboBox {
     background: @window;

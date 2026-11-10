@@ -22,13 +22,15 @@ bash scripts/package_macos.sh                    # self-contained .app + .dmg
 
 ## Rules
 
-- `core/`, `pgn/` (and later `library/`, `repertoire/`, `gamedb/`) must **never** include Qt.
+- `core/`, `pgn/`, `engine/` (and later `repertoire/`, `gamedb/`) must **never** include Qt.
   Only `app/` (UI) and thin adapters may use Qt. The `ci-core` job builds core without Qt
   to enforce this.
 - No blocking work on the UI thread: parsing, I/O, search, network and engine I/O run in the
   background and report back through signals.
 - Nothing slow at startup. Load lazily; engines start on demand.
 - Every new chess-logic feature gets unit tests. Move generation is verified with perft.
+- Engine UI tests use `tests/fake_engine.cpp`, a predictable UCI engine; a `RealEngine` test runs
+  Homebrew's Stockfish when it is installed (skipped in CI). Tests never use the network.
 - UI behaviour gets tests in `tests/ui/` (real mouse events, offscreen). Set
   `CHESSGUI_SNAPSHOT_DIR=<dir>` when running `chessgui_ui_tests` to save PNGs of the board.
 - Performance-sensitive code gets a benchmark in `bench/`.
@@ -51,5 +53,5 @@ bash scripts/package_macos.sh                    # self-contained .app + .dmg
 ## Milestones
 
 M0 skeleton (done) → M1 core (game tree, SAN/FEN; done) → M2 board UI (done) → M3 PGN viewer/editor (done) →
-M4 engine (= v1) → M5 library + cache → M6 repertoire → M7 training → M8 explorer + gap check
+M4 engine (= v1; done) → M5 library + cache → M6 repertoire → M7 training → M8 explorer + gap check
 (= v2) → M9 game import → M10 large database (= v3).

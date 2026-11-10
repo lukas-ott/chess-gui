@@ -4,10 +4,14 @@ A fast, native macOS chess GUI for opening preparation, written in C++20 with Qt
 It opens instantly, keeps your PGN files as the source of truth, and focuses on building
 and training opening repertoires.
 
-> Status: **M3, PGN viewer and editor.** A Library tab shows every PGN file in your library folder
-> (`~/Documents/ChessGui` by default) with a game list and preview. Games open in tabs; you can
-> edit variations, comments and NAGs, edit headers, save back into the file, and copy or paste
-> PGN and FEN. Engine analysis comes in M4.
+> Status: **M4, engine analysis (v1).** A sidebar switches between the board (games in tabs),
+> the Library and the Engines page. The Library shows every PGN file in your library folder
+> (`~/Documents/ChessGui` by default) with a game list and preview. On the board you can edit
+> variations, comments and NAGs, edit headers, save back into the file, and copy or paste PGN
+> and FEN. The Engines page downloads the latest Stockfish in one click (or uses the one on your
+> Mac, or any UCI engine); the Engine tab analyses the board with it or the Lichess cloud: up to
+> 5 lines, an eval bar and best-move arrows, and a click on a move plays the line into the game.
+> Space starts and stops it.
 
 ## Requirements (macOS)
 
@@ -67,9 +71,13 @@ In CLion or VS Code (CMake Tools + clangd), just open the folder: both pick up t
 ```
 core/     Pure C++ chess logic: positions, FEN, SAN, game tree, annotations. No Qt.
 pgn/      Reading, indexing and writing PGN files (fast game index, round-trip safe). No Qt.
+engine/   The UCI protocol (engine output, scores, lines as moves) and picking the Stockfish
+          download for this Mac. No Qt.
 app/      Qt Widgets application: main window, board/ (board widget, themes, piece sets),
           library/ (library folder scan and Library tab), document/ (open games, background
           file loading and saving), notation/ (move list editor), panels/ (game info),
+          engine/ (engine processes, Lichess cloud, Stockfish download, Engines page and
+          Engine tab),
           style/ (app colours and style sheet, light and dark),
           resources/pieces/ (bundled SVG piece sets, with their licences).
 tests/    GoogleTest unit tests; tests/ui/ drives the board and window offscreen.
@@ -78,7 +86,7 @@ scripts/  Dev scripts (startup timing).
 cmake/    Compiler options and pinned dependencies.
 ```
 
-Planned modules (`engine/`, `library/`, `repertoire/`, `gamedb/`, `online/`) are added
+Planned modules (`repertoire/`, `gamedb/`, `online/`) are added
 with their milestones.
 
 ## Roadmap

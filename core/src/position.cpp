@@ -199,10 +199,22 @@ Result<Move> Position::parseUci(std::string_view uci) const {
     if (!move) {
         return Error{"\"" + std::string(uci) + "\" is not a UCI move."};
     }
-    if (!isLegal(*move)) {
-        return Error{"\"" + std::string(uci) + "\" is not a legal move here."};
+    if (isLegal(*move)) {
+        return *move;
     }
-    return *move;
+    // Castling written as the king taking its own rook ("e1h1"), as Chess960 notation and the
+    // Lichess cloud do: the same move as the king's two-square step.
+    const Piece king = pieceAt(move->from);
+    const Piece rook = pieceAt(move->to);
+    if (king.type == PieceType::King && rook.type == PieceType::Rook && king.color == rook.color &&
+        move->from.rank() == move->to.rank()) {
+        const int file = move->to.file() > move->from.file() ? 6 : 2;
+        const Move castle{move->from, Square::at(file, move->from.rank())};
+        if (isLegal(castle)) {
+            return castle;
+        }
+    }
+    return Error{"\"" + std::string(uci) + "\" is not a legal move here."};
 }
 
 // ---- SAN parsing -------------------------------------------------------------------------------

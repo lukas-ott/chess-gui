@@ -227,6 +227,7 @@ LibraryView::LibraryView(Library& library, const AppStyle& style, QWidget* paren
     m_listTitle->setProperty("role", "sectionTitle");
     m_listTitle->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
     m_listCount = label(QString(), "emptyHint");
+    m_listCount->setObjectName(QStringLiteral("libraryListCount"));
     m_search = new QLineEdit;
     m_search->setPlaceholderText(tr("Search files, players, events"));
     m_search->setClearButtonEnabled(true);
@@ -376,6 +377,11 @@ LibraryView::LibraryView(Library& library, const AppStyle& style, QWidget* paren
                             "emptyHint");
     emptyHint->setWordWrap(true);
     emptyHint->setMinimumWidth(400);
+    // Tall enough for the wrapped text (a wrapped label doesn't ask for its height by itself),
+    // measured in the style sheet's font.
+    emptyHint->ensurePolished();
+    emptyHint->setMinimumHeight(emptyHint->heightForWidth(460 - 56) +
+                                emptyHint->fontMetrics().descent());
     auto* choose = new QPushButton(tr("Choose Folder…"));
     choose->setProperty("role", "primary");
     connect(choose, &QPushButton::clicked, this, &LibraryView::changeFolderRequested);
@@ -400,6 +406,15 @@ LibraryView::LibraryView(Library& library, const AppStyle& style, QWidget* paren
                                      : (files == 1 ? tr("1 file") : tr("%1 files").arg(files)) +
                                            QStringLiteral("  ·  ") + gamesText(games));
         m_status->setToolTip(tr("Loaded in %1 ms").arg(ms));
+        refreshFiles();
+    });
+    // While files are still being read (iCloud may be downloading them), the list is already
+    // there; the counts fill in as they arrive.
+    connect(&m_library, &Library::progress, this, [this] {
+        const auto count = static_cast<int>(m_library.files().size());
+        m_status->setText((count == 1 ? tr("1 file") : tr("%1 files").arg(count)) +
+                          QStringLiteral("  ·  ") + tr("reading…"));
+        m_status->setToolTip({});
         refreshFiles();
     });
     connect(&m_style, &AppStyle::changed, this, &LibraryView::updateIcons);
@@ -462,7 +477,8 @@ void LibraryView::refreshFiles() {
     const auto& files = m_library.files();
     if (files.empty()) {
         m_files->clear();
-        m_pages->setCurrentIndex(1);
+        // "Empty" only once the folder has really been looked at, never while it loads.
+        m_pages->setCurrentIndex(m_library.isScanning() ? 0 : 1);
         m_model->setRows({});
         return;
     }
@@ -521,7 +537,7 @@ void LibraryView::refreshFiles() {
         const int games = static_cast<int>(files[i].pgn ? files[i].pgn->games.size() : 0);
         item->setText(0, info.completeBaseName());
         item->setToolTip(0, info.completeBaseName());
-        item->setText(1, QString::number(games));
+        item->setText(1, files[i].pgn ? QString::number(games) : QStringLiteral("…")); // reading
         item->setForeground(1, countColor);
         item->setTextAlignment(1, Qt::AlignRight | Qt::AlignVCenter);
         item->setData(0, kKindRole, kFile);
@@ -604,10 +620,12 @@ void LibraryView::selectFile(const QString& path) {
 }
 
 void LibraryView::showSelection() {
-    // A file lists its games; a folder lists every game in the files below it.
+    // A file lists its games; a folder lists the games of the files directly in it. Files in its
+    // subfolders show when that subfolder is opened.
     std::vector<GameListModel::Row> rows;
     const QTreeWidgetItem* item = m_files->currentItem();
     int fileCount = 0;
+    int folderCount = 0;
     if (item != nullptr) {
         const auto& files = m_library.files();
         const auto addFile = [&](const QTreeWidgetItem* fileItem) {
@@ -621,25 +639,30 @@ void LibraryView::showSelection() {
             }
             ++fileCount;
         };
-        const std::function<void(const QTreeWidgetItem*)> addAll =
-            [&](const QTreeWidgetItem* node) {
-                if (node->data(0, kKindRole).toInt() == kFile) {
-                    addFile(node);
+        if (item->data(0, kKindRole).toInt() == kFile) {
+            addFile(item);
+        } else {
+            for (int i = 0; i < item->childCount(); ++i) {
+                if (item->child(i)->data(0, kKindRole).toInt() == kFile) {
+                    addFile(item->child(i));
+                } else {
+                    ++folderCount;
                 }
-                for (int i = 0; i < node->childCount(); ++i) {
-                    addAll(node->child(i));
-                }
-            };
-        addAll(item);
+            }
+        }
         m_listTitle->setFullText(item->text(0));
     }
     const bool folder = item != nullptr && item->data(0, kKindRole).toInt() == kFolder;
     const int games = static_cast<int>(rows.size());
     m_model->setRows(std::move(rows));
-    m_listCount->setText(folder
-                             ? gamesText(games) + QStringLiteral("  ·  ") +
-                                   (fileCount == 1 ? tr("1 file") : tr("%1 files").arg(fileCount))
-                             : gamesText(games));
+    QStringList count{gamesText(games)};
+    if (folder) {
+        count << (fileCount == 1 ? tr("1 file") : tr("%1 files").arg(fileCount));
+        if (folderCount > 0) {
+            count << (folderCount == 1 ? tr("1 folder") : tr("%1 folders").arg(folderCount));
+        }
+    }
+    m_listCount->setText(count.join(QStringLiteral("  ·  ")));
     m_games->resizeColumnToContents(0);
     // Preview the first game straight away.
     if (m_filter->rowCount() > 0) {

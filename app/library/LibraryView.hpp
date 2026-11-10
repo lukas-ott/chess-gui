@@ -31,8 +31,8 @@ class Library;
 
 /// The Library tab, in three columns (a layout borrowed from ChessBase's database window, with
 /// the look of Lichess / chess.com / En Croissant):
-///   Files: the library folder as a tree; folders fold away, and selecting a folder lists every
-///          game inside it;
+///   Files: the library folder as a tree; folders fold away, and selecting a folder lists the
+///          games of the files directly in it (a subfolder's files show when it is opened);
 ///   Games: the selected file's or folder's games, with a search box;
 ///   Preview: the selected game on a small board you can step through.
 /// No paths are shown: the folder button shows the folder's name and picks another one.

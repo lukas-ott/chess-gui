@@ -2,8 +2,12 @@
 
 #include "board/BoardTheme.hpp"
 #include "board/BoardView.hpp"
+#include "board/EvalBar.hpp"
 #include "board/PieceSet.hpp"
 #include "document/PgnIo.hpp"
+#include "engine/EnginePanel.hpp"
+#include "engine/EngineRegistry.hpp"
+#include "engine/EnginesView.hpp"
 #include "library/Library.hpp"
 #include "library/LibraryView.hpp"
 #include "notation/NotationView.hpp"
@@ -13,6 +17,7 @@
 
 #include <QActionGroup>
 #include <QApplication>
+#include <QButtonGroup>
 #include <QClipboard>
 #include <QCloseEvent>
 #include <QColorDialog>
@@ -47,6 +52,7 @@
 #include <QVBoxLayout>
 
 #include <algorithm>
+#include <tuple>
 #include <utility>
 
 namespace chessgui::app {
@@ -67,6 +73,7 @@ constexpr auto kCustomTheme = "Custom"_L1;
 constexpr auto kAppearanceKey = "app/appearance"_L1;
 constexpr auto kContinuationsLearnedKey = "hints/continuationsLearned"_L1;
 constexpr auto kLibraryFolderKey = "library/folder"_L1;
+constexpr int kEvalBarGap = 6; ///< between the eval bar and the board
 
 constexpr int kStatusMs = 4000;
 
@@ -130,7 +137,8 @@ void whenReady(QObject* context, const QFuture<T>& future, const Done& done) {
 } // namespace
 
 MainWindow::MainWindow(AppStyle& style, QWidget* parent)
-    : QMainWindow(parent), m_style(style), m_library(new Library(this)) {
+    : QMainWindow(parent), m_style(style), m_library(new Library(this)),
+      m_engineRegistry(new EngineRegistry(this)) {
     setWindowTitle(QStringLiteral("ChessGui"));
     // Smaller than this and the tabs, the game list and the board no longer fit side by side.
     setMinimumSize(960, 620);
@@ -148,8 +156,7 @@ MainWindow::MainWindow(AppStyle& style, QWidget* parent)
     m_library->setFolder(QSettings().value(kLibraryFolderKey, Library::defaultFolder()).toString());
 
     addDocument(std::make_unique<GameDocument>()); // an empty board to play on right away
-    m_tabs->setCurrentIndex(0);                    // but start in the Library
-    onTabChanged(0);
+    showSection(Section::Library);                 // but start in the Library
 }
 
 MainWindow::~MainWindow() = default;
@@ -196,7 +203,11 @@ void MainWindow::buildFileMenu() {
         }
     });
     menu->addAction(tr("&Library"), QKeySequence(Qt::CTRL | Qt::Key_L), this,
-                    [this] { m_tabs->setCurrentIndex(0); });
+                    [this] { showSection(Section::Library); });
+    menu->addAction(tr("&Board"), QKeySequence(Qt::CTRL | Qt::Key_1), this,
+                    [this] { showSection(Section::Board); });
+    menu->addAction(tr("&Engines"), QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_E), this,
+                    [this] { showSection(Section::Engines); });
     menu->addSeparator();
     auto* saveAction = menu->addAction(tr("&Save"), QKeySequence::Save, this, &MainWindow::save);
     auto* saveAsAction =
@@ -268,9 +279,16 @@ void MainWindow::buildGameMenu() {
     menu->addSeparator();
     auto* commentAction = menu->addAction(tr("Edit &Comment"), QKeySequence(Qt::CTRL | Qt::Key_E),
                                           this, [this] { editComment(doc()->current); });
+    menu->addSeparator();
+    // Space, as on Lichess. Typing a space in the comment box still types a space: text fields
+    // claim the key before window shortcuts see it.
+    auto* engineAction =
+        menu->addAction(tr("Start / Stop &Engine"), this, [this] { m_enginePanel->toggle(); });
+    bindPlainKey(engineAction, Qt::Key_Space);
     m_gameActions.insert(m_gameActions.end(),
                          {m_backAction, m_forwardAction, m_startAction, m_endAction, promoteAction,
-                          mainLineAction, deleteFromAction, deleteVariationAction, commentAction});
+                          mainLineAction, deleteFromAction, deleteVariationAction, commentAction,
+                          engineAction});
 }
 
 void MainWindow::buildViewMenu(QMenu* menu) {
@@ -298,6 +316,7 @@ void MainWindow::buildViewMenu(QMenu* menu) {
     flipAction->setChecked(m_board->isFlipped());
     connect(flipAction, &QAction::toggled, this, [this](bool on) {
         m_board->setFlipped(on);
+        m_evalBar->setFlipped(on);
         QSettings().setValue(kFlippedKey, on);
     });
 
@@ -390,11 +409,7 @@ void MainWindow::buildLayout() {
     m_tabs->setTabsClosable(true);
     m_tabs->setFocusPolicy(Qt::NoFocus);
     m_tabs->setElideMode(Qt::ElideRight);
-    m_tabs->addTab(tr("Library"));
-    // The Library tab can't be closed.
-    m_tabs->setTabButton(0, QTabBar::LeftSide, nullptr);
-    m_tabs->setTabButton(0, QTabBar::RightSide, nullptr);
-    connect(m_tabs, &QTabBar::currentChanged, this, &MainWindow::onTabChanged);
+    connect(m_tabs, &QTabBar::currentChanged, this, &MainWindow::updatePage);
     connect(m_tabs, &QTabBar::tabCloseRequested, this, &MainWindow::closeTab);
 
     auto* newTab = new QToolButton;
@@ -418,15 +433,56 @@ void MainWindow::buildLayout() {
     connect(m_libraryView, &LibraryView::changeFolderRequested, this,
             &MainWindow::chooseLibraryFolder);
 
-    m_pages = new QStackedWidget;
+    m_enginesView = new EnginesView(*m_engineRegistry, m_style);
+    m_enginesView->setObjectName(QStringLiteral("enginesView"));
+
+    // The board page: the game tabs over the board and its panels.
+    auto* boardPage = new QWidget;
+    auto* boardLayout = new QVBoxLayout(boardPage);
+    boardLayout->setContentsMargins(0, 0, 0, 0);
+    boardLayout->setSpacing(0);
+    boardLayout->addWidget(tabRow);
+    boardLayout->addWidget(buildAnalysisPage(), 1);
+
+    m_pages = new QStackedWidget; // in Section order
+    m_pages->addWidget(boardPage);
     m_pages->addWidget(m_libraryView);
-    m_pages->addWidget(buildAnalysisPage());
+    m_pages->addWidget(m_enginesView);
+
+    // The sidebar: one icon per section, as in En Croissant.
+    auto* sidebar = new QFrame;
+    sidebar->setObjectName(QStringLiteral("sidebar"));
+    sidebar->setFixedWidth(52);
+    auto* sideLayout = new QVBoxLayout(sidebar);
+    sideLayout->setContentsMargins(0, 8, 0, 8);
+    sideLayout->setSpacing(4);
+    m_sidebar = new QButtonGroup(this);
+    for (const auto& [section, name, tip] :
+         {std::tuple{Section::Board, "sideBoard", tr("Board (⌘1)")},
+          std::tuple{Section::Library, "sideLibrary", tr("Library (⌘L)")},
+          std::tuple{Section::Engines, "sideEngines", tr("Engines (⇧⌘E)")}}) {
+        auto* button = new QToolButton;
+        button->setObjectName(QString::fromLatin1(name));
+        button->setProperty("role", "sideNav");
+        button->setToolTip(tip);
+        button->setCheckable(true);
+        button->setFocusPolicy(Qt::NoFocus);
+        button->setIconSize(QSize(22, 22));
+        button->setFixedSize(52, 44);
+        m_sidebar->addButton(button, static_cast<int>(section));
+        sideLayout->addWidget(button);
+    }
+    sideLayout->addStretch();
+    m_sidebar->setExclusive(true);
+    connect(m_sidebar, &QButtonGroup::idClicked, this,
+            [this](int id) { showSection(static_cast<Section>(id)); });
+    connect(m_sidebar, &QButtonGroup::buttonToggled, this, &MainWindow::updateSidebarIcons);
 
     auto* central = new QWidget;
-    auto* layout = new QVBoxLayout(central);
+    auto* layout = new QHBoxLayout(central);
     layout->setContentsMargins(0, 0, 0, 0);
     layout->setSpacing(0);
-    layout->addWidget(tabRow);
+    layout->addWidget(sidebar);
     layout->addWidget(m_pages, 1);
     setCentralWidget(central);
 
@@ -457,8 +513,18 @@ QWidget* MainWindow::buildAnalysisPage() {
     m_sideSplitter->setStretchFactor(0, 2);
     m_sideSplitter->setStretchFactor(1, 1);
 
+    // The board's column keeps room on its right for the eval bar, which placeEvalBar() puts
+    // exactly halfway between the board's squares and the moves panel. The room stays when the
+    // bar is hidden, so the board never shifts when engines start or stop.
+    auto* boardColumn = new QWidget;
+    auto* boardLayout = new QHBoxLayout(boardColumn);
+    boardLayout->setContentsMargins(0, 0, EvalBar::kWidth + kEvalBarGap, 0);
+    boardLayout->addWidget(m_board, 1);
+    m_board->installEventFilter(this);
+
     m_mainSplitter = new QSplitter(Qt::Horizontal);
-    m_mainSplitter->addWidget(m_board);
+    m_mainSplitter->setObjectName(QStringLiteral("mainSplitter"));
+    m_mainSplitter->addWidget(boardColumn);
     m_mainSplitter->addWidget(m_sideSplitter);
     m_mainSplitter->setChildrenCollapsible(false);
     // When the window grows, the board gets the extra room; the side column keeps its width.
@@ -470,6 +536,9 @@ QWidget* MainWindow::buildAnalysisPage() {
     auto* layout = new QVBoxLayout(page);
     layout->setContentsMargins(8, 4, 10, 10);
     layout->addWidget(m_mainSplitter);
+    m_evalBar = new EvalBar(page); // floats over the page; see placeEvalBar()
+    m_evalBar->hide();
+    connect(m_mainSplitter, &QSplitter::splitterMoved, this, &MainWindow::placeEvalBar);
     return page;
 }
 
@@ -544,10 +613,23 @@ QWidget* MainWindow::buildPanelsCard() {
     panels->setFocusPolicy(Qt::NoFocus);
     panels->tabBar()->setFocusPolicy(Qt::NoFocus);
     panels->tabBar()->setDrawBase(false);
-    panels->addTab(emptyState(tr("Engine analysis"),
-                              tr("Coming in M4: Stockfish or any UCI engine, several lines at "
-                                 "once, eval bar and best-move arrow.")),
-                   tr("Engine"));
+    m_enginePanel = new EnginePanel(*m_engineRegistry, m_style);
+    connect(m_enginePanel, &EnginePanel::manageEnginesRequested, this,
+            [this] { showSection(Section::Engines); });
+    m_enginePanel->setObjectName(QStringLiteral("enginePanel"));
+    connect(m_enginePanel, &EnginePanel::playRequested, this, &MainWindow::playMoves);
+    connect(m_enginePanel, &EnginePanel::analysisChanged, this,
+            [this](const std::vector<core::Move>& best, std::optional<engine::Score> score,
+                   bool running) {
+                m_board->setEngineMoves(best);
+                m_evalBar->setScore(score);
+                if (running && !m_evalBar->isVisible()) {
+                    placeEvalBar();
+                    m_evalBar->raise();
+                }
+                m_evalBar->setVisible(running); // its space is kept: nothing else moves
+            });
+    panels->addTab(m_enginePanel, tr("Engine"));
     panels->addTab(emptyState(tr("Opening explorer"),
                               tr("Coming in v2: what masters and Lichess players play here, "
                                  "and how it scores.")),
@@ -598,6 +680,7 @@ void MainWindow::restoreState() {
     }
     m_board->setPieceSet(settings.value(kPiecesKey).toString());
     m_board->setFlipped(settings.value(kFlippedKey, false).toBool());
+    m_evalBar->setFlipped(m_board->isFlipped());
     m_board->setShowCoordinates(settings.value(kCoordinatesKey, true).toBool());
     m_libraryView->setBoardLook(m_board->theme(), m_board->pieceSetName());
 }
@@ -609,6 +692,29 @@ void MainWindow::resizeEvent(QResizeEvent* event) {
     QMetaObject::invokeMethod(this, &MainWindow::fitBoardColumn, Qt::QueuedConnection);
 }
 
+bool MainWindow::eventFilter(QObject* watched, QEvent* event) {
+    if (watched == m_board && (event->type() == QEvent::Resize || event->type() == QEvent::Move)) {
+        placeEvalBar();
+    }
+    return QMainWindow::eventFilter(watched, event);
+}
+
+void MainWindow::placeEvalBar() {
+    // As tall as the board's squares, and centred in the gap between them and the moves panel.
+    const QWidget* page = m_evalBar->parentWidget();
+    const QRect a8 = m_board->squareRect(core::Square::at(0, 7));
+    const QRect h1 = m_board->squareRect(core::Square::at(7, 0));
+    const QRect squares =
+        QRect(m_board->mapTo(page, a8.topLeft()), m_board->mapTo(page, h1.bottomRight()))
+            .normalized()
+            .united(
+                QRect(m_board->mapTo(page, h1.topLeft()), m_board->mapTo(page, a8.bottomRight()))
+                    .normalized());
+    const int panel = m_sideSplitter->mapTo(page, QPoint(0, 0)).x();
+    const int x = squares.right() + 1 + ((panel - squares.right() - 1 - EvalBar::kWidth) / 2);
+    m_evalBar->setGeometry(x, squares.top(), EvalBar::kWidth, squares.height());
+}
+
 void MainWindow::fitBoardColumn() {
     // The board is square, so a board column wider than it is tall only adds empty space.
     // Give it exactly its height and the rest to the side column.
@@ -617,7 +723,9 @@ void MainWindow::fitBoardColumn() {
         return;
     }
     const int total = sizes[0] + sizes[1];
-    const int side = std::max(m_sideSplitter->minimumWidth(), total - m_mainSplitter->height());
+    const int bar = EvalBar::kWidth + kEvalBarGap; // always reserved, shown or not
+    const int side =
+        std::max(m_sideSplitter->minimumWidth(), total - m_mainSplitter->height() - bar);
     m_mainSplitter->setSizes({total - side, side});
     if (m_defaultSideSplit) {
         // The moves are what you read: they get two thirds of the height, the panels the rest.
@@ -625,6 +733,7 @@ void MainWindow::fitBoardColumn() {
         const int moves = (height * 2) / 3;
         m_sideSplitter->setSizes({moves, height - moves});
     }
+    placeEvalBar();
 }
 
 void MainWindow::closeEvent(QCloseEvent* event) {
@@ -652,7 +761,7 @@ void MainWindow::showAbout() {
 // ---- Documents and tabs ------------------------------------------------------------------------
 
 GameDocument* MainWindow::docAt(int tab) const {
-    if (tab <= 0) { // the Library
+    if (tab < 0) {
         return nullptr;
     }
     // Each game tab remembers its document's id (tabs can be closed in any order).
@@ -666,22 +775,20 @@ GameDocument* MainWindow::docAt(int tab) const {
 }
 
 GameDocument* MainWindow::doc() const {
-    return docAt(m_tabs->currentIndex());
+    // Only the board page has a current game (menus act on it); the other pages have none.
+    return m_section == Section::Board ? docAt(m_tabs->currentIndex()) : nullptr;
 }
 
 void MainWindow::addDocument(std::unique_ptr<GameDocument> document) {
     // An untouched empty game is replaced rather than left lying around in its own tab.
-    for (int tab = 1; tab < m_tabs->count(); ++tab) {
+    for (int tab = 0; tab < m_tabs->count(); ++tab) {
         if (GameDocument* existing = docAt(tab); existing->isPristine()) {
             const int id = existing->id; // the tab knows the document by this id: keep it
             *existing = std::move(*document);
             existing->id = id;
-            if (m_tabs->currentIndex() == tab) {
-                onTabChanged(tab);
-            } else {
-                m_tabs->setCurrentIndex(tab);
-            }
-            updateTitles();
+            const QSignalBlocker block(m_tabs); // updatePage() below shows it either way
+            m_tabs->setCurrentIndex(tab);
+            showSection(Section::Board);
             return;
         }
     }
@@ -698,7 +805,7 @@ void MainWindow::addDocument(std::unique_ptr<GameDocument> document) {
     const auto& c = m_style.colors();
     close->setIcon(makeIcon(IconKind::Close, c.muted, c.dimmed, 12));
     connect(close, &QToolButton::clicked, this, [this, close] {
-        for (int i = 1; i < m_tabs->count(); ++i) {
+        for (int i = 0; i < m_tabs->count(); ++i) {
             if (m_tabs->tabButton(i, QTabBar::RightSide) == close) {
                 closeTab(i);
                 return;
@@ -707,32 +814,57 @@ void MainWindow::addDocument(std::unique_ptr<GameDocument> document) {
     });
     m_tabs->setTabButton(tab, QTabBar::LeftSide, nullptr);
     m_tabs->setTabButton(tab, QTabBar::RightSide, close);
-    m_tabs->setCurrentIndex(tab);
-    updateTitles();
+    {
+        const QSignalBlocker block(m_tabs);
+        m_tabs->setCurrentIndex(tab);
+    }
+    showSection(Section::Board);
 }
 
-void MainWindow::onTabChanged(int tab) {
+void MainWindow::showSection(Section section) {
+    m_section = section;
+    if (auto* button = m_sidebar->button(static_cast<int>(section))) {
+        button->setChecked(true);
+    }
+    updatePage();
+}
+
+void MainWindow::updatePage() {
     m_notationRefresh.stop();
-    const GameDocument* d = docAt(tab);
+    const GameDocument* d = doc();
     for (auto* action : m_gameActions) {
         action->setEnabled(d != nullptr);
     }
-    // The arrow keys move through the game only on a game tab; in the Library they belong to
-    // the file tree and the game list.
+    // The arrow keys move through the game only on the board; in the Library they belong to the
+    // file tree and the game list.
     for (auto* key : m_gameKeys) {
         key->setEnabled(d != nullptr);
     }
+    m_pages->setCurrentIndex(static_cast<int>(m_section));
     if (d == nullptr) {
+        m_enginePanel->setPosition(std::nullopt); // nothing to analyse off the board
         m_notation->setGame(nullptr, Game::root());
         m_info->setGame(nullptr);
-        m_pages->setCurrentIndex(0);
     } else {
-        m_pages->setCurrentIndex(1);
         showDocument();
         m_board->setFocus();
         fitBoardColumn();
     }
     updateTitles();
+}
+
+void MainWindow::updateSidebarIcons() {
+    const auto& c = m_style.colors();
+    for (auto* button : m_sidebar->buttons()) {
+        const auto section = static_cast<Section>(m_sidebar->id(button));
+        IconKind kind = IconKind::Board;
+        if (section == Section::Library) {
+            kind = IconKind::Library;
+        } else if (section == Section::Engines) {
+            kind = IconKind::Engine;
+        }
+        button->setIcon(makeIcon(kind, button->isChecked() ? c.text : c.muted, c.dimmed, 22));
+    }
 }
 
 void MainWindow::closeTab(int tab) {
@@ -742,6 +874,9 @@ void MainWindow::closeTab(int tab) {
     }
     m_tabs->removeTab(tab); // switches tabs first, so nothing shows the game being removed
     std::erase_if(m_documents, [d](const auto& document) { return document.get() == d; });
+    if (m_tabs->count() == 0) {
+        addDocument(std::make_unique<GameDocument>()); // the board always has a game
+    }
     updateTitles();
 }
 
@@ -749,9 +884,10 @@ bool MainWindow::maybeSave(GameDocument& document) {
     if (!document.modified) {
         return true;
     }
-    for (int tab = 1; tab < m_tabs->count(); ++tab) {
+    for (int tab = 0; tab < m_tabs->count(); ++tab) {
         if (docAt(tab) == &document) {
             m_tabs->setCurrentIndex(tab); // show which game the question is about
+            showSection(Section::Board);
         }
     }
     const auto answer = QMessageBox::question(
@@ -869,7 +1005,7 @@ void MainWindow::setModified() {
 }
 
 void MainWindow::updateTitles() {
-    for (int tab = 1; tab < m_tabs->count(); ++tab) {
+    for (int tab = 0; tab < m_tabs->count(); ++tab) {
         if (const GameDocument* d = docAt(tab)) {
             // A long title (opening files have them) is cut off; hovering shows all of it.
             const QString title = d->title();
@@ -880,7 +1016,8 @@ void MainWindow::updateTitles() {
     }
     const GameDocument* d = doc();
     if (d == nullptr) {
-        setWindowTitle(tr("Library — ChessGui"));
+        setWindowTitle(m_section == Section::Engines ? tr("Engines — ChessGui")
+                                                     : tr("Library — ChessGui"));
         setWindowModified(false);
         return;
     }
@@ -947,11 +1084,12 @@ void MainWindow::openFile(const QString& path) {
 
 void MainWindow::openGame(const std::shared_ptr<PgnFile>& file, int index) {
     // Already open? Go there.
-    for (int tab = 1; tab < m_tabs->count(); ++tab) {
+    for (int tab = 0; tab < m_tabs->count(); ++tab) {
         const GameDocument* d = docAt(tab);
         if (d != nullptr && d->file && !file->path.isEmpty() && d->file->path == file->path &&
             d->gameIndex == index) {
             m_tabs->setCurrentIndex(tab);
+            showSection(Section::Board);
             return;
         }
     }
@@ -1141,6 +1279,7 @@ void MainWindow::showNode(NodeId id, bool animate) {
     m_choice = 0; // the main continuation, until the user picks another
     updateFork();
     updateNavigation();
+    m_enginePanel->setPosition(m_board->position());
 }
 
 void MainWindow::onMoveMade(core::Move move) {
@@ -1156,6 +1295,23 @@ void MainWindow::onMoveMade(core::Move move) {
         // Board first (spec: a move shows within one frame), then the notation, which can take
         // ~0.1 s to rebuild for a repertoire with thousands of commented positions.
         m_board->repaint();
+        refreshNotation();
+    }
+}
+
+void MainWindow::playMoves(const std::vector<core::Move>& moves) {
+    GameDocument* d = doc();
+    if (d == nullptr || moves.empty()) {
+        return;
+    }
+    const std::size_t before = d->game.nodeCount();
+    NodeId id = d->current;
+    for (const auto& move : moves) {
+        id = d->game.addMove(id, move);
+    }
+    showNode(id, moves.size() == 1);
+    if (d->game.nodeCount() != before) {
+        setModified();
         refreshNotation();
     }
 }
@@ -1283,7 +1439,8 @@ void MainWindow::updateNavigation() {
 
 void MainWindow::updateIcons() {
     const auto& c = m_style.colors();
-    for (int tab = 1; tab < m_tabs->count(); ++tab) {
+    updateSidebarIcons();
+    for (int tab = 0; tab < m_tabs->count(); ++tab) {
         if (auto* close = qobject_cast<QToolButton*>(m_tabs->tabButton(tab, QTabBar::RightSide))) {
             close->setIcon(makeIcon(IconKind::Close, c.muted, c.dimmed, 12));
         }

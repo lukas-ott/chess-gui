@@ -40,8 +40,8 @@ protected:
         ASSERT_TRUE(QTest::qWaitForWindowExposed(&window));
         board = window.findChild<BoardView*>();
         ASSERT_NE(board, nullptr);
-        // The app starts in the Library; the game tests work in the first game tab.
-        window.findChild<QTabBar*>(QStringLiteral("documentTabs"))->setCurrentIndex(1);
+        // The app starts in the Library; the game tests work on the board.
+        window.showSection(MainWindow::Section::Board);
     }
     void play(std::string_view san) {
         const Move move = board->position().parseSan(san).value();

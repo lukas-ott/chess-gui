@@ -43,6 +43,12 @@ public:
     /// The continuations to show as thin arrows at a branch point, and which one is chosen
     /// (-1 for none). Pass an empty list to hide them.
     void setCandidates(std::vector<core::Move> moves, int chosen);
+    /// The engine's suggestions, best first: the best as a blue arrow, the others thinner.
+    /// Pass an empty list to hide them.
+    void setEngineMoves(std::vector<core::Move> moves);
+    [[nodiscard]] const std::vector<core::Move>& engineMoves() const noexcept {
+        return m_engineMoves;
+    }
     [[nodiscard]] const core::Position& position() const noexcept { return m_position; }
     [[nodiscard]] const std::vector<core::Arrow>& arrows() const noexcept { return m_arrows; }
     [[nodiscard]] const std::vector<core::SquareMark>& squareMarks() const noexcept {
@@ -125,6 +131,7 @@ private:
     std::vector<core::SquareMark> m_marks;
     std::vector<core::Move> m_candidates;
     int m_candidateChoice = -1;
+    std::vector<core::Move> m_engineMoves;
 
     BoardTheme m_theme;
     PieceSet m_pieces;

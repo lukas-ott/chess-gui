@@ -36,6 +36,9 @@ const QColor kMoveHint(0, 0, 0, 38);
 const QColor kCandidate(0x4A, 0x4A, 0x4A, 80);
 const QColor kChosenCandidate(0x00, 0x30, 0x88, 135);
 const QColor kPromotionShade(0, 0, 0, 120);
+// Engine suggestions: the best move in Lichess's engine blue, the others fainter.
+const QColor kEngineBest(0x00, 0x30, 0x88, 150);
+const QColor kEngineOther(0x00, 0x30, 0x88, 70);
 
 // Lichess's drawing colours, semi-transparent so the pieces show through.
 constexpr int kDrawingAlpha = 158;
@@ -112,6 +115,16 @@ void BoardView::setPosition(const core::Position& position, std::optional<Move> 
         m_animation->start();
     }
     m_skipNextSlide = false;
+    update();
+}
+
+void BoardView::setEngineMoves(std::vector<core::Move> moves) {
+    if (moves.size() == m_engineMoves.size() &&
+        std::equal(moves.begin(), moves.end(), m_engineMoves.begin(),
+                   [](const Move& a, const Move& b) { return a.from == b.from && a.to == b.to; })) {
+        return; // nothing to repaint (the engine reports the same moves many times a second)
+    }
+    m_engineMoves = std::move(moves);
     update();
 }
 
@@ -614,6 +627,16 @@ void BoardView::paintArrow(QPainter& painter, Square from, Square to, const QCol
 
 void BoardView::paintDrawings(QPainter& painter) const {
     const qreal size = m_geometry.squareSize();
+    // The engine's moves underneath everything else; the best one last, so it's on top.
+    for (std::size_t i = m_engineMoves.size(); i > 1; --i) {
+        const Move& move = m_engineMoves[i - 1];
+        if (move.from != m_engineMoves.front().from || move.to != m_engineMoves.front().to) {
+            paintArrow(painter, move.from, move.to, kEngineOther, 0.6);
+        }
+    }
+    if (!m_engineMoves.empty()) {
+        paintArrow(painter, m_engineMoves.front().from, m_engineMoves.front().to, kEngineBest);
+    }
     // Candidate continuations at a branch point: thin pale arrows, the chosen one in blue
     // (as on Lichess). Drawn first, so the user's own drawings stay on top.
     for (std::size_t i = 0; i < m_candidates.size(); ++i) {
