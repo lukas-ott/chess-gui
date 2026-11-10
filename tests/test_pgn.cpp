@@ -183,7 +183,7 @@ INSTANTIATE_TEST_SUITE_P(
                       BadPgn{"VariationFirst", "( 1. e4 ) *", "must follow the move"},
                       BadPgn{"BadFen", "[FEN \"8/8/8 w - -\"]\n\n*", "FEN header is invalid"},
                       BadPgn{"NullMove", "1. e4 -- 2. d4 *", "null moves"}),
-    [](const auto& info) { return std::string(info.param.name); });
+    [](const auto& testCase) { return std::string(testCase.param.name); });
 
 // ---- Index -------------------------------------------------------------------------------------
 
