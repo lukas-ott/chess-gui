@@ -1,10 +1,10 @@
-#include "chessgui/core/types.hpp"
+#include "kiebitz/core/types.hpp"
 
 #include <gtest/gtest.h>
 
 namespace {
 
-using namespace chessgui::core;
+using namespace kiebitz::core;
 
 TEST(Square, ParseAndName) {
     const auto e4 = Square::parse("e4");

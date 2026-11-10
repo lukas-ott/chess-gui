@@ -1,4 +1,4 @@
-#include "chessgui/core/game.hpp"
+#include "kiebitz/core/game.hpp"
 
 #include <gtest/gtest.h>
 
@@ -7,7 +7,7 @@
 
 namespace {
 
-using namespace chessgui::core;
+using namespace kiebitz::core;
 
 /// Adds SAN moves after `parent` and returns the last node; fails the test on a bad move.
 NodeId line(Game& game, NodeId parent, std::initializer_list<std::string_view> sans) {

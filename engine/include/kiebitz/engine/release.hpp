@@ -7,7 +7,7 @@
 #include <vector>
 
 /// Choosing which file of a Stockfish release to download (the release lists one per platform).
-namespace chessgui::engine {
+namespace kiebitz::engine {
 
 enum class Cpu : std::uint8_t { Arm64, X86_64 };
 
@@ -30,4 +30,4 @@ enum class Cpu : std::uint8_t { Arm64, X86_64 };
 /// The hex SHA-256 from a GitHub asset digest ("sha256:ab12..."), or nullopt for anything else.
 [[nodiscard]] std::optional<std::string> sha256FromDigest(std::string_view digest);
 
-} // namespace chessgui::engine
+} // namespace kiebitz::engine

@@ -5,7 +5,7 @@
 #include <QPainterPath>
 #include <QPixmap>
 
-namespace chessgui::app {
+namespace kiebitz::app {
 namespace {
 
 /// Draws the icon on a 16×16 grid, scaled to `size`.
@@ -134,4 +134,4 @@ QIcon makeIcon(IconKind kind, const QColor& color, const QColor& disabledColor, 
     return icon;
 }
 
-} // namespace chessgui::app
+} // namespace kiebitz::app

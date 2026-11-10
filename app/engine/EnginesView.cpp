@@ -5,12 +5,15 @@
 #include "StockfishDownload.hpp"
 #include "style/AppStyle.hpp"
 #include "style/Icons.hpp"
+#include "style/Layout.hpp"
+#include "style/PageHeader.hpp"
+#include "widgets/EmptyState.hpp"
+#include "widgets/Stepper.hpp"
 
 #include <QDesktopServices>
 #include <QDir>
 #include <QFileDialog>
 #include <QFileInfo>
-#include <QFormLayout>
 #include <QFrame>
 #include <QGridLayout>
 #include <QHBoxLayout>
@@ -21,7 +24,6 @@
 #include <QProgressBar>
 #include <QPushButton>
 #include <QScrollArea>
-#include <QSpinBox>
 #include <QStackedWidget>
 #include <QStyle>
 #include <QThread>
@@ -29,7 +31,7 @@
 #include <QUrl>
 #include <QVBoxLayout>
 
-namespace chessgui::app {
+namespace kiebitz::app {
 namespace {
 
 QLabel* label(const QString& text, const char* role) {
@@ -58,6 +60,17 @@ QWidget* stat(const QString& title, const QString& value) {
     layout->setSpacing(2);
     layout->addWidget(label(title, "statTitle"));
     layout->addWidget(label(value, "statValue"));
+    return widget;
+}
+
+/// A small title over a control, like the cards' stats.
+QWidget* setting(const QString& title, Stepper* stepper) {
+    auto* widget = new QWidget;
+    auto* layout = new QVBoxLayout(widget);
+    layout->setContentsMargins(0, 0, 0, 0);
+    layout->setSpacing(6);
+    layout->addWidget(label(title, "statTitle"));
+    layout->addWidget(stepper, 0, Qt::AlignLeft);
     return widget;
 }
 
@@ -124,31 +137,28 @@ private:
 EnginesView::EnginesView(EngineRegistry& registry, const AppStyle& style, QWidget* parent)
     : QWidget(parent), m_registry(registry), m_style(style) {
     auto* layout = new QVBoxLayout(this);
-    layout->setContentsMargins(20, 16, 20, 20);
-    layout->setSpacing(14);
+    layout->setContentsMargins(layout::kPage);
+    layout->setSpacing(layout::kPageSpacing);
 
-    // ---- Header: title and the engines folder ---------------------------------------------------
-    auto* header = new QHBoxLayout;
-    header->setSpacing(10);
-    header->addWidget(label(tr("Engines"), "pageTitle"));
-    m_folderButton = new QToolButton;
+    // ---- Header: title and the engines folder (the same button as the Library's) ---------------
+    auto* header = new PageHeader(tr("Engines"));
+    m_folderButton = new QPushButton(tr("Engine Folder"));
     m_folderButton->setObjectName(QStringLiteral("enginesFolder"));
+    m_folderButton->setProperty("role", "secondary");
     m_folderButton->setToolTip(tr("Show the downloaded engines in Finder"));
-    m_folderButton->setIconSize(QSize(20, 20));
-    connect(m_folderButton, &QToolButton::clicked, this, [] {
+    connect(m_folderButton, &QPushButton::clicked, this, [] {
         QDir().mkpath(engines::downloadFolder());
         QDesktopServices::openUrl(QUrl::fromLocalFile(engines::downloadFolder()));
     });
-    header->addWidget(m_folderButton, 0, Qt::AlignVCenter);
-    header->addStretch();
-    layout->addLayout(header);
+    header->addAction(m_folderButton);
+    layout->addWidget(header);
 
     // ---- Left: search, +, cards
     // -------------------------------------------------------------------
     auto* list = card();
     auto* listLayout = new QVBoxLayout(list);
-    listLayout->setContentsMargins(14, 14, 14, 14);
-    listLayout->setSpacing(12);
+    listLayout->setContentsMargins(layout::kCard);
+    listLayout->setSpacing(layout::kCardSpacing);
     auto* tools = new QHBoxLayout;
     tools->setSpacing(8);
     m_search = new QLineEdit;
@@ -157,7 +167,10 @@ EnginesView::EnginesView(EngineRegistry& registry, const AppStyle& style, QWidge
     connect(m_search, &QLineEdit::textChanged, this, &EnginesView::rebuildCards);
     m_addButton = new QToolButton;
     m_addButton->setObjectName(QStringLiteral("addEngine"));
+    m_addButton->setProperty("role", "icon");
+    m_addButton->setProperty("outlined", true);
     m_addButton->setToolTip(tr("Add an engine"));
+    m_addButton->setFixedSize(layout::kControlHeight, layout::kControlHeight);
     m_addButton->setIconSize(QSize(16, 16));
     m_addButton->setPopupMode(QToolButton::InstantPopup);
     auto* menu = new QMenu(m_addButton);
@@ -220,22 +233,11 @@ EnginesView::EnginesView(EngineRegistry& registry, const AppStyle& style, QWidge
     // ---- Right: details -------------------------------------------------------------------------
     auto* details = card();
     auto* detailsLayout = new QVBoxLayout(details);
-    detailsLayout->setContentsMargins(20, 18, 20, 18);
+    detailsLayout->setContentsMargins(layout::kCard);
     m_details = new QStackedWidget;
     detailsLayout->addWidget(m_details);
 
-    auto* empty = new QWidget;
-    auto* emptyLayout = new QVBoxLayout(empty);
-    emptyLayout->addStretch();
-    m_emptyIcon = new QLabel;
-    m_emptyIcon->setObjectName(QStringLiteral("emptyEngineIcon"));
-    m_emptyIcon->setAlignment(Qt::AlignCenter);
-    m_emptyIcon->setFixedSize(64, 64);
-    emptyLayout->addWidget(m_emptyIcon, 0, Qt::AlignHCenter);
-    auto* emptyText = label(tr("No engine selected"), "emptyTitle");
-    emptyText->setAlignment(Qt::AlignCenter);
-    emptyLayout->addWidget(emptyText);
-    emptyLayout->addStretch();
+    auto* empty = new EmptyState(IconKind::Engine, tr("No engine selected"), {}, m_style);
     m_details->addWidget(empty);
 
     auto* page = new QWidget;
@@ -260,22 +262,22 @@ EnginesView::EnginesView(EngineRegistry& registry, const AppStyle& style, QWidge
     m_detailAbout->setWordWrap(true);
     pageLayout->addWidget(m_detailAbout);
 
+    // Settings laid out like the card's stats: a small title over each value.
     m_settings = new QWidget;
-    auto* form = new QFormLayout(m_settings);
-    form->setContentsMargins(0, 0, 0, 0);
-    form->setHorizontalSpacing(16);
-    form->setVerticalSpacing(10);
-    form->setFieldGrowthPolicy(QFormLayout::FieldsStayAtSizeHint);
-    m_threads = new QSpinBox;
+    auto* settingsRow = new QHBoxLayout(m_settings);
+    settingsRow->setContentsMargins(0, 0, 0, 0);
+    settingsRow->setSpacing(24);
+    m_threads = new Stepper;
     m_threads->setObjectName(QStringLiteral("engineThreads"));
     m_threads->setRange(1, std::max(1, QThread::idealThreadCount()));
-    m_hash = new QSpinBox;
+    m_hash = new Stepper;
     m_hash->setObjectName(QStringLiteral("engineHash"));
     m_hash->setRange(16, 16384);
     m_hash->setSingleStep(64);
     m_hash->setSuffix(tr(" MB"));
-    form->addRow(label(tr("THREADS"), "statTitle"), m_threads);
-    form->addRow(label(tr("HASH"), "statTitle"), m_hash);
+    settingsRow->addWidget(setting(tr("THREADS"), m_threads));
+    settingsRow->addWidget(setting(tr("HASH"), m_hash));
+    settingsRow->addStretch();
     const auto save = [this] {
         if (const EngineEntry* current = m_registry.find(m_selected)) {
             EngineEntry entry = *current;
@@ -286,11 +288,9 @@ EnginesView::EnginesView(EngineRegistry& registry, const AppStyle& style, QWidge
             }
         }
     };
-    // Saved (and a running engine restarted with it) once a value is entered, not per keystroke.
-    m_threads->setKeyboardTracking(false);
-    m_hash->setKeyboardTracking(false);
-    connect(m_threads, &QSpinBox::valueChanged, this, save);
-    connect(m_hash, &QSpinBox::valueChanged, this, save);
+    // Saved (and a running engine restarted with it) once a value is chosen, not per keystroke.
+    connect(m_threads, &Stepper::valueChanged, this, save);
+    connect(m_hash, &Stepper::valueChanged, this, save);
     pageLayout->addWidget(m_settings);
 
     auto* buttons = new QHBoxLayout;
@@ -309,7 +309,7 @@ EnginesView::EnginesView(EngineRegistry& registry, const AppStyle& style, QWidge
     m_details->addWidget(page);
 
     auto* columns = new QHBoxLayout;
-    columns->setSpacing(14);
+    columns->setSpacing(layout::kPageSpacing);
     columns->addWidget(list, 1);
     columns->addWidget(details, 1);
     layout->addLayout(columns, 1);
@@ -430,23 +430,23 @@ void EnginesView::showDetails() {
     m_remove->setVisible(!cloud);
     if (cloud) {
         m_detailSubtitle->setText(QStringLiteral("lichess.org"));
+        m_detailAbout->setVisible(true);
         m_detailAbout->setText(tr("Deep evaluations Lichess has already computed, for positions "
                                   "its users have analysed. Needs an internet connection."));
         return;
     }
-    m_detailSubtitle->setText(QFileInfo(entry->path).fileName());
-    m_detailAbout->setText(tr("Version %1").arg(versionOf(entry->name)));
-    const QSignalBlocker blockThreads(m_threads);
-    const QSignalBlocker blockHash(m_hash);
+    m_detailSubtitle->setText(
+        tr("Version %1  ·  %2").arg(versionOf(entry->name), QFileInfo(entry->path).fileName()));
+    m_detailAbout->clear();
+    m_detailAbout->setVisible(false);
     m_threads->setValue(entry->threads);
     m_hash->setValue(entry->hashMb);
 }
 
 void EnginesView::updateIcons() {
     const auto& c = m_style.colors();
-    m_folderButton->setIcon(makeIcon(IconKind::Folder, c.muted, c.dimmed, 20));
+    m_folderButton->setIcon(makeIcon(IconKind::Folder, c.text, c.dimmed));
     m_addButton->setIcon(makeIcon(IconKind::Plus, c.text, c.dimmed, 16));
-    m_emptyIcon->setPixmap(makeIcon(IconKind::Engine, c.muted, c.dimmed, 30).pixmap(30, 30));
 }
 
 void EnginesView::startDownload() {
@@ -472,4 +472,4 @@ void EnginesView::showError(const QString& message) {
     m_error->show();
 }
 
-} // namespace chessgui::app
+} // namespace kiebitz::app

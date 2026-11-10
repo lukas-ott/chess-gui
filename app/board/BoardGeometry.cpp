@@ -2,7 +2,7 @@
 
 #include <algorithm>
 
-namespace chessgui::app {
+namespace kiebitz::app {
 
 BoardGeometry::BoardGeometry(QSize widgetSize, int margin, bool flipped) : m_flipped(flipped) {
     const int available = std::min(widgetSize.width(), widgetSize.height()) - (2 * margin);
@@ -40,4 +40,4 @@ std::optional<core::Square> BoardGeometry::squareAt(QPoint point) const noexcept
     return core::Square::at(file, rank);
 }
 
-} // namespace chessgui::app
+} // namespace kiebitz::app

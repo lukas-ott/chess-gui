@@ -1,10 +1,10 @@
-#include "chessgui/core/annotations.hpp"
+#include "kiebitz/core/annotations.hpp"
 
 #include <array>
 #include <initializer_list>
 #include <span>
 
-namespace chessgui::core {
+namespace kiebitz::core {
 namespace {
 
 std::optional<MarkColor> colorFromLetter(char c) {
@@ -206,4 +206,4 @@ std::optional<std::uint8_t> nagFromSymbol(std::string_view symbol) noexcept {
     return std::nullopt;
 }
 
-} // namespace chessgui::core
+} // namespace kiebitz::core

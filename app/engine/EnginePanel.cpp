@@ -5,19 +5,19 @@
 #include "style/AppStyle.hpp"
 #include "style/Icons.hpp"
 
+#include <QButtonGroup>
 #include <QFrame>
 #include <QHBoxLayout>
 #include <QLabel>
 #include <QPushButton>
 #include <QScrollArea>
 #include <QSettings>
-#include <QSpinBox>
 #include <QToolButton>
 #include <QVBoxLayout>
 
 #include <algorithm>
 
-namespace chessgui::app {
+namespace kiebitz::app {
 namespace {
 
 constexpr auto kLinesKey = "engine/lines";
@@ -57,22 +57,41 @@ EnginePanel::EnginePanel(EngineRegistry& registry, const AppStyle& style, QWidge
     getOne->setCursor(Qt::PointingHandCursor);
     connect(getOne, &QPushButton::clicked, this, &EnginePanel::manageEnginesRequested);
     noEngineLayout->addWidget(getOne);
-    m_lineCount = new QSpinBox;
-    m_lineCount->setObjectName(QStringLiteral("engineLines"));
-    m_lineCount->setRange(1, EngineSection::kMaxLines);
-    m_lineCount->setValue(m_multiPv);
-    m_lineCount->setSuffix(tr(" lines"));
-    m_lineCount->setFocusPolicy(Qt::NoFocus);
-    connect(m_lineCount, &QSpinBox::valueChanged, this, &EnginePanel::setLineCount);
+    // How many lines each engine shows: a segmented control, 1 to 5.
+    auto* lines = new QWidget;
+    lines->setObjectName(QStringLiteral("engineLines"));
+    lines->setProperty("role", "segmented");
+    lines->setToolTip(tr("Lines per engine"));
+    auto* linesLayout = new QHBoxLayout(lines);
+    linesLayout->setContentsMargins(2, 2, 2, 2);
+    linesLayout->setSpacing(2);
+    m_lineButtons = new QButtonGroup(this);
+    m_lineButtons->setExclusive(true);
+    for (int n = 1; n <= EngineSection::kMaxLines; ++n) {
+        auto* segment = new QPushButton(QString::number(n));
+        segment->setObjectName(QStringLiteral("lines%1").arg(n));
+        segment->setProperty("role", "segment");
+        segment->setCheckable(true);
+        segment->setFocusPolicy(Qt::NoFocus);
+        segment->setChecked(n == m_multiPv);
+        m_lineButtons->addButton(segment, n);
+        linesLayout->addWidget(segment);
+    }
+    connect(m_lineButtons, &QButtonGroup::idClicked, this, &EnginePanel::setLineCount);
+    auto* linesLabel = new QLabel(tr("Lines"));
+    linesLabel->setProperty("role", "engineStatus");
     m_manage = new QToolButton;
     m_manage->setObjectName(QStringLiteral("manageEngines"));
+    m_manage->setProperty("role", "icon");
+    m_manage->setFixedSize(32, 32);
     m_manage->setToolTip(tr("Engines"));
     m_manage->setFocusPolicy(Qt::NoFocus);
     m_manage->setIconSize(QSize(18, 18));
     connect(m_manage, &QToolButton::clicked, this, &EnginePanel::manageEnginesRequested);
     header->addWidget(m_noEngine);
     header->addStretch();
-    header->addWidget(m_lineCount);
+    header->addWidget(linesLabel);
+    header->addWidget(lines);
     header->addWidget(m_manage);
     layout->addLayout(header);
 
@@ -215,9 +234,8 @@ const std::vector<engine::Info>& EnginePanel::lines() const {
 void EnginePanel::setLineCount(int lines) {
     lines = std::clamp(lines, 1, EngineSection::kMaxLines);
     m_multiPv = lines;
-    {
-        const QSignalBlocker block(m_lineCount);
-        m_lineCount->setValue(lines);
+    if (auto* segment = m_lineButtons->button(lines)) {
+        segment->setChecked(true);
     }
     QSettings().setValue(QString::fromLatin1(kLinesKey), lines);
     for (auto* s : m_sections) {
@@ -252,4 +270,4 @@ void EnginePanel::updateIcons() {
     m_manage->setIcon(makeIcon(IconKind::Engine, c.muted, c.dimmed, 18));
 }
 
-} // namespace chessgui::app
+} // namespace kiebitz::app

@@ -1,6 +1,6 @@
 #pragma once
 
-#include "chessgui/core/game.hpp"
+#include "kiebitz/core/game.hpp"
 
 #include <QTextBrowser>
 #include <QTextCharFormat>
@@ -8,7 +8,7 @@
 #include <cstdint>
 #include <unordered_map>
 
-namespace chessgui::app {
+namespace kiebitz::app {
 
 class AppStyle;
 
@@ -30,14 +30,14 @@ public:
     void setCurrent(core::NodeId current);
 
 signals:
-    void nodeActivated(chessgui::core::NodeId id);
-    void promoteRequested(chessgui::core::NodeId id);
-    void makeMainLineRequested(chessgui::core::NodeId id);
-    void deleteFromRequested(chessgui::core::NodeId id);
-    void deleteVariationRequested(chessgui::core::NodeId id);
-    void nagToggled(chessgui::core::NodeId id, std::uint8_t nag);
-    void nagsCleared(chessgui::core::NodeId id);
-    void commentEditRequested(chessgui::core::NodeId id);
+    void nodeActivated(kiebitz::core::NodeId id);
+    void promoteRequested(kiebitz::core::NodeId id);
+    void makeMainLineRequested(kiebitz::core::NodeId id);
+    void deleteFromRequested(kiebitz::core::NodeId id);
+    void deleteVariationRequested(kiebitz::core::NodeId id);
+    void nagToggled(kiebitz::core::NodeId id, std::uint8_t nag);
+    void nagsCleared(kiebitz::core::NodeId id);
+    void commentEditRequested(kiebitz::core::NodeId id);
 
 protected:
     void contextMenuEvent(QContextMenuEvent* event) override;
@@ -61,4 +61,4 @@ private:
     QTextCharFormat m_savedFormat; ///< the highlighted move's format before highlighting
 };
 
-} // namespace chessgui::app
+} // namespace kiebitz::app

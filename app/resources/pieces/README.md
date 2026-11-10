@@ -1,8 +1,8 @@
 # Piece sets
 
-SVG piece sets shipped with ChessGui, taken unchanged from the Lichess repository
+SVG piece sets shipped with Kiebitz, taken unchanged from the Lichess repository
 (https://github.com/lichess-org/lila, `public/piece/<set>/`), where their licences are listed in
-`COPYING.md`. All are compatible with ChessGui's GPL-3.0 licence.
+`COPYING.md`. All are compatible with Kiebitz's GPL-3.0 licence.
 
 | Set | Author | Licence |
 | --- | --- | --- |

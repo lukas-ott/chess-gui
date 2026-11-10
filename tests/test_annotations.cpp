@@ -1,10 +1,10 @@
-#include "chessgui/core/annotations.hpp"
+#include "kiebitz/core/annotations.hpp"
 
 #include <gtest/gtest.h>
 
 namespace {
 
-using namespace chessgui::core;
+using namespace kiebitz::core;
 
 Square sq(std::string_view name) {
     return Square::parse(name).value();

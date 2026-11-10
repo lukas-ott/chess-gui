@@ -9,7 +9,7 @@
 #include <algorithm>
 #include <utility>
 
-namespace chessgui::app {
+namespace kiebitz::app {
 namespace {
 
 constexpr auto kListKey = "engines/list";
@@ -72,4 +72,4 @@ QString downloadFolder() {
 }
 
 } // namespace engines
-} // namespace chessgui::app
+} // namespace kiebitz::app

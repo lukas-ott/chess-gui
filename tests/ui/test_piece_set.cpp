@@ -5,8 +5,8 @@
 
 namespace {
 
-using chessgui::app::PieceSet;
-using namespace chessgui::core;
+using kiebitz::app::PieceSet;
+using namespace kiebitz::core;
 
 /// Every bundled set has all 12 pieces, and they actually draw something.
 TEST(PieceSet, AllSetsRenderAllPieces) {

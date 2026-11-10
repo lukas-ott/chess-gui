@@ -19,9 +19,9 @@
 
 namespace {
 
-using chessgui::app::BoardView;
-using chessgui::app::MainWindow;
-using namespace chessgui::core;
+using kiebitz::app::BoardView;
+using kiebitz::app::MainWindow;
+using namespace kiebitz::core;
 
 /// Finds a menu action by its text (without the & mnemonic).
 QAction* action(MainWindow& window, const QString& text) {
@@ -49,7 +49,7 @@ protected:
     }
     [[nodiscard]] std::string fen() const { return board->position().fen(); }
 
-    chessgui::app::AppStyle style{*qApp};
+    kiebitz::app::AppStyle style{*qApp};
     MainWindow window{style};
     BoardView* board = nullptr;
 };
@@ -144,7 +144,7 @@ TEST_F(MainWindowTest, ClickingAMoveInTheListGoesThere) {
     EXPECT_EQ(fen(), "rnbqkbnr/pppppppp/8/8/3P4/8/PPP1PPPP/RNBQKBNR b KQkq - 0 1");
 }
 
-/// Saves the whole window in dark and light when CHESSGUI_SNAPSHOT_DIR is set.
+/// Saves the whole window in dark and light when KIEBITZ_SNAPSHOT_DIR is set.
 TEST_F(MainWindowTest, Snapshots) {
     window.resize(1200, 760);
     for (const char* san : {"e4", "e5", "Nf3", "Nc6", "Bb5", "a6", "Ba4", "Nf6", "O-O", "Be7"}) {
@@ -163,19 +163,19 @@ TEST_F(MainWindowTest, Snapshots) {
         {});
     QTest::keyClick(&window, Qt::Key_Left); // back to 4... Nf6: a branch point (5. O-O or 5. d3)
     QTest::keyClick(&window, Qt::Key_Down); // choose 5. d3
-    const QString dir = qEnvironmentVariable("CHESSGUI_SNAPSHOT_DIR");
+    const QString dir = qEnvironmentVariable("KIEBITZ_SNAPSHOT_DIR");
     for (const auto appearance :
-         {chessgui::app::AppStyle::Appearance::Dark, chessgui::app::AppStyle::Appearance::Light}) {
+         {kiebitz::app::AppStyle::Appearance::Dark, kiebitz::app::AppStyle::Appearance::Light}) {
         style.setAppearance(appearance);
         QApplication::processEvents();
         const QImage image = window.grab().toImage();
         EXPECT_FALSE(image.isNull());
         if (!dir.isEmpty()) {
-            image.save(QDir(dir).filePath(QStringLiteral("window-%1.png")
-                                              .arg(chessgui::app::AppStyle::toString(appearance))));
+            image.save(QDir(dir).filePath(
+                QStringLiteral("window-%1.png").arg(kiebitz::app::AppStyle::toString(appearance))));
         }
     }
-    style.setAppearance(chessgui::app::AppStyle::Appearance::System);
+    style.setAppearance(kiebitz::app::AppStyle::Appearance::System);
 }
 
 /// The keys themselves, not just the menu items: on macOS plain-key menu shortcuts never fire,

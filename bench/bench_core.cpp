@@ -1,9 +1,9 @@
 // Speed of the operations that decide how fast PGN files and repertoires open (M3, M5):
 // reading FEN, generating moves, writing and reading SAN, and building a game tree.
-// Run from the release preset:  ./build/release/bench/chessgui_bench
+// Run from the release preset:  ./build/release/bench/kiebitz_bench
 
-#include "chessgui/core/game.hpp"
-#include "chessgui/core/position.hpp"
+#include "kiebitz/core/game.hpp"
+#include "kiebitz/core/position.hpp"
 
 #include <benchmark/benchmark.h>
 
@@ -14,7 +14,7 @@
 
 namespace {
 
-using namespace chessgui::core;
+using namespace kiebitz::core;
 
 /// A fixed, reproducible game of up to 120 plies, picked by a simple pseudo-random sequence.
 /// Real games would do too; this avoids typing one in by hand.

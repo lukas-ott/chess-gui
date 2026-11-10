@@ -1,6 +1,6 @@
 #pragma once
 
-#include "chessgui/core/types.hpp"
+#include "kiebitz/core/types.hpp"
 
 #include <QPixmap>
 #include <QString>
@@ -11,7 +11,7 @@
 
 class QSvgRenderer;
 
-namespace chessgui::app {
+namespace kiebitz::app {
 
 /// One set of 12 SVG pieces, rendered to pixmaps on demand.
 ///
@@ -46,4 +46,4 @@ private:
     qreal m_cacheRatio = 0;
 };
 
-} // namespace chessgui::app
+} // namespace kiebitz::app

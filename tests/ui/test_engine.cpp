@@ -23,11 +23,11 @@
 #include <QFrame>
 #include <QImage>
 #include <QLabel>
+#include <QLineEdit>
 #include <QProcess>
 #include <QPushButton>
 #include <QSettings>
 #include <QSignalSpy>
-#include <QSpinBox>
 #include <QSplitter>
 #include <QStackedWidget>
 #include <QTabBar>
@@ -40,16 +40,16 @@
 
 namespace {
 
-using chessgui::app::AppStyle;
-using chessgui::app::BoardView;
-using chessgui::app::CloudEval;
-using chessgui::app::EngineEntry;
-using chessgui::app::EnginePanel;
-using chessgui::app::EngineSection;
-using chessgui::app::EvalBar;
-using chessgui::app::MainWindow;
-using chessgui::app::StockfishDownload;
-using namespace chessgui;
+using kiebitz::app::AppStyle;
+using kiebitz::app::BoardView;
+using kiebitz::app::CloudEval;
+using kiebitz::app::EngineEntry;
+using kiebitz::app::EnginePanel;
+using kiebitz::app::EngineSection;
+using kiebitz::app::EvalBar;
+using kiebitz::app::MainWindow;
+using kiebitz::app::StockfishDownload;
+using namespace kiebitz;
 
 /// The name the fake engine is added under.
 QString fake() {
@@ -59,7 +59,7 @@ QString fake() {
 EngineEntry fakeEngine(const QString& name = fake()) {
     EngineEntry entry;
     entry.name = name;
-    entry.path = QStringLiteral(CHESSGUI_FAKE_ENGINE);
+    entry.path = QStringLiteral(KIEBITZ_FAKE_ENGINE);
     entry.threads = 1;
     entry.hashMb = 16;
     return entry;
@@ -141,8 +141,8 @@ TEST_F(EngineTest, WithoutAnEngineTheCloudIsThereAndStockfishOnOffer) {
     ASSERT_NE(panel->section(fake()), nullptr);
     EXPECT_FALSE(panel->isRunning());
     EXPECT_FALSE(noEngine->isVisibleTo(panel));
-    ASSERT_EQ(chessgui::app::engines::load().size(), 1U);
-    EXPECT_EQ(chessgui::app::engines::load().front().name, fake());
+    ASSERT_EQ(kiebitz::app::engines::load().size(), 1U);
+    EXPECT_EQ(kiebitz::app::engines::load().front().name, fake());
 }
 
 TEST_F(EngineTest, TheEnginesPageShowsCardsAndDetails) {
@@ -151,7 +151,7 @@ TEST_F(EngineTest, TheEnginesPageShowsCardsAndDetails) {
     window->setWindowState(Qt::WindowNoState);
     window->resize(1280, 800);
     QApplication::processEvents();
-    auto* view = window->findChild<chessgui::app::EnginesView*>(QStringLiteral("enginesView"));
+    auto* view = window->findChild<kiebitz::app::EnginesView*>(QStringLiteral("enginesView"));
     ASSERT_NE(view, nullptr);
     const auto cardFor = [&](const QString& name) -> QFrame* {
         for (auto* card : view->findChildren<QFrame*>(QStringLiteral("engineCard"))) {
@@ -180,11 +180,14 @@ TEST_F(EngineTest, TheEnginesPageShowsCardsAndDetails) {
     EXPECT_EQ(view->selected(), fake());
 
     // Settings change in the details and are kept.
-    auto* threads = view->findChild<QSpinBox*>(QStringLiteral("engineThreads"));
+    // Threads: one step up with the stepper's + button (it starts at 1).
+    auto* threads = view->findChild<QWidget*>(QStringLiteral("engineThreads"));
     ASSERT_NE(threads, nullptr);
-    threads->setValue(2);
+    auto* up = threads->findChild<QPushButton*>(QStringLiteral("stepUp"));
+    ASSERT_NE(up, nullptr);
+    QTest::mouseClick(up, Qt::LeftButton);
     EXPECT_EQ(window->engines().find(fake())->threads, 2);
-    EXPECT_EQ(chessgui::app::engines::load().front().threads, 2);
+    EXPECT_EQ(kiebitz::app::engines::load().front().threads, 2);
     window->showSection(MainWindow::Section::Board);
     panel->setRunning(fake(), true);
     ASSERT_TRUE(waitForLines());
@@ -390,10 +393,10 @@ TEST_F(EngineTest, AnEngineThatWontStartIsReported) {
         << status->text().toStdString();
 }
 
-/// Design review: PNGs of the engine panel and the Engines page when CHESSGUI_SNAPSHOT_DIR is
+/// Design review: PNGs of the engine panel and the Engines page when KIEBITZ_SNAPSHOT_DIR is
 /// set.
 TEST_F(EngineTest, Snapshots) {
-    const QString dir = qEnvironmentVariable("CHESSGUI_SNAPSHOT_DIR");
+    const QString dir = qEnvironmentVariable("KIEBITZ_SNAPSHOT_DIR");
     window->setWindowState(Qt::WindowNoState);
     window->resize(1280, 800);
     auto* panels = window->findChild<QTabWidget*>(QStringLiteral("panels"));
@@ -412,7 +415,7 @@ TEST_F(EngineTest, Snapshots) {
     save(QStringLiteral("engines-page-empty"));
     window->engines().add(fakeEngine());
     window->engines().add(fakeEngine(QStringLiteral("FakeFish 2")));
-    window->findChild<chessgui::app::EnginesView*>()->select(fake());
+    window->findChild<kiebitz::app::EnginesView*>()->select(fake());
     save(QStringLiteral("engines-page"));
     window->showSection(MainWindow::Section::Board);
     panel->setLineCount(2);
@@ -423,6 +426,10 @@ TEST_F(EngineTest, Snapshots) {
     ASSERT_TRUE(waitForLines(2));
     QTest::qWait(300); // the eval bar's animation
     save(QStringLiteral("engine-running"));
+    panels->setCurrentIndex(3);
+    save(QStringLiteral("info-tab"));
+    panels->setCurrentIndex(1);
+    save(QStringLiteral("explorer-tab"));
 }
 
 TEST(CloudEvalParse, ScoresForTheSideToMoveAndCastling) {
@@ -461,7 +468,7 @@ TEST(StockfishInstall, UnpacksAndFindsTheEngine) {
     // An archive shaped like Stockfish's: a folder with the engine and some text files.
     const QString inner = work.filePath(QStringLiteral("pack/stockfish"));
     ASSERT_TRUE(QDir().mkpath(inner));
-    ASSERT_TRUE(QFile::copy(QStringLiteral(CHESSGUI_FAKE_ENGINE),
+    ASSERT_TRUE(QFile::copy(QStringLiteral(KIEBITZ_FAKE_ENGINE),
                             inner + QStringLiteral("/stockfish-macos-universal")));
     QFile readme(inner + QStringLiteral("/README.md"));
     ASSERT_TRUE(readme.open(QIODevice::WriteOnly));
@@ -496,16 +503,16 @@ TEST(StockfishInstall, UnpacksAndFindsTheEngine) {
 }
 
 /// The real Lichess cloud. Tests stay off the network, so this runs only when asked:
-///   CHESSGUI_LIVE_NETWORK=1 ./build/dev/tests/chessgui_ui_tests --gtest_filter='Live*'
+///   KIEBITZ_LIVE_NETWORK=1 ./build/dev/tests/kiebitz_ui_tests --gtest_filter='Live*'
 TEST(LiveNetwork, LichessCloudKnowsTheStartPosition) {
-    if (qEnvironmentVariableIsEmpty("CHESSGUI_LIVE_NETWORK")) {
-        GTEST_SKIP() << "set CHESSGUI_LIVE_NETWORK=1 to run";
+    if (qEnvironmentVariableIsEmpty("KIEBITZ_LIVE_NETWORK")) {
+        GTEST_SKIP() << "set KIEBITZ_LIVE_NETWORK=1 to run";
     }
     CloudEval cloud;
     cloud.setMultiPv(2);
-    chessgui::app::AnalysisUpdate last;
-    QObject::connect(&cloud, &chessgui::app::AnalysisSource::updated,
-                     [&](const chessgui::app::AnalysisUpdate& update) { last = update; });
+    kiebitz::app::AnalysisUpdate last;
+    QObject::connect(&cloud, &kiebitz::app::AnalysisSource::updated,
+                     [&](const kiebitz::app::AnalysisUpdate& update) { last = update; });
     const core::Position start;
     cloud.analyse(start);
     ASSERT_TRUE(QTest::qWaitFor([&] { return last.lines.size() == 2; }, 10000));
@@ -516,7 +523,7 @@ TEST(LiveNetwork, LichessCloudKnowsTheStartPosition) {
 
 /// The real thing, when Stockfish is installed (Homebrew); skipped otherwise (e.g. in CI).
 TEST(RealEngine, StockfishAnalysesAndFollowsPositions) {
-    const QString path = chessgui::app::engines::findInstalledStockfish();
+    const QString path = kiebitz::app::engines::findInstalledStockfish();
     if (path.isEmpty()) {
         GTEST_SKIP() << "no Stockfish installed";
     }
@@ -525,11 +532,11 @@ TEST(RealEngine, StockfishAnalysesAndFollowsPositions) {
     entry.path = path;
     entry.threads = 2;
     entry.hashMb = 32;
-    chessgui::app::UciEngine engine(entry);
+    kiebitz::app::UciEngine engine(entry);
     engine.setMultiPv(2);
-    chessgui::app::AnalysisUpdate last;
-    QObject::connect(&engine, &chessgui::app::AnalysisSource::updated,
-                     [&](const chessgui::app::AnalysisUpdate& update) { last = update; });
+    kiebitz::app::AnalysisUpdate last;
+    QObject::connect(&engine, &kiebitz::app::AnalysisSource::updated,
+                     [&](const kiebitz::app::AnalysisUpdate& update) { last = update; });
     const core::Position start;
     engine.analyse(start);
     ASSERT_TRUE(QTest::qWaitFor(

@@ -3,7 +3,7 @@
 // first; its score is 50 - 10·(k-1) centipawns for the side to move. It reports depths 1 to 3
 // and then waits for "stop", like "go infinite".
 
-#include "chessgui/core/position.hpp"
+#include "kiebitz/core/position.hpp"
 
 #include <algorithm>
 #include <cstdio>
@@ -13,8 +13,8 @@
 
 namespace {
 
-using chessgui::core::Move;
-using chessgui::core::Position;
+using kiebitz::core::Move;
+using kiebitz::core::Position;
 
 std::vector<Move> sortedMoves(const Position& position) {
     auto moves = position.legalMoves();

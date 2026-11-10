@@ -6,7 +6,7 @@
 #include <string>
 #include <string_view>
 
-namespace chessgui::core {
+namespace kiebitz::core {
 
 enum class Color : std::uint8_t { White, Black };
 
@@ -73,4 +73,4 @@ struct Move {
     friend constexpr bool operator==(const Move&, const Move&) noexcept = default;
 };
 
-} // namespace chessgui::core
+} // namespace kiebitz::core

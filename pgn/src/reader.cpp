@@ -1,11 +1,11 @@
-#include "chessgui/core/annotations.hpp"
-#include "chessgui/pgn/pgn.hpp"
+#include "kiebitz/core/annotations.hpp"
+#include "kiebitz/pgn/pgn.hpp"
 #include "tokenizer.hpp"
 
 #include <algorithm>
 #include <optional>
 
-namespace chessgui::pgn {
+namespace kiebitz::pgn {
 
 using core::Error;
 using core::Game;
@@ -340,4 +340,4 @@ core::Result<std::vector<Game>> parseAll(std::string_view text) {
     return games;
 }
 
-} // namespace chessgui::pgn
+} // namespace kiebitz::pgn

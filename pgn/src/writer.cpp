@@ -1,10 +1,10 @@
-#include "chessgui/core/annotations.hpp"
-#include "chessgui/pgn/pgn.hpp"
+#include "kiebitz/core/annotations.hpp"
+#include "kiebitz/pgn/pgn.hpp"
 
 #include <algorithm>
 #include <array>
 
-namespace chessgui::pgn {
+namespace kiebitz::pgn {
 
 using core::Game;
 using core::NodeId;
@@ -206,4 +206,4 @@ std::string writeGame(const Game& game) {
     return out;
 }
 
-} // namespace chessgui::pgn
+} // namespace kiebitz::pgn

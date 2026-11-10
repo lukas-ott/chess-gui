@@ -1,8 +1,8 @@
-#include "chessgui/engine/uci.hpp"
+#include "kiebitz/engine/uci.hpp"
 
 #include <charconv>
 
-namespace chessgui::engine {
+namespace kiebitz::engine {
 namespace {
 
 /// Splits on spaces, skipping runs of them (engines are not always tidy).
@@ -207,4 +207,4 @@ std::vector<core::Move> pvMoves(const core::Position& position,
     return moves;
 }
 
-} // namespace chessgui::engine
+} // namespace kiebitz::engine

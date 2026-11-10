@@ -1,7 +1,7 @@
 #pragma once
 
-#include "chessgui/core/game.hpp"
-#include "chessgui/pgn/pgn.hpp"
+#include "kiebitz/core/game.hpp"
+#include "kiebitz/pgn/pgn.hpp"
 
 #include <QString>
 
@@ -9,7 +9,7 @@
 #include <string>
 #include <vector>
 
-namespace chessgui::app {
+namespace kiebitz::app {
 
 /// The text of a PGN file and where its games are. Shared by every tab showing a game from
 /// that file (they all save into the same text).
@@ -39,4 +39,4 @@ struct GameDocument {
     [[nodiscard]] bool isPristine() const { return !file && !modified && game.nodeCount() == 1; }
 };
 
-} // namespace chessgui::app
+} // namespace kiebitz::app

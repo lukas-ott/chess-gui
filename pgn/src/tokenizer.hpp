@@ -4,7 +4,7 @@
 #include <cstdint>
 #include <string_view>
 
-namespace chessgui::pgn::detail {
+namespace kiebitz::pgn::detail {
 
 enum class TokenType : std::uint8_t {
     Tag,            ///< [Name "Value"]: text = name, value = value (still escaped)
@@ -52,4 +52,4 @@ private:
 /// The 1-based line number of a byte offset.
 [[nodiscard]] std::size_t lineAt(std::string_view text, std::size_t offset);
 
-} // namespace chessgui::pgn::detail
+} // namespace kiebitz::pgn::detail

@@ -5,7 +5,7 @@
 
 #include <cmath>
 
-namespace chessgui::app {
+namespace kiebitz::app {
 
 QStringList PieceSet::available() {
     // Folders under app/resources/pieces/. See the README there for authors and licences.
@@ -60,4 +60,4 @@ QPixmap PieceSet::pixmap(core::Piece piece, int size, qreal devicePixelRatio) {
     return cached;
 }
 
-} // namespace chessgui::app
+} // namespace kiebitz::app

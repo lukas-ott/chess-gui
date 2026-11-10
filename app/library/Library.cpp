@@ -14,7 +14,7 @@
 #include <algorithm>
 #include <unordered_map>
 
-namespace chessgui::app {
+namespace kiebitz::app {
 namespace {
 
 struct Listing {
@@ -252,4 +252,4 @@ void Library::watch() {
     }
 }
 
-} // namespace chessgui::app
+} // namespace kiebitz::app

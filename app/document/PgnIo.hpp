@@ -11,7 +11,7 @@
 
 /// File work for PGN documents. Everything that touches the disk or parses runs on a worker
 /// thread (QtConcurrent) and hands its result back as a QFuture, so the window never freezes.
-namespace chessgui::app::pgnio {
+namespace kiebitz::app::pgnio {
 
 struct Loaded {
     std::shared_ptr<PgnFile> file;   ///< null if the file couldn't be read
@@ -37,4 +37,4 @@ struct Parsed {
 /// The file's text with one game's text replaced, for saving a game back into its file.
 [[nodiscard]] std::string replaceGame(const PgnFile& file, int index, std::string_view gameText);
 
-} // namespace chessgui::app::pgnio
+} // namespace kiebitz::app::pgnio

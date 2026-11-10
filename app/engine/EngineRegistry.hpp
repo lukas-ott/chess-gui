@@ -7,7 +7,7 @@
 
 #include <vector>
 
-namespace chessgui::app {
+namespace kiebitz::app {
 
 class StockfishDownload;
 
@@ -48,4 +48,4 @@ private:
     StockfishDownload* m_download = nullptr;
 };
 
-} // namespace chessgui::app
+} // namespace kiebitz::app

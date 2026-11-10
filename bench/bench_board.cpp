@@ -1,9 +1,9 @@
 // How long a full board repaint takes (spec: move input to redraw < 16 ms, one frame at 60 Hz).
 // Paints offscreen into an image, the same drawing work the screen does.
-// Run from the release preset:  ./build/release/bench/chessgui_bench_ui
+// Run from the release preset:  ./build/release/bench/kiebitz_bench_ui
 
 #include "board/BoardView.hpp"
-#include "chessgui/core/game.hpp"
+#include "kiebitz/core/game.hpp"
 #include "notation/NotationView.hpp"
 #include "style/AppStyle.hpp"
 
@@ -16,9 +16,9 @@
 
 namespace {
 
-using chessgui::app::BoardView;
-using namespace chessgui::core;
-namespace core = chessgui::core;
+using kiebitz::app::BoardView;
+using namespace kiebitz::core;
+namespace core = kiebitz::core;
 
 Square sq(std::string_view name) {
     return Square::parse(name).value();
@@ -75,8 +75,8 @@ core::Game bigGame() {
 }
 
 void notationRender(benchmark::State& state) {
-    const chessgui::app::AppStyle style(*qApp);
-    chessgui::app::NotationView view(style);
+    const kiebitz::app::AppStyle style(*qApp);
+    kiebitz::app::NotationView view(style);
     view.resize(400, 600);
     const core::Game game = bigGame();
     for ([[maybe_unused]] const auto _ : state) {
@@ -87,8 +87,8 @@ void notationRender(benchmark::State& state) {
 
 void notationStep(benchmark::State& state) {
     // Moving the highlight one move, as ← → do: must stay far below one frame.
-    const chessgui::app::AppStyle style(*qApp);
-    chessgui::app::NotationView view(style);
+    const kiebitz::app::AppStyle style(*qApp);
+    kiebitz::app::NotationView view(style);
     view.resize(400, 600);
     const core::Game game = bigGame();
     view.setGame(&game, core::Game::root());

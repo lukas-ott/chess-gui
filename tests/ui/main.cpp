@@ -13,11 +13,12 @@ int main(int argc, char** argv) {
     // Settings go to a throwaway INI file, never to the real app's preferences.
     QSettings::setDefaultFormat(QSettings::IniFormat);
     QSettings::setPath(QSettings::IniFormat, QSettings::UserScope,
-                       QDir::temp().filePath(QStringLiteral("chessgui-ui-tests")));
-    QApplication::setOrganizationName(QStringLiteral("ChessGuiTests"));
+                       QDir::temp().filePath(QStringLiteral("kiebitz-ui-tests")));
+    QApplication::setOrganizationName(QStringLiteral("KiebitzTests"));
     const QApplication app(argc, argv);
-    // A throwaway library folder too: tests must never touch ~/Documents/ChessGui.
-    const QString library = QDir::temp().filePath(QStringLiteral("chessgui-ui-tests-library"));
+    // A throwaway library folder too: tests must never touch the real library
+    // (~/Documents/Kiebitz).
+    const QString library = QDir::temp().filePath(QStringLiteral("kiebitz-ui-tests-library"));
     QDir(library).removeRecursively();
     QSettings().setValue(QStringLiteral("library/folder"), library);
     ::testing::InitGoogleTest(&argc, argv);

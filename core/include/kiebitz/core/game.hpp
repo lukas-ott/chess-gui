@@ -1,9 +1,9 @@
 #pragma once
 
-#include "chessgui/core/annotations.hpp"
-#include "chessgui/core/position.hpp"
-#include "chessgui/core/result.hpp"
-#include "chessgui/core/types.hpp"
+#include "kiebitz/core/annotations.hpp"
+#include "kiebitz/core/position.hpp"
+#include "kiebitz/core/result.hpp"
+#include "kiebitz/core/types.hpp"
 
 #include <cstdint>
 #include <limits>
@@ -13,7 +13,7 @@
 #include <utility>
 #include <vector>
 
-namespace chessgui::core {
+namespace kiebitz::core {
 
 /// Identifies a node in a Game. Stays valid until that node is removed; after that the id may be
 /// reused by a new node.
@@ -135,4 +135,4 @@ private:
     std::vector<NodeId> m_free; // ids of removed nodes, reused by newNode()
 };
 
-} // namespace chessgui::core
+} // namespace kiebitz::core

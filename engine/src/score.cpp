@@ -1,10 +1,10 @@
-#include "chessgui/engine/score.hpp"
+#include "kiebitz/engine/score.hpp"
 
 #include <algorithm>
 #include <cmath>
 #include <cstdlib>
 
-namespace chessgui::engine {
+namespace kiebitz::engine {
 
 double winningChances(const Score& score) noexcept {
     if (score.kind == Score::Kind::Mate || score.kind == Score::Kind::Over) {
@@ -39,4 +39,4 @@ std::string formatScore(const Score& score) {
            (hundredths < 10 ? "0" : "") + std::to_string(hundredths);
 }
 
-} // namespace chessgui::engine
+} // namespace kiebitz::engine

@@ -1,4 +1,4 @@
-#include "chessgui/core/position.hpp"
+#include "kiebitz/core/position.hpp"
 
 #include <gtest/gtest.h>
 
@@ -6,7 +6,7 @@
 
 namespace {
 
-using namespace chessgui::core;
+using namespace kiebitz::core;
 
 constexpr std::string_view kKiwipete =
     "r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - 0 1";

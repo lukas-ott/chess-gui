@@ -1,7 +1,7 @@
-#include "chessgui/core/version.hpp"
+#include "kiebitz/core/version.hpp"
 
 #include <gtest/gtest.h>
 
 TEST(Version, IsNotEmpty) {
-    EXPECT_FALSE(chessgui::core::version().empty());
+    EXPECT_FALSE(kiebitz::core::version().empty());
 }

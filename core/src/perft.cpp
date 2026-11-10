@@ -1,8 +1,8 @@
-#include "chessgui/core/perft.hpp"
+#include "kiebitz/core/perft.hpp"
 
 #include <chess.hpp>
 
-namespace chessgui::core {
+namespace kiebitz::core {
 namespace {
 
 std::uint64_t perftRecursive(chess::Board& board, int depth) {
@@ -32,4 +32,4 @@ std::uint64_t perft(std::string_view fen, int depth) {
     return perftRecursive(board, depth);
 }
 
-} // namespace chessgui::core
+} // namespace kiebitz::core

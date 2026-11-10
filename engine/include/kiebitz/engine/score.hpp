@@ -1,11 +1,11 @@
 #pragma once
 
-#include "chessgui/core/types.hpp"
+#include "kiebitz/core/types.hpp"
 
 #include <cstdint>
 #include <string>
 
-namespace chessgui::engine {
+namespace kiebitz::engine {
 
 /// An engine's evaluation: centipawns or moves to mate; or, with the game already over on the
 /// board (checkmate, stalemate), who won.
@@ -49,4 +49,4 @@ struct Score {
 /// `score` is from White's view.
 [[nodiscard]] std::string formatScore(const Score& score);
 
-} // namespace chessgui::engine
+} // namespace kiebitz::engine

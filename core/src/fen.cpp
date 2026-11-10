@@ -1,13 +1,13 @@
 #include "fen.hpp"
 
-#include "chessgui/core/types.hpp"
+#include "kiebitz/core/types.hpp"
 
 #include <algorithm>
 #include <array>
 #include <optional>
 #include <vector>
 
-namespace chessgui::core::detail {
+namespace kiebitz::core::detail {
 namespace {
 
 std::vector<std::string_view> splitFields(std::string_view text) {
@@ -201,4 +201,4 @@ Result<std::string> validateFen(std::string_view fen) {
            ' ' + std::to_string(halfmove) + ' ' + std::to_string(fullmove);
 }
 
-} // namespace chessgui::core::detail
+} // namespace kiebitz::core::detail

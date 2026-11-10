@@ -24,7 +24,7 @@ class QTabBar;
 class QTabWidget;
 class QVBoxLayout;
 
-namespace chessgui::app {
+namespace kiebitz::app {
 
 class AppStyle;
 class BoardView;
@@ -199,4 +199,4 @@ private:
     QActionGroup* m_appearanceGroup = nullptr;
 };
 
-} // namespace chessgui::app
+} // namespace kiebitz::app

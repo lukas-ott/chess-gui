@@ -8,12 +8,12 @@ set -euo pipefail
 
 BUILD_DIR="${1:-build/release}"
 RUNS="${2:-5}"
-LIMIT_MS="${CHESSGUI_STARTUP_LIMIT_MS:-1000}"
+LIMIT_MS="${KIEBITZ_STARTUP_LIMIT_MS:-1000}"
 
 if [[ "$(uname)" == "Darwin" ]]; then
-    APP="$BUILD_DIR/app/ChessGui.app/Contents/MacOS/ChessGui"
+    APP="$BUILD_DIR/app/Kiebitz.app/Contents/MacOS/Kiebitz"
 else
-    APP="$BUILD_DIR/app/ChessGui"
+    APP="$BUILD_DIR/app/Kiebitz"
 fi
 
 if [[ ! -x "$APP" ]]; then
@@ -24,7 +24,7 @@ fi
 worst=0
 for ((i = 1; i <= RUNS; i++)); do
     start=$(python3 -c 'import time; print(int(time.time() * 1000))')
-    inner=$(CHESSGUI_STARTUP_EXIT=1 "$APP" | sed -n 's/^startup_ms=//p')
+    inner=$(KIEBITZ_STARTUP_EXIT=1 "$APP" | sed -n 's/^startup_ms=//p')
     end=$(python3 -c 'import time; print(int(time.time() * 1000))')
     wall=$((end - start))
     echo "run $i: main->first frame ${inner} ms, process wall ${wall} ms"

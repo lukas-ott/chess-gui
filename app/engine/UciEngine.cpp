@@ -2,7 +2,7 @@
 
 #include <QProcess>
 
-namespace chessgui::app {
+namespace kiebitz::app {
 
 UciEngine::UciEngine(EngineEntry entry, QObject* parent)
     : AnalysisSource(parent), m_entry(std::move(entry)) {
@@ -222,4 +222,4 @@ void UciEngine::publish() {
     emit updated({m_searching, std::move(lines)});
 }
 
-} // namespace chessgui::app
+} // namespace kiebitz::app

@@ -1,6 +1,6 @@
 #pragma once
 
-#include "chessgui/core/types.hpp"
+#include "kiebitz/core/types.hpp"
 
 #include <cstdint>
 #include <optional>
@@ -8,7 +8,7 @@
 #include <string_view>
 #include <vector>
 
-namespace chessgui::core {
+namespace kiebitz::core {
 
 /// Colours for arrows and square marks, as in Lichess and ChessBase PGN comments.
 enum class MarkColor : std::uint8_t { Green, Red, Blue, Yellow };
@@ -75,4 +75,4 @@ inline constexpr std::uint8_t kBlackWinning = 19;  // −+
 inline constexpr std::uint8_t kNovelty = 146;      // N
 } // namespace nag
 
-} // namespace chessgui::core
+} // namespace kiebitz::core

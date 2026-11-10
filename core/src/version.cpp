@@ -1,9 +1,9 @@
-#include "chessgui/core/version.hpp"
+#include "kiebitz/core/version.hpp"
 
-namespace chessgui::core {
+namespace kiebitz::core {
 
 std::string_view version() noexcept {
-    return CHESSGUI_VERSION;
+    return KIEBITZ_VERSION;
 }
 
-} // namespace chessgui::core
+} // namespace kiebitz::core

@@ -14,6 +14,8 @@
 #include "panels/GameInfoPanel.hpp"
 #include "style/AppStyle.hpp"
 #include "style/Icons.hpp"
+#include "style/Layout.hpp"
+#include "widgets/EmptyState.hpp"
 
 #include <QActionGroup>
 #include <QApplication>
@@ -55,7 +57,7 @@
 #include <tuple>
 #include <utility>
 
-namespace chessgui::app {
+namespace kiebitz::app {
 namespace {
 
 using namespace Qt::StringLiterals;
@@ -88,22 +90,6 @@ QLabel* label(const QString& text, const char* role) {
     auto* result = new QLabel(text);
     result->setProperty("role", role);
     return result;
-}
-
-/// What a panel shows until its feature exists: a title and one line about what's coming.
-QWidget* emptyState(const QString& title, const QString& hint) {
-    auto* widget = new QWidget;
-    auto* layout = new QVBoxLayout(widget);
-    layout->addStretch();
-    auto* titleLabel = label(title, "emptyTitle");
-    titleLabel->setAlignment(Qt::AlignCenter);
-    auto* hintLabel = label(hint, "emptyHint");
-    hintLabel->setAlignment(Qt::AlignCenter);
-    hintLabel->setWordWrap(true);
-    layout->addWidget(titleLabel);
-    layout->addWidget(hintLabel);
-    layout->addStretch();
-    return widget;
 }
 
 QString toQString(std::string_view text) {
@@ -139,7 +125,7 @@ void whenReady(QObject* context, const QFuture<T>& future, const Done& done) {
 MainWindow::MainWindow(AppStyle& style, QWidget* parent)
     : QMainWindow(parent), m_style(style), m_library(new Library(this)),
       m_engineRegistry(new EngineRegistry(this)) {
-    setWindowTitle(QStringLiteral("ChessGui"));
+    setWindowTitle(QStringLiteral("Kiebitz"));
     // Smaller than this and the tabs, the game list and the board no longer fit side by side.
     setMinimumSize(960, 620);
     setAcceptDrops(true);
@@ -187,7 +173,7 @@ void MainWindow::buildMenus() {
     buildGameMenu();
     buildViewMenu(menuBar()->addMenu(tr("&View")));
     auto* helpMenu = menuBar()->addMenu(tr("&Help"));
-    auto* aboutAction = helpMenu->addAction(tr("&About ChessGui"), this, &MainWindow::showAbout);
+    auto* aboutAction = helpMenu->addAction(tr("&About Kiebitz"), this, &MainWindow::showAbout);
     aboutAction->setMenuRole(QAction::AboutRole);
 }
 
@@ -545,8 +531,8 @@ QWidget* MainWindow::buildAnalysisPage() {
 QWidget* MainWindow::buildMovesCard() {
     auto* frame = card();
     auto* layout = new QVBoxLayout(frame);
-    layout->setContentsMargins(14, 12, 14, 12);
-    layout->setSpacing(8);
+    layout->setContentsMargins(layout::kCard);
+    layout->setSpacing(layout::kCardSpacing);
     layout->addWidget(label(tr("MOVES"), "cardTitle"));
 
     m_notation = new NotationView(m_style);
@@ -630,12 +616,14 @@ QWidget* MainWindow::buildPanelsCard() {
                 m_evalBar->setVisible(running); // its space is kept: nothing else moves
             });
     panels->addTab(m_enginePanel, tr("Engine"));
-    panels->addTab(emptyState(tr("Opening explorer"),
-                              tr("Coming in v2: what masters and Lichess players play here, "
-                                 "and how it scores.")),
+    panels->addTab(new EmptyState(IconKind::Board, tr("Opening explorer"),
+                                  tr("Coming in v2: what masters and Lichess players play here, "
+                                     "and how it scores."),
+                                  m_style),
                    tr("Explorer"));
-    panels->addTab(emptyState(tr("Repertoire"),
-                              tr("Coming in v2: build your lines, find the gaps, train them.")),
+    panels->addTab(new EmptyState(IconKind::Library, tr("Repertoire"),
+                                  tr("Coming in v2: build your lines, find the gaps, train them."),
+                                  m_style),
                    tr("Repertoire"));
     m_info = new GameInfoPanel;
     connect(m_info, &GameInfoPanel::headerEdited, this, &MainWindow::onHeaderEdited);
@@ -751,8 +739,8 @@ void MainWindow::closeEvent(QCloseEvent* event) {
 }
 
 void MainWindow::showAbout() {
-    QMessageBox::about(this, tr("About ChessGui"),
-                       tr("<b>ChessGui %1</b><p>A fast native chess GUI for opening preparation."
+    QMessageBox::about(this, tr("About Kiebitz"),
+                       tr("<b>Kiebitz %1</b><p>A fast native chess GUI for opening preparation."
                           "<p>Licensed under the GNU GPL v3. Piece sets: cburnett and merida "
                           "(GPLv2+), chessnut (Apache 2.0), fantasy (MIT), via Lichess.")
                            .arg(QApplication::applicationVersion()));
@@ -800,6 +788,8 @@ void MainWindow::addDocument(std::unique_ptr<GameDocument> document) {
     auto* close = new QToolButton;
     close->setObjectName(QStringLiteral("tabClose"));
     close->setIconSize(QSize(12, 12));
+    close->setFixedSize(26, 26); // 20 x 20 for the ✕, plus its top and right margins
+    close->setAutoRaise(true);
     close->setFocusPolicy(Qt::NoFocus);
     close->setToolTip(tr("Close tab (⌘W)"));
     const auto& c = m_style.colors();
@@ -1016,13 +1006,13 @@ void MainWindow::updateTitles() {
     }
     const GameDocument* d = doc();
     if (d == nullptr) {
-        setWindowTitle(m_section == Section::Engines ? tr("Engines — ChessGui")
-                                                     : tr("Library — ChessGui"));
+        setWindowTitle(m_section == Section::Engines ? tr("Engines — Kiebitz")
+                                                     : tr("Library — Kiebitz"));
         setWindowModified(false);
         return;
     }
     const QString title = d->modified ? d->title().mid(2) : d->title();
-    setWindowTitle(title + QStringLiteral("[*] — ChessGui"));
+    setWindowTitle(title + QStringLiteral("[*] — Kiebitz"));
     setWindowModified(d->modified);
 }
 
@@ -1570,4 +1560,4 @@ void MainWindow::onHeaderEdited(const QString& name, const QString& value) {
     }
 }
 
-} // namespace chessgui::app
+} // namespace kiebitz::app

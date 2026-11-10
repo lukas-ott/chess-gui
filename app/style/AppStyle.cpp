@@ -8,7 +8,7 @@
 #include <array>
 #include <utility>
 
-namespace chessgui::app {
+namespace kiebitz::app {
 
 AppStyle::Colors AppStyle::darkColors() {
     return {
@@ -128,11 +128,14 @@ QString AppStyle::styleSheet(const Colors& colors) {
         return color.name(QColor::HexRgb);
     };
     QString css = QStringLiteral(R"(
-/* Cards: the rounded panels on the right */
+/* One system for every screen: cards have 10 px corners and 16 px padding (style/Layout.hpp);
+   every control (button, field, spin box, combo box) is 32 px tall with 8 px corners. */
+
+/* Cards: the rounded panels */
 QFrame[card="true"] {
     background: @surface;
     border: 1px solid @border;
-    border-radius: 8px;
+    border-radius: 10px;
 }
 QFrame[card="true"][focused="true"] { border-color: @accent; }
 QLabel[role="cardTitle"] {
@@ -148,7 +151,7 @@ QTabBar#documentTabs { background: @window; }
 QTabBar#documentTabs::tab {
     color: @muted;
     background: transparent;
-    padding: 7px 16px;
+    padding: 7px 10px 7px 14px;
     margin: 6px 0 0 6px;
     border: 1px solid transparent;
     border-bottom: none;
@@ -189,8 +192,8 @@ QTextBrowser#moveList { background: transparent; border: none; color: @text; }
 QPushButton[role="nav"] {
     background: @raised;
     border: none;
-    border-radius: 6px;
-    min-height: 34px;
+    border-radius: 8px;
+    min-height: 32px;
 }
 QPushButton[role="nav"]:hover { background: @border; }
 QPushButton[role="nav"]:pressed { background: @dimmed; }
@@ -201,7 +204,7 @@ QPushButton[role="fork"] {
     background: transparent;
     color: @muted;
     border: none;
-    border-radius: 6px;
+    border-radius: 8px;
     padding: 6px 10px;
     text-align: left;
     font-size: 14px;
@@ -225,72 +228,111 @@ QScrollBar::add-page, QScrollBar::sub-page { background: transparent; }
 
 QToolTip { background: @raised; color: @text; border: 1px solid @border; padding: 4px 6px; }
 
-/* Page titles (Library) */
-QLabel[role="pageTitle"] { color: @text; font-size: 20px; font-weight: 700; }
+/* Page headers (Library, Engines): style/PageHeader */
+QLabel[role="pageTitle"] { color: @text; font-size: 22px; font-weight: 700; }
+QLabel[role="pageSubtitle"] { color: @muted; font-size: 13px; }
 
 QLabel[role="sectionTitle"] { color: @text; font-size: 15px; font-weight: 600; }
 QLabel[role="previewPlayers"] { color: @text; font-size: 14px; font-weight: 600; }
 
+/* Buttons: 32 px tall (contents 18 px + padding + border) */
 /* The main action on a page: one per screen, in the accent colour */
 QPushButton[role="primary"] {
     background: @accent;
     color: @accentText;
     border: none;
-    border-radius: 6px;
+    border-radius: 8px;
     padding: 7px 16px;
     min-height: 18px;
     font-weight: 600;
 }
 QPushButton[role="primary"]:hover { background: @accentHover; }
-
-/* Quiet buttons (Library header) */
+/* Quiet buttons */
 QPushButton[role="secondary"] {
     background: @surface;
     color: @text;
     border: 1px solid @border;
-    border-radius: 6px;
-    padding: 6px 12px;
+    border-radius: 8px;
+    padding: 6px 14px;
     min-height: 18px;
 }
 QPushButton[role="secondary"]:hover { background: @raised; }
 QPushButton[role="secondary"]:pressed { background: @border; }
-
-/* Engine panel */
+/* Start / Stop of an engine: quiet when off, accent while it runs */
 QPushButton[role="engineToggle"] {
     background: @raised;
     color: @text;
     border: 1px solid @border;
-    border-radius: 6px;
-    padding: 5px 14px;
+    border-radius: 8px;
+    padding: 6px 14px;
     min-height: 18px;
     font-weight: 600;
 }
 QPushButton[role="engineToggle"]:hover { background: @border; }
 QPushButton[role="engineToggle"]:checked { background: @accent; color: @accentText; border-color: @accent; }
 QPushButton[role="engineToggle"]:checked:hover { background: @accentHover; }
-QSpinBox#engineLines {
-    background: @window;
-    color: @text;
-    border: 1px solid @border;
-    border-radius: 6px;
-    padding: 4px 6px;
-    min-height: 18px;
+/* Icon-only buttons (32 x 32, set in code) */
+QToolButton[role="icon"] {
+    background: transparent;
+    border: 1px solid transparent;
+    border-radius: 8px;
 }
-QToolButton#engineMore {
+QToolButton[role="icon"]:hover { background: @raised; }
+QToolButton[role="icon"][outlined="true"] { border-color: @border; background: @surface; }
+QToolButton[role="icon"]::menu-indicator { image: none; }
+
+/* Segmented controls (lines per engine) and steppers (− value +): a 32 px track with
+   28 px segments inside it; the chosen segment is raised, as in macOS and Lichess pickers */
+QWidget[role="segmented"], QWidget[role="stepper"] {
+    background: @window;
+    border: 1px solid @border;
+    border-radius: 8px;
+}
+QPushButton[role="segment"] {
     background: transparent;
     color: @muted;
     border: none;
     border-radius: 6px;
-    padding: 4px 8px;
-    font-size: 16px;
+    min-width: 26px;
+    min-height: 26px;
+    padding: 0 4px;
+    font-weight: 600;
 }
-QToolButton#engineMore:hover { background: @raised; color: @text; }
-QToolButton#engineMore::menu-indicator { image: none; }
+QPushButton[role="segment"]:hover { color: @text; background: @raised; }
+QPushButton[role="segment"]:checked { color: @text; background: @border; }
+QLineEdit[role="stepperValue"] {
+    background: transparent;
+    border: none;
+    padding: 0;
+    min-height: 26px;
+    font-weight: 600;
+}
+QPushButton[role="step"] {
+    background: transparent;
+    color: @muted;
+    border: none;
+    border-radius: 6px;
+    min-width: 26px;
+    min-height: 26px;
+    font-size: 16px;
+    font-weight: 600;
+}
+QPushButton[role="step"]:hover { color: @text; background: @raised; }
+QPushButton[role="step"]:pressed { background: @border; }
+/* The text field inside a spin box or editable combo box is part of it: no box of its own */
+QAbstractSpinBox QLineEdit, QComboBox QLineEdit {
+    background: transparent;
+    border: none;
+    padding: 0;
+    min-height: 0;
+}
+
+/* Engine tab */
 QLabel[role="engineStatus"] { color: @muted; font-size: 12px; }
 QLabel[role="pvLine"] { color: @text; font-size: 14px; }
 /* A score chip in the colours of the side that is better, as Lichess shows it */
 QLabel[role="scorePill"] {
-    border-radius: 4px;
+    border-radius: 6px;
     padding: 2px 0;
     font-size: 13px;
     font-weight: 600;
@@ -323,26 +365,7 @@ QLabel[role="statValue"] { color: @text; font-size: 15px; font-weight: 600; }
 QScrollArea#engineCards, QWidget#engineCardsContent { background: transparent; }
 QScrollArea#engineSections, QWidget#engineSectionsContent { background: transparent; }
 QWidget#engineSection { border-bottom: 1px solid @border; }
-QLabel#emptyEngineIcon { background: @raised; border-radius: 32px; }
-QToolButton#addEngine, QToolButton#enginesFolder, QToolButton#manageEngines {
-    background: transparent;
-    border: 1px solid transparent;
-    border-radius: 6px;
-    padding: 5px;
-}
-QToolButton#addEngine { border-color: @border; background: @surface; }
-QToolButton#addEngine:hover, QToolButton#enginesFolder:hover, QToolButton#manageEngines:hover {
-    background: @raised;
-}
-QToolButton#addEngine::menu-indicator { image: none; }
-QSpinBox#engineThreads, QSpinBox#engineHash {
-    background: @window;
-    color: @text;
-    border: 1px solid @border;
-    border-radius: 6px;
-    padding: 4px 6px;
-    min-width: 90px;
-}
+QLabel[role="emptyIcon"] { background: @raised; border-radius: 32px; } /* widgets/EmptyState */
 /* A button that reads as a link */
 QPushButton[role="link"] {
     background: transparent;
@@ -353,17 +376,21 @@ QPushButton[role="link"] {
 }
 QPushButton[role="link"]:hover { color: @accentHover; }
 
-/* Text fields: search, comment box, header fields */
-QLineEdit, QPlainTextEdit#commentBox, QComboBox {
+/* Fields: search, comment box, header fields, spin boxes, combo boxes (32 px tall) */
+QLineEdit, QPlainTextEdit#commentBox, QComboBox, QSpinBox {
     background: @window;
     color: @text;
     border: 1px solid @border;
-    border-radius: 6px;
-    padding: 4px 8px;
+    border-radius: 8px;
+    padding: 4px 10px;
     selection-background-color: @accent;
     selection-color: @accentText;
 }
-QLineEdit:focus, QPlainTextEdit#commentBox:focus, QComboBox:focus { border-color: @accent; }
+QLineEdit, QComboBox, QSpinBox { min-height: 22px; }
+QSpinBox { min-width: 70px; }
+QLineEdit:focus, QPlainTextEdit#commentBox:focus, QComboBox:focus, QSpinBox:focus {
+    border-color: @accent;
+}
 QLineEdit:disabled { color: @dimmed; }
 QComboBox::drop-down { border: none; width: 18px; }
 QComboBox QAbstractItemView {
@@ -401,13 +428,22 @@ QHeaderView::section {
 }
 
 /* Document tabs: close buttons and the "+" button */
-QToolButton#tabClose { background: transparent; border: none; border-radius: 4px; padding: 2px; }
-QToolButton#tabClose:hover { background: @border; }
+/* (Named through the tab bar: the rule for its scroll arrows would otherwise win.) */
+QTabBar#documentTabs QToolButton#tabClose {
+    background: transparent;
+    border: none;
+    border-radius: 10px;
+    padding: 0;
+    /* top: the tabs' own top margin, so it centres on the title; right: it sits a little in
+       from the tab's edge, as in a browser */
+    margin: 6px 6px 0 0;
+}
+QTabBar#documentTabs QToolButton#tabClose:hover { background: @raised; }
 QToolButton#newTabButton {
     color: @muted;
     background: transparent;
     border: none;
-    border-radius: 6px;
+    border-radius: 8px;
     font-size: 18px;
     padding: 0 8px;
     margin-top: 6px;
@@ -448,4 +484,4 @@ QStatusBar::item { border: none; }
     return css;
 }
 
-} // namespace chessgui::app
+} // namespace kiebitz::app

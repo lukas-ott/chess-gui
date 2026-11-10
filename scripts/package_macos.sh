@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Builds a self-contained ChessGui.app and a .dmg that runs on a Mac without Homebrew or Qt.
+# Builds a self-contained Kiebitz.app and a .dmg that runs on a Mac without Homebrew or Qt.
 #
 #   1. Builds the release preset (unless --no-build).
 #   2. Copies the app and only the Qt plugins it needs into a staging folder.
@@ -10,7 +10,7 @@
 #   6. Wraps it in a compressed .dmg with an Applications shortcut.
 #
 # Usage: scripts/package_macos.sh [--no-build] [build-dir]   (build-dir defaults to build/release)
-# Output: <build-dir>/package/ChessGui.app and <build-dir>/package/ChessGui-<version>.dmg
+# Output: <build-dir>/package/Kiebitz.app and <build-dir>/package/Kiebitz-<version>.dmg
 #
 # Gatekeeper: an ad-hoc signature is not a Developer ID signature, so on another Mac the first
 # launch needs right-click → Open. Signing with a Developer ID and notarising needs a paid
@@ -44,9 +44,9 @@ if ((BUILD)); then
     cmake --build --preset "$preset"
 fi
 
-SRC_APP="$BUILD_DIR/app/ChessGui.app"
+SRC_APP="$BUILD_DIR/app/Kiebitz.app"
 OUT="$BUILD_DIR/package"
-APP="$OUT/ChessGui.app"
+APP="$OUT/Kiebitz.app"
 [[ -d "$SRC_APP" ]] || { echo "No app at $SRC_APP" >&2; exit 1; }
 
 echo "==> Staging $APP"
@@ -93,16 +93,16 @@ codesign --force --deep --sign - "$APP"
 codesign --verify --deep --strict "$APP"
 
 echo "==> Smoke test"
-CHESSGUI_STARTUP_EXIT=1 "$APP/Contents/MacOS/ChessGui"
+KIEBITZ_STARTUP_EXIT=1 "$APP/Contents/MacOS/Kiebitz"
 
 VERSION="$(/usr/libexec/PlistBuddy -c 'Print CFBundleShortVersionString' "$APP/Contents/Info.plist")"
-DMG="$OUT/ChessGui-$VERSION.dmg"
+DMG="$OUT/Kiebitz-$VERSION.dmg"
 echo "==> Creating $DMG"
 dmg_root="$(mktemp -d)"
 trap 'rm -rf "$dmg_root"' EXIT
 cp -R "$APP" "$dmg_root/"
 ln -s /Applications "$dmg_root/Applications"
-hdiutil create -quiet -volname "ChessGui $VERSION" -srcfolder "$dmg_root" -format UDZO -ov "$DMG"
+hdiutil create -quiet -volname "Kiebitz $VERSION" -srcfolder "$dmg_root" -format UDZO -ov "$DMG"
 
 echo
 echo "App: $APP ($(du -sh "$APP" | cut -f1))"

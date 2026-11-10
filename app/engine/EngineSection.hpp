@@ -14,7 +14,7 @@
 class QLabel;
 class QPushButton;
 
-namespace chessgui::app {
+namespace kiebitz::app {
 
 class AppStyle;
 class UciEngine;
@@ -58,7 +58,7 @@ public:
 signals:
     /// Started, stopped, or new lines: the board may need to show something else.
     void changed();
-    void playRequested(const std::vector<chessgui::core::Move>& moves);
+    void playRequested(const std::vector<kiebitz::core::Move>& moves);
 
 private:
     void ensureSource();
@@ -89,4 +89,4 @@ private:
     std::array<LineRow, kMaxLines> m_rows{};
 };
 
-} // namespace chessgui::app
+} // namespace kiebitz::app

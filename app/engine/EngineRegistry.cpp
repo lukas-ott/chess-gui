@@ -1,7 +1,7 @@
 #include "EngineRegistry.hpp"
 
 #include "StockfishDownload.hpp"
-#include "chessgui/engine/uci.hpp"
+#include "kiebitz/engine/uci.hpp"
 
 #include <QProcess>
 #include <QTimer>
@@ -9,7 +9,7 @@
 #include <algorithm>
 #include <memory>
 
-namespace chessgui::app {
+namespace kiebitz::app {
 
 EngineRegistry::EngineRegistry(QObject* parent) : QObject(parent), m_engines(engines::load()) {}
 
@@ -101,4 +101,4 @@ bool EngineRegistry::isDownloading() const {
     return m_download != nullptr && m_download->isRunning();
 }
 
-} // namespace chessgui::app
+} // namespace kiebitz::app

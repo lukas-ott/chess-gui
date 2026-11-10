@@ -1,4 +1,4 @@
-#include "chessgui/core/position.hpp"
+#include "kiebitz/core/position.hpp"
 
 #include <gtest/gtest.h>
 
@@ -6,7 +6,7 @@
 
 namespace {
 
-using namespace chessgui::core;
+using namespace kiebitz::core;
 
 Position fromFen(std::string_view fen) {
     auto position = Position::fromFen(fen);

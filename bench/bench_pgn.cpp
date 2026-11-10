@@ -1,9 +1,9 @@
 // PGN speed: the game index (what opening a big file waits for) and full parsing (what opening
 // one game waits for). Spec targets: a ~50k-position repertoire in < 300 ms (with cache, M5).
-// Run from the release preset:  ./build/release/bench/chessgui_bench --benchmark_filter=pgn
+// Run from the release preset:  ./build/release/bench/kiebitz_bench --benchmark_filter=pgn
 
-#include "chessgui/core/game.hpp"
-#include "chessgui/pgn/pgn.hpp"
+#include "kiebitz/core/game.hpp"
+#include "kiebitz/pgn/pgn.hpp"
 
 #include <benchmark/benchmark.h>
 
@@ -12,7 +12,7 @@
 
 namespace {
 
-using namespace chessgui;
+using namespace kiebitz;
 
 /// A reproducible annotated game of ~120 plies with a short variation at every 10th move and a
 /// comment every 7th, built by pseudo-random legal moves.

@@ -12,7 +12,7 @@
 
 class QProcess;
 
-namespace chessgui::app {
+namespace kiebitz::app {
 
 /// A UCI engine running as a separate process, analysing without a time limit ("go infinite").
 ///
@@ -74,4 +74,4 @@ private:
     std::string m_buffer;                 ///< output not yet ended by a newline
 };
 
-} // namespace chessgui::app
+} // namespace kiebitz::app

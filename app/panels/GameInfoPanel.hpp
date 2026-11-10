@@ -1,6 +1,6 @@
 #pragma once
 
-#include "chessgui/core/game.hpp"
+#include "kiebitz/core/game.hpp"
 
 #include <QWidget>
 
@@ -9,7 +9,7 @@
 class QComboBox;
 class QLineEdit;
 
-namespace chessgui::app {
+namespace kiebitz::app {
 
 /// The "Info" panel: edits a game's headers (players, ratings, event, date, result, ...).
 /// Reports each change through headerEdited(); the window applies it to the game.
@@ -34,4 +34,4 @@ private:
     QComboBox* m_result = nullptr;
 };
 
-} // namespace chessgui::app
+} // namespace kiebitz::app

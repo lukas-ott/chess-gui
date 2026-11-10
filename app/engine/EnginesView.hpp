@@ -8,15 +8,15 @@ class QLabel;
 class QLineEdit;
 class QProgressBar;
 class QPushButton;
-class QSpinBox;
 class QStackedWidget;
 class QToolButton;
 class QWidget;
 
-namespace chessgui::app {
+namespace kiebitz::app {
 
 class AppStyle;
 class EngineRegistry;
+class Stepper;
 
 /// The Engines page (a sidebar section, like En Croissant's): the engines as cards on the left,
 /// the selected one's details and settings on the right. New engines come from the + menu:
@@ -43,7 +43,7 @@ private:
     const AppStyle& m_style;
     QString m_selected;
 
-    QToolButton* m_folderButton = nullptr;
+    QPushButton* m_folderButton = nullptr;
     QToolButton* m_addButton = nullptr;
     QLineEdit* m_search = nullptr;
     QGridLayout* m_grid = nullptr;
@@ -53,15 +53,14 @@ private:
     QLabel* m_error = nullptr;
 
     QStackedWidget* m_details = nullptr; ///< nothing selected, or the details
-    QLabel* m_emptyIcon = nullptr;
     QLabel* m_detailIcon = nullptr;
     QLabel* m_detailName = nullptr;
     QLabel* m_detailSubtitle = nullptr;
     QLabel* m_detailAbout = nullptr;
     QWidget* m_settings = nullptr;
-    QSpinBox* m_threads = nullptr;
-    QSpinBox* m_hash = nullptr;
+    Stepper* m_threads = nullptr;
+    Stepper* m_hash = nullptr;
     QPushButton* m_remove = nullptr;
 };
 
-} // namespace chessgui::app
+} // namespace kiebitz::app

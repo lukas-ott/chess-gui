@@ -11,7 +11,7 @@ class QNetworkAccessManager;
 class QNetworkReply;
 class QProcess;
 
-namespace chessgui::app {
+namespace kiebitz::app {
 
 /// Downloads the latest official Stockfish for macOS from its GitHub releases, the way En
 /// Croissant offers it: one click, no browser.
@@ -67,4 +67,4 @@ private:
     bool m_running = false;
 };
 
-} // namespace chessgui::app
+} // namespace kiebitz::app

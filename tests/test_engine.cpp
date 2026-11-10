@@ -1,14 +1,14 @@
 // The engine module: reading UCI output, scores, engine lines as moves, picking a download.
 
-#include "chessgui/engine/release.hpp"
-#include "chessgui/engine/score.hpp"
-#include "chessgui/engine/uci.hpp"
+#include "kiebitz/engine/release.hpp"
+#include "kiebitz/engine/score.hpp"
+#include "kiebitz/engine/uci.hpp"
 
 #include <gtest/gtest.h>
 
 namespace {
 
-using namespace chessgui;
+using namespace kiebitz;
 using engine::Score;
 
 core::Position fromFen(std::string_view fen) {

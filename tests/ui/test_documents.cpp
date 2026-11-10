@@ -3,7 +3,7 @@
 
 #include "MainWindow.hpp"
 #include "board/BoardView.hpp"
-#include "chessgui/pgn/pgn.hpp"
+#include "kiebitz/pgn/pgn.hpp"
 #include "library/Library.hpp"
 #include "notation/NotationView.hpp"
 #include "panels/GameInfoPanel.hpp"
@@ -33,12 +33,12 @@
 
 namespace {
 
-using chessgui::app::AppStyle;
-using chessgui::app::BoardView;
-using chessgui::app::Library;
-using chessgui::app::MainWindow;
-using chessgui::app::NotationView;
-using namespace chessgui;
+using kiebitz::app::AppStyle;
+using kiebitz::app::BoardView;
+using kiebitz::app::Library;
+using kiebitz::app::MainWindow;
+using kiebitz::app::NotationView;
+using namespace kiebitz;
 
 constexpr const char* kOneGame = R"([Event "Club"]
 [White "Alice"]
@@ -372,7 +372,7 @@ TEST_F(LibraryTreeTest, ArrowKeysActOnWhatWasClicked) {
     EXPECT_TRUE(games->hasFocus());
 
     // Click a step button under the preview: now the keys belong to the preview (outlined).
-    auto* board = window.findChild<chessgui::app::BoardView*>(QStringLiteral("previewBoard"));
+    auto* board = window.findChild<kiebitz::app::BoardView*>(QStringLiteral("previewBoard"));
     ASSERT_NE(board, nullptr);
     auto* back = window.findChild<QPushButton*>(QStringLiteral("previewBack"));
     ASSERT_NE(back, nullptr);
@@ -530,12 +530,12 @@ TEST_F(DocumentsTest, MenuShortcutsLeaveTheCommentBoxAlone) {
 
     board->setFocus(); // with the board focused, the same command deletes the move
     action(window, QStringLiteral("Delete From Here"))->trigger();
-    EXPECT_EQ(fen(), std::string(chessgui::core::kStartFen));
+    EXPECT_EQ(fen(), std::string(kiebitz::core::kStartFen));
 }
 
 TEST_F(DocumentsTest, HeadersFromTheInfoPanel) {
     window.showSection(MainWindow::Section::Board);
-    auto* info = window.findChild<chessgui::app::GameInfoPanel*>();
+    auto* info = window.findChild<kiebitz::app::GameInfoPanel*>();
     ASSERT_NE(info, nullptr);
     emit info->headerEdited(QStringLiteral("White"), QStringLiteral("Carlsen"));
     emit info->headerEdited(QStringLiteral("Black"), QStringLiteral("Nepomniachtchi"));
@@ -560,11 +560,11 @@ TEST_F(DocumentsTest, CopyAndPaste) {
 }
 
 /// Design review: the Library and a game with variations, saved as PNGs when
-/// CHESSGUI_SNAPSHOT_DIR is set. CHESSGUI_REVIEW_LIBRARY may name a real folder to show (it is
+/// KIEBITZ_SNAPSHOT_DIR is set. KIEBITZ_REVIEW_LIBRARY may name a real folder to show (it is
 /// only read); otherwise the test's own files are used.
 TEST_F(DocumentsTest, Snapshots) {
-    const QString dir = qEnvironmentVariable("CHESSGUI_SNAPSHOT_DIR");
-    const QString review = qEnvironmentVariable("CHESSGUI_REVIEW_LIBRARY");
+    const QString dir = qEnvironmentVariable("KIEBITZ_SNAPSHOT_DIR");
+    const QString review = qEnvironmentVariable("KIEBITZ_REVIEW_LIBRARY");
     const auto save = [&](const QString& name) {
         QApplication::processEvents();
         const QImage image = window.grab().toImage();
@@ -593,7 +593,7 @@ TEST_F(DocumentsTest, Snapshots) {
     save(QStringLiteral("library"));
 
     // The biggest game in the library, opened at a move with variations.
-    std::shared_ptr<chessgui::app::PgnFile> biggest;
+    std::shared_ptr<kiebitz::app::PgnFile> biggest;
     int index = 0;
     std::size_t length = 0;
     for (const auto& file : window.library().files()) {

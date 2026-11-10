@@ -5,7 +5,7 @@
 
 #include <cstdint>
 
-namespace chessgui::app {
+namespace kiebitz::app {
 
 /// Small line icons drawn in code, so they stay crisp at any size and follow the app's colours
 /// without shipping image files.
@@ -27,4 +27,4 @@ enum class IconKind : std::uint8_t {
 [[nodiscard]] QIcon makeIcon(IconKind kind, const QColor& color, const QColor& disabledColor,
                              int size = 16);
 
-} // namespace chessgui::app
+} // namespace kiebitz::app

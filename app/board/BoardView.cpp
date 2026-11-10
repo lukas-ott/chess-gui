@@ -16,7 +16,7 @@
 #include <tuple>
 #include <utility>
 
-namespace chessgui::app {
+namespace kiebitz::app {
 namespace {
 
 using core::Color;
@@ -701,4 +701,4 @@ void BoardView::paintPromotion(QPainter& painter) {
     painter.setBrush(Qt::NoBrush);
 }
 
-} // namespace chessgui::app
+} // namespace kiebitz::app

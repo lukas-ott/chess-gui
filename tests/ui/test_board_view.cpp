@@ -9,9 +9,9 @@
 
 namespace {
 
-using chessgui::app::BoardTheme;
-using chessgui::app::BoardView;
-using namespace chessgui::core;
+using kiebitz::app::BoardTheme;
+using kiebitz::app::BoardView;
+using namespace kiebitz::core;
 
 Square sq(std::string_view name) {
     return Square::parse(name).value();
@@ -164,10 +164,10 @@ TEST_F(BoardViewTest, NewPositionClearsTheSelection) {
     EXPECT_EQ(moves.count(), 0);
 }
 
-/// Writes PNGs of the board in various states when CHESSGUI_SNAPSHOT_DIR is set, so the
+/// Writes PNGs of the board in various states when KIEBITZ_SNAPSHOT_DIR is set, so the
 /// rendering can be looked at. Always checks that painting works.
 TEST_F(BoardViewTest, Snapshots) {
-    const QString dir = qEnvironmentVariable("CHESSGUI_SNAPSHOT_DIR");
+    const QString dir = qEnvironmentVariable("KIEBITZ_SNAPSHOT_DIR");
     const auto save = [&](const QString& name) {
         const QImage image = board.grab().toImage();
         EXPECT_FALSE(image.isNull());
@@ -210,16 +210,16 @@ TEST_F(BoardViewTest, Snapshots) {
         board.setTheme(theme);
         save(QStringLiteral("theme-") + theme.name);
     }
-    for (const auto& name : chessgui::app::PieceSet::available()) {
+    for (const auto& name : kiebitz::app::PieceSet::available()) {
         board.setPieceSet(name);
         save(QStringLiteral("pieces-") + name);
     }
 }
 
-/// Interaction states for design review (saved when CHESSGUI_SNAPSHOT_DIR is set): dragging
+/// Interaction states for design review (saved when KIEBITZ_SNAPSHOT_DIR is set): dragging
 /// over a capture and over an empty square, a selection with captures, and many arrow shapes.
 TEST_F(BoardViewTest, DesignStates) {
-    const QString dir = qEnvironmentVariable("CHESSGUI_SNAPSHOT_DIR");
+    const QString dir = qEnvironmentVariable("KIEBITZ_SNAPSHOT_DIR");
     const auto save = [&](const QString& name) {
         const QImage image = board.grab().toImage();
         EXPECT_FALSE(image.isNull());

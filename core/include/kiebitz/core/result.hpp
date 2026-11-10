@@ -5,7 +5,7 @@
 #include <utility>
 #include <variant>
 
-namespace chessgui::core {
+namespace kiebitz::core {
 
 /// Why an operation failed, in words a user can read ("rank 3 has 9 squares").
 struct Error {
@@ -55,4 +55,4 @@ private:
     std::variant<T, Error> m_data;
 };
 
-} // namespace chessgui::core
+} // namespace kiebitz::core

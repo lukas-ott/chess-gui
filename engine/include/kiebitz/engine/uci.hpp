@@ -1,7 +1,7 @@
 #pragma once
 
-#include "chessgui/core/position.hpp"
-#include "chessgui/engine/score.hpp"
+#include "kiebitz/core/position.hpp"
+#include "kiebitz/engine/score.hpp"
 
 #include <cstdint>
 #include <optional>
@@ -11,7 +11,7 @@
 
 /// The UCI protocol: what a chess engine prints, read into plain structs, and the commands sent
 /// to it. https://backscattering.de/chess/uci/
-namespace chessgui::engine {
+namespace kiebitz::engine {
 
 /// One "info" line with a score and a line (principal variation) to go with it.
 struct Info {
@@ -56,4 +56,4 @@ struct Option {
 [[nodiscard]] std::vector<core::Move> pvMoves(const core::Position& position,
                                               const std::vector<std::string>& pv);
 
-} // namespace chessgui::engine
+} // namespace kiebitz::engine

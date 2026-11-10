@@ -1,6 +1,6 @@
 #include "StockfishDownload.hpp"
 
-#include "chessgui/engine/release.hpp"
+#include "kiebitz/engine/release.hpp"
 
 #include <QCoreApplication>
 #include <QDir>
@@ -13,7 +13,7 @@
 #include <QNetworkReply>
 #include <QProcess>
 
-namespace chessgui::app {
+namespace kiebitz::app {
 namespace {
 
 constexpr auto kLatestRelease =
@@ -23,7 +23,7 @@ QNetworkRequest makeRequest(const QUrl& url) {
     QNetworkRequest request(url);
     // A plain client name: no personal details go to GitHub.
     request.setHeader(QNetworkRequest::UserAgentHeader,
-                      QStringLiteral("ChessGui/%1").arg(QCoreApplication::applicationVersion()));
+                      QStringLiteral("Kiebitz/%1").arg(QCoreApplication::applicationVersion()));
     request.setTransferTimeout(30000); // without any data for this long, give up
     return request;
 }
@@ -251,4 +251,4 @@ void StockfishDownload::cleanUp() {
     }
 }
 
-} // namespace chessgui::app
+} // namespace kiebitz::app

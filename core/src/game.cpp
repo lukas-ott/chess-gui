@@ -1,9 +1,9 @@
-#include "chessgui/core/game.hpp"
+#include "kiebitz/core/game.hpp"
 
 #include <algorithm>
 #include <cassert>
 
-namespace chessgui::core {
+namespace kiebitz::core {
 
 Game::Game() : Game(Position()) {}
 
@@ -311,4 +311,4 @@ void Game::setSquareMarks(NodeId id, std::vector<SquareMark> marks) {
     at(id).squareMarks = std::move(marks);
 }
 
-} // namespace chessgui::core
+} // namespace kiebitz::core

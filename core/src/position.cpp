@@ -1,4 +1,4 @@
-#include "chessgui/core/position.hpp"
+#include "kiebitz/core/position.hpp"
 
 #include "fen.hpp"
 
@@ -8,7 +8,7 @@
 #include <cstdlib>
 #include <utility>
 
-namespace chessgui::core {
+namespace kiebitz::core {
 
 // ---- Conversions between our types and chess-library's ----------------------------------------
 namespace {
@@ -372,4 +372,4 @@ Result<Move> Position::parseSan(std::string_view san) const {
     return *found;
 }
 
-} // namespace chessgui::core
+} // namespace kiebitz::core

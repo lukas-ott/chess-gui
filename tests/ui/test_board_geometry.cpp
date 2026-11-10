@@ -4,8 +4,8 @@
 
 namespace {
 
-using chessgui::app::BoardGeometry;
-using chessgui::core::Square;
+using kiebitz::app::BoardGeometry;
+using kiebitz::core::Square;
 
 Square sq(std::string_view name) {
     return Square::parse(name).value();

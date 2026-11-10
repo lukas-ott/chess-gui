@@ -45,12 +45,12 @@ jobs:
           bash scripts/lint.sh build/ci
 
       - name: Benchmark (move generation)
-        run: ./build/ci/bench/chessgui_bench --benchmark_min_time=0.2s
+        run: ./build/ci/bench/kiebitz_bench --benchmark_min_time=0.2s
 
       - name: Startup time
         env:
           QT_QPA_PLATFORM: offscreen
-          CHESSGUI_STARTUP_LIMIT_MS: "2000" # CI runners are slower than a local Mac
+          KIEBITZ_STARTUP_LIMIT_MS: "2000" # CI runners are slower than a local Mac
         run: bash scripts/measure_startup.sh build/ci 3
 
       - name: Package (self-contained app + DMG)
@@ -59,7 +59,7 @@ jobs:
       - name: Upload DMG
         uses: actions/upload-artifact@v4
         with:
-          name: ChessGui-macOS
+          name: Kiebitz-macOS
           path: build/ci/package/*.dmg
           if-no-files-found: error
 

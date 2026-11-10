@@ -1,14 +1,14 @@
 #pragma once
 
-#include "chessgui/core/position.hpp"
-#include "chessgui/engine/uci.hpp"
+#include "kiebitz/core/position.hpp"
+#include "kiebitz/engine/uci.hpp"
 
 #include <QObject>
 #include <QString>
 
 #include <vector>
 
-namespace chessgui::app {
+namespace kiebitz::app {
 
 /// What an analysis source currently knows about a position.
 struct AnalysisUpdate {
@@ -32,11 +32,11 @@ public:
 
 signals:
     /// New or deeper lines. An update with no lines clears the old ones.
-    void updated(const chessgui::app::AnalysisUpdate& update);
+    void updated(const kiebitz::app::AnalysisUpdate& update);
     /// A short note on what's going on ("Not in the Lichess cloud"); empty clears it.
     void statusChanged(const QString& status);
     /// Something went wrong for good (the engine crashed or couldn't start).
     void failed(const QString& message);
 };
 
-} // namespace chessgui::app
+} // namespace kiebitz::app

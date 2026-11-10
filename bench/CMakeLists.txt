@@ -1,10 +1,10 @@
-add_executable(chessgui_bench bench_core.cpp bench_engine.cpp bench_perft.cpp bench_pgn.cpp)
-target_link_libraries(chessgui_bench PRIVATE chessgui::pgn chessgui::engine
+add_executable(kiebitz_bench bench_core.cpp bench_engine.cpp bench_perft.cpp bench_pgn.cpp)
+target_link_libraries(kiebitz_bench PRIVATE kiebitz::pgn kiebitz::engine
     benchmark::benchmark_main)
-chessgui_set_warnings(chessgui_bench)
+kiebitz_set_warnings(kiebitz_bench)
 
-if(CHESSGUI_BUILD_APP)
-    add_executable(chessgui_bench_ui bench_board.cpp)
-    target_link_libraries(chessgui_bench_ui PRIVATE chessgui_ui benchmark::benchmark)
-    chessgui_set_warnings(chessgui_bench_ui)
+if(KIEBITZ_BUILD_APP)
+    add_executable(kiebitz_bench_ui bench_board.cpp)
+    target_link_libraries(kiebitz_bench_ui PRIVATE kiebitz_ui benchmark::benchmark)
+    kiebitz_set_warnings(kiebitz_bench_ui)
 endif()

@@ -4,7 +4,8 @@ Project context for Claude sessions working in this repo.
 
 ## What this is
 
-A native macOS chess GUI (C++20, Qt 6 Widgets, GPL-3.0) focused on opening preparation.
+**Kiebitz** (formerly ChessGui): a native macOS chess app (C++20, Qt 6 Widgets, GPL-3.0) for
+opening preparation and training.
 Main goal: **speed**. App launch, opening files and opening databases all under 1 s.
 Spec: https://claude.ai/artifact/72UYJmxrxkknmn2oTY4o3C
 
@@ -14,7 +15,7 @@ Spec: https://claude.ai/artifact/72UYJmxrxkknmn2oTY4o3C
 cmake --workflow --preset dev                    # configure + build + test
 cmake --preset core-only && cmake --build --preset core-only && ctest --preset core-only
 cmake --preset debug && cmake --build --preset debug && ctest --preset debug   # ASan/UBSan, Homebrew clang
-./build/release/bench/chessgui_bench
+./build/release/bench/kiebitz_bench
 bash scripts/measure_startup.sh build/release
 bash scripts/lint.sh [build-dir]                 # clang-format + clang-tidy, must pass in CI
 bash scripts/package_macos.sh                    # self-contained .app + .dmg
@@ -32,7 +33,7 @@ bash scripts/package_macos.sh                    # self-contained .app + .dmg
 - Engine UI tests use `tests/fake_engine.cpp`, a predictable UCI engine; a `RealEngine` test runs
   Homebrew's Stockfish when it is installed (skipped in CI). Tests never use the network.
 - UI behaviour gets tests in `tests/ui/` (real mouse events, offscreen). Set
-  `CHESSGUI_SNAPSHOT_DIR=<dir>` when running `chessgui_ui_tests` to save PNGs of the board.
+  `KIEBITZ_SNAPSHOT_DIR=<dir>` when running `kiebitz_ui_tests` to save PNGs of the board.
 - Performance-sensitive code gets a benchmark in `bench/`.
 - New Qt plugins the app needs (e.g. image formats) go into the `PLUGINS` list in
   `scripts/package_macos.sh`, or the packaged app won't have them.
@@ -42,9 +43,9 @@ bash scripts/package_macos.sh                    # self-contained .app + .dmg
 ## Code style
 
 - `.clang-format` is the source of truth (4 spaces, 100 columns).
-- Namespaces `chessgui::core`, `chessgui::app`, ...; classes `CamelCase`, functions
+- Namespaces `kiebitz::core`, `kiebitz::app`, ...; classes `CamelCase`, functions
   `camelBack`, private members `m_name`, constants `kName`.
-- Files: `.hpp` / `.cpp`; public core headers under `core/include/chessgui/core/`.
+- Files: `.hpp` / `.cpp`; public core headers under `core/include/kiebitz/core/`.
 - UI colours come from `AppStyle` (app/style/): its palette, style sheet and `colors()`.
   Don't hard-code colours in widgets (the board's square and drawing colours are the exception).
 - Prefer value types, `std::span`/`std::string_view` for views, no raw `new` outside

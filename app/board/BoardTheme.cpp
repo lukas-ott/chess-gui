@@ -1,6 +1,6 @@
 #include "BoardTheme.hpp"
 
-namespace chessgui::app {
+namespace kiebitz::app {
 
 QList<BoardTheme> BoardTheme::presets() {
     // name, light squares, dark squares, highlight
@@ -32,4 +32,4 @@ BoardTheme BoardTheme::custom(const QColor& light, const QColor& dark) {
     return {QStringLiteral("Custom"), light, dark, QColor(0xFF, 0xD8, 0x4D, 0x73)};
 }
 
-} // namespace chessgui::app
+} // namespace kiebitz::app

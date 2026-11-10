@@ -1,7 +1,7 @@
 // Move generation throughput. Run from the release preset:
-//   ./build/release/bench/chessgui_bench
+//   ./build/release/bench/kiebitz_bench
 
-#include "chessgui/core/perft.hpp"
+#include "kiebitz/core/perft.hpp"
 
 #include <benchmark/benchmark.h>
 
@@ -13,7 +13,7 @@ void perftStartPosition(benchmark::State& state) {
     const auto depth = static_cast<int>(state.range(0));
     std::uint64_t nodes = 0;
     for ([[maybe_unused]] const auto _ : state) {
-        nodes = chessgui::core::perft(chessgui::core::kStartFen, depth);
+        nodes = kiebitz::core::perft(kiebitz::core::kStartFen, depth);
         benchmark::DoNotOptimize(nodes);
     }
     state.counters["nodes/s"] =

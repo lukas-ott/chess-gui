@@ -1,14 +1,15 @@
 #include "GameInfoPanel.hpp"
 
 #include <QComboBox>
-#include <QFormLayout>
+#include <QGridLayout>
+#include <QLabel>
 #include <QLineEdit>
 #include <QSignalBlocker>
+#include <QVBoxLayout>
 
 #include <algorithm>
-#include <array>
 
-namespace chessgui::app {
+namespace kiebitz::app {
 namespace {
 
 QString value(const core::Game& game, const QString& name) {
@@ -21,41 +22,57 @@ QString value(const core::Game& game, const QString& name) {
 } // namespace
 
 GameInfoPanel::GameInfoPanel(QWidget* parent) : QWidget(parent) {
-    auto* form = new QFormLayout(this);
-    form->setContentsMargins(12, 10, 12, 10);
-    form->setVerticalSpacing(6);
-    form->setLabelAlignment(Qt::AlignRight);
+    // Two columns of small titles over their fields, as elsewhere in the app (engine cards and
+    // settings): names on the left, the shorter values beside them.
+    auto* grid = new QGridLayout(this);
+    grid->setContentsMargins(10, 10, 10, 10);
+    grid->setHorizontalSpacing(12);
+    grid->setVerticalSpacing(12);
+    grid->setColumnStretch(0, 3);
+    grid->setColumnStretch(1, 2);
 
-    // header name, label, placeholder
-    const std::array<std::array<QString, 3>, 9> fields{{
-        {QStringLiteral("White"), tr("White"), tr("Player")},
-        {QStringLiteral("WhiteElo"), tr("White Elo"), QString()},
-        {QStringLiteral("Black"), tr("Black"), tr("Player")},
-        {QStringLiteral("BlackElo"), tr("Black Elo"), QString()},
-        {QStringLiteral("Event"), tr("Event"), QString()},
-        {QStringLiteral("Site"), tr("Site"), QString()},
-        {QStringLiteral("Date"), tr("Date"), QStringLiteral("2026.11.10")},
-        {QStringLiteral("Round"), tr("Round"), QString()},
-        {QStringLiteral("ECO"), tr("Opening (ECO)"), QStringLiteral("C65")},
-    }};
-    for (const auto& [header, label, placeholder] : fields) {
+    const auto titled = [](const QString& title, QWidget* field) {
+        auto* cell = new QWidget;
+        auto* layout = new QVBoxLayout(cell);
+        layout->setContentsMargins(0, 0, 0, 0);
+        layout->setSpacing(6);
+        auto* label = new QLabel(title.toUpper());
+        label->setProperty("role", "statTitle");
+        layout->addWidget(label);
+        layout->addWidget(field);
+        return cell;
+    };
+    const auto field = [this](const QString& header, const QString& placeholder) {
         auto* edit = new QLineEdit;
+        edit->setObjectName(QStringLiteral("header") + header);
         edit->setPlaceholderText(placeholder);
         connect(edit, &QLineEdit::textEdited, this, [this, header](const QString& text) {
             emit headerEdited(header, text.isEmpty() ? QStringLiteral("?") : text);
         });
-        form->addRow(label, edit);
         m_fields.push_back({header, edit});
-        if (header == u"BlackElo") {
-            m_result = new QComboBox;
-            m_result->addItems({QStringLiteral("*"), QStringLiteral("1-0"), QStringLiteral("0-1"),
-                                QStringLiteral("1/2-1/2")});
-            connect(m_result, &QComboBox::activated, this, [this](int) {
-                emit headerEdited(QStringLiteral("Result"), m_result->currentText());
-            });
-            form->addRow(tr("Result"), m_result);
-        }
-    }
+        return edit;
+    };
+    m_result = new QComboBox;
+    m_result->setObjectName(QStringLiteral("headerResult"));
+    m_result->addItems({QStringLiteral("*"), QStringLiteral("1-0"), QStringLiteral("0-1"),
+                        QStringLiteral("1/2-1/2")});
+    connect(m_result, &QComboBox::activated, this,
+            [this](int) { emit headerEdited(QStringLiteral("Result"), m_result->currentText()); });
+
+    // Row by row: left (wide), right (short).
+    grid->addWidget(titled(tr("White"), field(QStringLiteral("White"), tr("Player"))), 0, 0);
+    grid->addWidget(titled(tr("Elo"), field(QStringLiteral("WhiteElo"), QString())), 0, 1);
+    grid->addWidget(titled(tr("Black"), field(QStringLiteral("Black"), tr("Player"))), 1, 0);
+    grid->addWidget(titled(tr("Elo"), field(QStringLiteral("BlackElo"), QString())), 1, 1);
+    grid->addWidget(titled(tr("Event"), field(QStringLiteral("Event"), QString())), 2, 0);
+    grid->addWidget(titled(tr("Result"), m_result), 2, 1);
+    grid->addWidget(titled(tr("Site"), field(QStringLiteral("Site"), QString())), 3, 0);
+    grid->addWidget(titled(tr("Date"), field(QStringLiteral("Date"), QStringLiteral("2026.11.10"))),
+                    3, 1);
+    grid->addWidget(
+        titled(tr("Opening (ECO)"), field(QStringLiteral("ECO"), QStringLiteral("C65"))), 4, 0);
+    grid->addWidget(titled(tr("Round"), field(QStringLiteral("Round"), QString())), 4, 1);
+    grid->setRowStretch(5, 1);
     setGame(nullptr);
 }
 
@@ -71,4 +88,4 @@ void GameInfoPanel::setGame(const core::Game* game) {
     m_result->setCurrentIndex(std::max(index, 0));
 }
 
-} // namespace chessgui::app
+} // namespace kiebitz::app

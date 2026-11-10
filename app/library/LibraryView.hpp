@@ -1,7 +1,7 @@
 #pragma once
 
-#include "chessgui/core/game.hpp"
 #include "document/GameDocument.hpp"
+#include "kiebitz/core/game.hpp"
 
 #include <QWidget>
 
@@ -20,12 +20,13 @@ class QTableView;
 class QTreeWidget;
 class QTreeWidgetItem;
 
-namespace chessgui::app {
+namespace kiebitz::app {
 
 class AppStyle;
 class BoardView;
 class ElidedLabel;
 class GameListModel;
+class PageHeader;
 struct BoardTheme;
 class Library;
 
@@ -63,7 +64,7 @@ public:
     bool eventFilter(QObject* watched, QEvent* event) override;
 
 signals:
-    void openGameRequested(std::shared_ptr<chessgui::app::PgnFile> file, int index);
+    void openGameRequested(std::shared_ptr<kiebitz::app::PgnFile> file, int index);
     void changeFolderRequested();
 
 private:
@@ -79,7 +80,7 @@ private:
 
     Library& m_library;
     const AppStyle& m_style;
-    QLabel* m_status = nullptr;
+    PageHeader* m_header = nullptr; ///< "Library", the counts, the folder button
     QPushButton* m_folderButton = nullptr;
     QTreeWidget* m_files = nullptr;
     ElidedLabel* m_listTitle = nullptr; ///< the selected file or folder; cut off if long
@@ -107,4 +108,4 @@ private:
     QSortFilterProxyModel* m_filter = nullptr;
 };
 
-} // namespace chessgui::app
+} // namespace kiebitz::app

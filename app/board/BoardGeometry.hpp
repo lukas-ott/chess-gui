@@ -1,6 +1,6 @@
 #pragma once
 
-#include "chessgui/core/types.hpp"
+#include "kiebitz/core/types.hpp"
 
 #include <QPoint>
 #include <QPointF>
@@ -9,7 +9,7 @@
 
 #include <optional>
 
-namespace chessgui::app {
+namespace kiebitz::app {
 
 /// Where the board and each square sit inside the widget.
 ///
@@ -39,4 +39,4 @@ private:
     bool m_flipped = false;
 };
 
-} // namespace chessgui::app
+} // namespace kiebitz::app

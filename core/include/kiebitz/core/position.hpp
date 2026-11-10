@@ -1,7 +1,7 @@
 #pragma once
 
-#include "chessgui/core/result.hpp"
-#include "chessgui/core/types.hpp"
+#include "kiebitz/core/result.hpp"
+#include "kiebitz/core/types.hpp"
 
 #include <cstdint>
 #include <memory>
@@ -10,7 +10,7 @@
 #include <string_view>
 #include <vector>
 
-namespace chessgui::core {
+namespace kiebitz::core {
 
 inline constexpr std::string_view kStartFen =
     "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
@@ -78,4 +78,4 @@ private:
     std::unique_ptr<Impl> m_impl;
 };
 
-} // namespace chessgui::core
+} // namespace kiebitz::core

@@ -4,7 +4,7 @@
 #include <QPainterPath>
 #include <QVariantAnimation>
 
-namespace chessgui::app {
+namespace kiebitz::app {
 namespace {
 
 // Like the board's squares, the bar's colours are part of the board's look, not the app theme:
@@ -94,4 +94,4 @@ void EvalBar::paintEvent(QPaintEvent* /*event*/) {
     painter.drawText(textRect, Qt::AlignCenter, text);
 }
 
-} // namespace chessgui::app
+} // namespace kiebitz::app

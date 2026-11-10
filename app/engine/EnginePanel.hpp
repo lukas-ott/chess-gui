@@ -8,11 +8,11 @@
 #include <optional>
 #include <vector>
 
-class QSpinBox;
+class QButtonGroup;
 class QToolButton;
 class QVBoxLayout;
 
-namespace chessgui::app {
+namespace kiebitz::app {
 
 class AppStyle;
 class EngineRegistry;
@@ -57,10 +57,10 @@ signals:
     /// What the board and eval bar should show (from the primary engine): the first move of
     /// each line, best first, and the best line's score from White's view. `running` is false
     /// when no engine runs.
-    void analysisChanged(const std::vector<chessgui::core::Move>& bestMoves,
-                         std::optional<chessgui::engine::Score> score, bool running);
+    void analysisChanged(const std::vector<kiebitz::core::Move>& bestMoves,
+                         std::optional<kiebitz::engine::Score> score, bool running);
     /// The user clicked a move in a line: play these moves from the current position.
-    void playRequested(const std::vector<chessgui::core::Move>& moves);
+    void playRequested(const std::vector<kiebitz::core::Move>& moves);
     /// Go to the Engines page (to add or set up engines).
     void manageEnginesRequested();
 
@@ -77,10 +77,10 @@ private:
     int m_multiPv = 3;
     QStringList m_lastRunning; ///< what Space starts again
 
-    QSpinBox* m_lineCount = nullptr;
+    QButtonGroup* m_lineButtons = nullptr; ///< 1–5 lines: a segmented control
     QToolButton* m_manage = nullptr;
     QWidget* m_noEngine = nullptr; ///< "no engine on this Mac yet", with a way to get one
     QVBoxLayout* m_sectionLayout = nullptr;
 };
 
-} // namespace chessgui::app
+} // namespace kiebitz::app

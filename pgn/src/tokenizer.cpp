@@ -2,7 +2,7 @@
 
 #include <algorithm>
 
-namespace chessgui::pgn::detail {
+namespace kiebitz::pgn::detail {
 namespace {
 
 bool isSpace(char c) noexcept {
@@ -149,4 +149,4 @@ std::size_t lineAt(std::string_view text, std::size_t offset) {
     return static_cast<std::size_t>(std::count(prefix.begin(), prefix.end(), '\n')) + 1;
 }
 
-} // namespace chessgui::pgn::detail
+} // namespace kiebitz::pgn::detail

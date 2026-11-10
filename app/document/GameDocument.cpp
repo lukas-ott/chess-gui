@@ -3,7 +3,7 @@
 #include <QFileInfo>
 #include <QObject>
 
-namespace chessgui::app {
+namespace kiebitz::app {
 
 QString GameDocument::title() const {
     const auto white = QString::fromStdString(std::string(game.header("White")));
@@ -24,4 +24,4 @@ QString GameDocument::title() const {
     return modified ? QStringLiteral("• ") + name : name;
 }
 
-} // namespace chessgui::app
+} // namespace kiebitz::app

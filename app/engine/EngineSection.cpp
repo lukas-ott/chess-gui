@@ -14,7 +14,7 @@
 
 #include <utility>
 
-namespace chessgui::app {
+namespace kiebitz::app {
 namespace {
 
 constexpr int kShownPlies = 14; ///< moves shown per line (the rest is cut off)
@@ -348,4 +348,4 @@ void EngineSection::playLine(int line, int plies) {
     }
 }
 
-} // namespace chessgui::app
+} // namespace kiebitz::app

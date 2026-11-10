@@ -1,4 +1,4 @@
-#include "chessgui/pgn/pgn.hpp"
+#include "kiebitz/pgn/pgn.hpp"
 
 #include <gtest/gtest.h>
 
@@ -7,7 +7,7 @@
 
 namespace {
 
-using namespace chessgui;
+using namespace kiebitz;
 using core::Game;
 using core::NodeId;
 

@@ -1,12 +1,16 @@
-# ChessGui
+# Kiebitz
 
-A fast, native macOS chess GUI for opening preparation, written in C++20 with Qt 6 Widgets.
+A *Kiebitz* is German for the onlooker who watches a game and comments on every move, and for
+the lapwing, the crested bird on the icon. (Formerly ChessGui.)
+
+A fast, native macOS chess app for opening preparation and training, written in C++20 with
+Qt 6 Widgets.
 It opens instantly, keeps your PGN files as the source of truth, and focuses on building
 and training opening repertoires.
 
 > Status: **M4, engine analysis (v1).** A sidebar switches between the board (games in tabs),
 > the Library and the Engines page. The Library shows every PGN file in your library folder
-> (`~/Documents/ChessGui` by default) with a game list and preview. On the board you can edit
+> (`~/Documents/Kiebitz` by default) with a game list and preview. On the board you can edit
 > variations, comments and NAGs, edit headers, save back into the file, and copy or paste PGN
 > and FEN. The Engines page downloads the latest Stockfish in one click (or uses the one on your
 > Mac, or any UCI engine); the Engine tab analyses the board with it or the Lichess cloud: up to
@@ -27,7 +31,7 @@ at pinned versions on first configure.
 
 ```bash
 cmake --workflow --preset dev              # configure + build + test
-open build/dev/app/ChessGui.app
+open build/dev/app/Kiebitz.app
 ```
 
 | Preset      | Use it for                                                       |
@@ -41,7 +45,7 @@ open build/dev/app/ChessGui.app
 ```bash
 cmake --preset debug && cmake --build --preset debug && ctest --preset debug
 cmake --preset release && cmake --build --preset release
-./build/release/bench/chessgui_bench       # move generation speed
+./build/release/bench/kiebitz_bench       # move generation speed
 bash scripts/measure_startup.sh build/release   # startup time vs. the 1 s target
 bash scripts/lint.sh                       # clang-format + clang-tidy (CI runs this too)
 ```
@@ -49,10 +53,10 @@ bash scripts/lint.sh                       # clang-format + clang-tidy (CI runs 
 ## Packaging
 
 ```bash
-bash scripts/package_macos.sh              # → build/release/package/ChessGui-<version>.dmg
+bash scripts/package_macos.sh              # → build/release/package/Kiebitz-<version>.dmg
 ```
 
-This builds the release preset and copies Qt and every library it needs into `ChessGui.app`,
+This builds the release preset and copies Qt and every library it needs into `Kiebitz.app`,
 so the app runs on a Mac without Homebrew or Qt. It needs at least the macOS version of the
 Mac that built it, because Homebrew builds Qt for that version (see the top of `CMakeLists.txt`). The script fails if anything
 in the bundle still loads from outside it. CI builds the same DMG on every push and attaches it

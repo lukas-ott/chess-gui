@@ -8,7 +8,7 @@
 #include <QNetworkReply>
 #include <QUrlQuery>
 
-namespace chessgui::app {
+namespace kiebitz::app {
 namespace {
 
 constexpr int kDebounceMs = 300; // wait until the user stops stepping through moves
@@ -77,7 +77,7 @@ void CloudEval::request() {
     QNetworkRequest request(url);
     // A plain client name: no personal details go to Lichess.
     request.setHeader(QNetworkRequest::UserAgentHeader,
-                      QStringLiteral("ChessGui/%1").arg(QCoreApplication::applicationVersion()));
+                      QStringLiteral("Kiebitz/%1").arg(QCoreApplication::applicationVersion()));
     request.setTransferTimeout(kTimeoutMs);
     m_reply = m_network->get(request);
     QNetworkReply* reply = m_reply;
@@ -158,4 +158,4 @@ std::vector<engine::Info> CloudEval::parse(const QByteArray& json, const core::P
     return lines;
 }
 
-} // namespace chessgui::app
+} // namespace kiebitz::app

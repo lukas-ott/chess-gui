@@ -4,7 +4,7 @@
 #include <QList>
 #include <QString>
 
-namespace chessgui::app {
+namespace kiebitz::app {
 
 /// The board's colours: the two square colours plus a semi-transparent highlight for the last
 /// move and the selected piece, chosen to sit well on those squares.
@@ -21,4 +21,4 @@ struct BoardTheme {
     [[nodiscard]] static BoardTheme custom(const QColor& light, const QColor& dark);
 };
 
-} // namespace chessgui::app
+} // namespace kiebitz::app

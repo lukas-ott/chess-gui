@@ -4,7 +4,7 @@
 
 #include <vector>
 
-namespace chessgui::app {
+namespace kiebitz::app {
 
 /// A UCI engine the user added, and how to run it.
 struct EngineEntry {
@@ -28,4 +28,4 @@ void save(const std::vector<EngineEntry>& list);
 [[nodiscard]] QString downloadFolder();
 
 } // namespace engines
-} // namespace chessgui::app
+} // namespace kiebitz::app

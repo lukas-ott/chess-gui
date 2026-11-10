@@ -19,7 +19,7 @@ add_library(chess_library INTERFACE)
 add_library(thirdparty::chess ALIAS chess_library)
 target_include_directories(chess_library SYSTEM INTERFACE "${chess_library_SOURCE_DIR}/include")
 
-if(CHESSGUI_BUILD_TESTS)
+if(KIEBITZ_BUILD_TESTS)
     set(INSTALL_GTEST OFF CACHE BOOL "" FORCE)
     set(BUILD_GMOCK OFF CACHE BOOL "" FORCE)
     FetchContent_Declare(googletest
@@ -29,7 +29,7 @@ if(CHESSGUI_BUILD_TESTS)
     FetchContent_MakeAvailable(googletest)
 endif()
 
-if(CHESSGUI_BUILD_BENCH)
+if(KIEBITZ_BUILD_BENCH)
     set(BENCHMARK_ENABLE_TESTING OFF CACHE BOOL "" FORCE)
     set(BENCHMARK_ENABLE_GTEST_TESTS OFF CACHE BOOL "" FORCE)
     set(BENCHMARK_ENABLE_INSTALL OFF CACHE BOOL "" FORCE)

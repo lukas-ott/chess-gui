@@ -8,7 +8,7 @@
 
 class QApplication;
 
-namespace chessgui::app {
+namespace kiebitz::app {
 
 /// The app's look: a flat, modern palette with rounded cards (inspired by Mantine, the design
 /// system En Croissant uses), in a dark and a light variant.
@@ -62,4 +62,4 @@ private:
     bool m_applying = false;
 };
 
-} // namespace chessgui::app
+} // namespace kiebitz::app

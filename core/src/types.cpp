@@ -1,6 +1,6 @@
-#include "chessgui/core/types.hpp"
+#include "kiebitz/core/types.hpp"
 
-namespace chessgui::core {
+namespace kiebitz::core {
 namespace {
 
 constexpr std::string_view kPieceLetters = "PNBRQK";
@@ -64,4 +64,4 @@ std::optional<Move> Move::fromUci(std::string_view uci) {
     return move;
 }
 
-} // namespace chessgui::core
+} // namespace kiebitz::core

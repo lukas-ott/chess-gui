@@ -5,6 +5,9 @@
 #include "document/PgnIo.hpp"
 #include "style/AppStyle.hpp"
 #include "style/Icons.hpp"
+#include "style/Layout.hpp"
+#include "style/PageHeader.hpp"
+#include "widgets/EmptyState.hpp"
 
 #include <QAbstractTableModel>
 #include <QApplication>
@@ -31,7 +34,7 @@
 #include <functional>
 #include <map>
 
-namespace chessgui::app {
+namespace kiebitz::app {
 /// A one-line label that cuts its text off with "…" when there isn't room, instead of forcing
 /// its column (and with it the window) to be as wide as the text. The full text is the tooltip.
 class ElidedLabel : public QLabel {
@@ -172,24 +175,19 @@ LibraryView::LibraryView(Library& library, const AppStyle& style, QWidget* paren
     : QWidget(parent), m_library(library), m_style(style), m_model(new GameListModel(this)),
       m_filter(new QSortFilterProxyModel(this)) {
     auto* layout = new QVBoxLayout(this);
-    layout->setContentsMargins(20, 16, 20, 20);
-    layout->setSpacing(14);
+    layout->setContentsMargins(layout::kPage);
+    layout->setSpacing(layout::kPageSpacing);
 
     // ---- Header: title, counts, folder button --------------------------------------------------
-    auto* header = new QHBoxLayout;
-    header->setSpacing(10);
-    header->addWidget(label(tr("Library"), "pageTitle"));
-    m_status = label(QString(), "emptyHint");
-    header->addWidget(m_status, 0, Qt::AlignBottom);
-    header->addStretch();
+    m_header = new PageHeader(tr("Library"));
     m_folderButton = new QPushButton;
     m_folderButton->setObjectName(QStringLiteral("libraryFolder"));
     m_folderButton->setProperty("role", "secondary");
     m_folderButton->setToolTip(
         tr("Your library folder. Click to look inside or choose another one."));
     connect(m_folderButton, &QPushButton::clicked, this, &LibraryView::changeFolderRequested);
-    header->addWidget(m_folderButton);
-    layout->addLayout(header);
+    m_header->addAction(m_folderButton);
+    layout->addWidget(m_header);
 
     // ---- Files: a folder tree ------------------------------------------------------------------
     m_files = new QTreeWidget;
@@ -216,8 +214,8 @@ LibraryView::LibraryView(Library& library, const AppStyle& style, QWidget* paren
     auto* filesCard = card();
     m_cards[0] = filesCard;
     auto* filesBox = new QVBoxLayout(filesCard);
-    filesBox->setContentsMargins(10, 12, 10, 10);
-    filesBox->setSpacing(8);
+    filesBox->setContentsMargins(layout::kCard);
+    filesBox->setSpacing(layout::kCardSpacing);
     filesBox->addWidget(label(tr("FILES"), "cardTitle"));
     filesBox->addWidget(m_files, 1);
 
@@ -271,8 +269,8 @@ LibraryView::LibraryView(Library& library, const AppStyle& style, QWidget* paren
     auto* gamesCard = card();
     m_cards[1] = gamesCard;
     auto* gamesBox = new QVBoxLayout(gamesCard);
-    gamesBox->setContentsMargins(14, 12, 14, 10);
-    gamesBox->setSpacing(10);
+    gamesBox->setContentsMargins(layout::kCard);
+    gamesBox->setSpacing(layout::kCardSpacing);
     auto* gamesHeader = new QHBoxLayout;
     auto* titles = new QVBoxLayout;
     titles->setSpacing(0);
@@ -338,17 +336,15 @@ LibraryView::LibraryView(Library& library, const AppStyle& style, QWidget* paren
     detailsBox->addSpacing(4);
     detailsBox->addWidget(open);
     detailsBox->addStretch(1);
-    auto* pickHint = label(tr("Select a game to preview it."), "emptyHint");
-    pickHint->setAlignment(Qt::AlignCenter);
     m_preview = new QStackedWidget;
-    m_preview->addWidget(pickHint);
+    m_preview->addWidget(new EmptyState(IconKind::Board, tr("No game selected"), {}, m_style));
     m_preview->addWidget(details);
 
     auto* previewCard = card();
     m_cards[2] = previewCard;
     auto* previewBox = new QVBoxLayout(previewCard);
-    previewBox->setContentsMargins(14, 12, 14, 14);
-    previewBox->setSpacing(10);
+    previewBox->setContentsMargins(layout::kCard);
+    previewBox->setSpacing(layout::kCardSpacing);
     previewBox->addWidget(label(tr("PREVIEW"), "cardTitle"));
     previewBox->addWidget(m_preview, 1);
 
@@ -402,19 +398,19 @@ LibraryView::LibraryView(Library& library, const AppStyle& style, QWidget* paren
     layout->addWidget(m_pages, 1);
 
     connect(&m_library, &Library::scanned, this, [this](int files, int games, qint64 ms) {
-        m_status->setText(files == 0 ? QString()
-                                     : (files == 1 ? tr("1 file") : tr("%1 files").arg(files)) +
-                                           QStringLiteral("  ·  ") + gamesText(games));
-        m_status->setToolTip(tr("Loaded in %1 ms").arg(ms));
+        m_header->setSubtitle(files == 0 ? QString()
+                                         : (files == 1 ? tr("1 file") : tr("%1 files").arg(files)) +
+                                               QStringLiteral("  ·  ") + gamesText(games));
+        m_header->setSubtitleToolTip(tr("Loaded in %1 ms").arg(ms));
         refreshFiles();
     });
     // While files are still being read (iCloud may be downloading them), the list is already
     // there; the counts fill in as they arrive.
     connect(&m_library, &Library::progress, this, [this] {
         const auto count = static_cast<int>(m_library.files().size());
-        m_status->setText((count == 1 ? tr("1 file") : tr("%1 files").arg(count)) +
-                          QStringLiteral("  ·  ") + tr("reading…"));
-        m_status->setToolTip({});
+        m_header->setSubtitle((count == 1 ? tr("1 file") : tr("%1 files").arg(count)) +
+                              QStringLiteral("  ·  ") + tr("reading…"));
+        m_header->setSubtitleToolTip({});
         refreshFiles();
     });
     connect(&m_style, &AppStyle::changed, this, &LibraryView::updateIcons);
@@ -835,4 +831,4 @@ void LibraryView::openSelectedGame() {
     }
 }
 
-} // namespace chessgui::app
+} // namespace kiebitz::app

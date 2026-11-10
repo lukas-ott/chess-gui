@@ -12,7 +12,7 @@
 class QNetworkAccessManager;
 class QNetworkReply;
 
-namespace chessgui::app {
+namespace kiebitz::app {
 
 /// Evaluations from the Lichess cloud: positions Lichess users have already analysed deeply,
 /// fetched over the network (https://lichess.org/api#tag/Analysis). Only common positions are
@@ -50,4 +50,4 @@ private:
     QDateTime m_pausedUntil;                           ///< after Lichess said "too many requests"
 };
 
-} // namespace chessgui::app
+} // namespace kiebitz::app

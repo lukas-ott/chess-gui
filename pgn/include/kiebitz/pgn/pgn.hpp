@@ -1,7 +1,7 @@
 #pragma once
 
-#include "chessgui/core/game.hpp"
-#include "chessgui/core/result.hpp"
+#include "kiebitz/core/game.hpp"
+#include "kiebitz/core/result.hpp"
 
 #include <cstddef>
 #include <string>
@@ -16,7 +16,7 @@
 ///      game list). This is a quick scan with no chess logic.
 ///   2. parseGame() reads one game's moves when the user opens it.
 /// The byte offsets from step 1 also let a changed game be saved by replacing just its text.
-namespace chessgui::pgn {
+namespace kiebitz::pgn {
 
 using Headers = std::vector<std::pair<std::string, std::string>>;
 
@@ -46,4 +46,4 @@ struct GameEntry {
 /// with variations, comments (arrows and marks as [%cal]/[%csl]) and NAGs as $n.
 [[nodiscard]] std::string writeGame(const core::Game& game);
 
-} // namespace chessgui::pgn
+} // namespace kiebitz::pgn

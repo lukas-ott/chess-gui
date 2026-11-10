@@ -5,7 +5,7 @@
 #include <QSaveFile>
 #include <QtConcurrent/QtConcurrentRun>
 
-namespace chessgui::app::pgnio {
+namespace kiebitz::app::pgnio {
 namespace {
 
 Loaded index(std::shared_ptr<PgnFile> file) {
@@ -91,4 +91,4 @@ std::string replaceGame(const PgnFile& file, int index, std::string_view gameTex
     return result;
 }
 
-} // namespace chessgui::app::pgnio
+} // namespace kiebitz::app::pgnio

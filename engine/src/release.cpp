@@ -1,9 +1,9 @@
-#include "chessgui/engine/release.hpp"
+#include "kiebitz/engine/release.hpp"
 
 #include <algorithm>
 #include <cctype>
 
-namespace chessgui::engine {
+namespace kiebitz::engine {
 namespace {
 
 std::string lower(std::string_view text) {
@@ -77,4 +77,4 @@ std::optional<std::string> sha256FromDigest(std::string_view digest) {
     return hex;
 }
 
-} // namespace chessgui::engine
+} // namespace kiebitz::engine

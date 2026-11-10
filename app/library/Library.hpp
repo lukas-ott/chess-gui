@@ -12,7 +12,7 @@
 #include <memory>
 #include <vector>
 
-namespace chessgui::app {
+namespace kiebitz::app {
 
 /// One PGN file in the library folder.
 struct LibraryFile {
@@ -24,7 +24,7 @@ struct LibraryFile {
 };
 
 /// The library: every PGN file in one folder (and its subfolders), indexed so the game lists
-/// are ready to browse. Like En Croissant's documents folder; by default ~/Documents/ChessGui.
+/// are ready to browse. Like En Croissant's documents folder; by default ~/Documents/Kiebitz.
 ///
 /// Scanning runs in the background: list the files, then read and index every new or changed
 /// file in parallel (unchanged files keep their index). The folder is watched, so files that
@@ -83,4 +83,4 @@ private:
     std::shared_ptr<std::atomic<bool>> m_cancel = std::make_shared<std::atomic<bool>>(false);
 };
 
-} // namespace chessgui::app
+} // namespace kiebitz::app

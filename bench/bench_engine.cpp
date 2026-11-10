@@ -1,8 +1,8 @@
 // Engine output: Stockfish prints dozens of "info" lines a second with 3–5 lines at once, and
 // each shown line is turned into SAN for the panel. Both must stay far below a frame (16 ms).
-// Run from the release preset:  ./build/release/bench/chessgui_bench --benchmark_filter=engine
+// Run from the release preset:  ./build/release/bench/kiebitz_bench --benchmark_filter=engine
 
-#include "chessgui/engine/uci.hpp"
+#include "kiebitz/engine/uci.hpp"
 
 #include <benchmark/benchmark.h>
 
@@ -10,7 +10,7 @@
 
 namespace {
 
-using namespace chessgui;
+using namespace kiebitz;
 
 // A typical deep Stockfish line (depth 30, 20-move PV).
 constexpr const char* kInfoLine =

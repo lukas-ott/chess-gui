@@ -1,6 +1,6 @@
 #pragma once
 
-#include "chessgui/engine/score.hpp"
+#include "kiebitz/engine/score.hpp"
 
 #include <QWidget>
 
@@ -8,7 +8,7 @@
 
 class QVariantAnimation;
 
-namespace chessgui::app {
+namespace kiebitz::app {
 
 /// The bar beside the board that shows who is better: White's share grows from White's side
 /// (the bottom, unless the board is flipped), following the same winning-chances curve as
@@ -42,4 +42,4 @@ private:
     QVariantAnimation* m_animation = nullptr;
 };
 
-} // namespace chessgui::app
+} // namespace kiebitz::app

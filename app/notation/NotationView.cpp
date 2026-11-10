@@ -1,6 +1,6 @@
 #include "NotationView.hpp"
 
-#include "chessgui/core/annotations.hpp"
+#include "kiebitz/core/annotations.hpp"
 #include "style/AppStyle.hpp"
 
 #include <QContextMenuEvent>
@@ -14,7 +14,7 @@
 #include <array>
 #include <functional>
 
-namespace chessgui::app {
+namespace kiebitz::app {
 namespace {
 
 using core::NodeId;
@@ -295,4 +295,4 @@ void NotationView::contextMenuEvent(QContextMenuEvent* event) {
     menu.exec(event->globalPos());
 }
 
-} // namespace chessgui::app
+} // namespace kiebitz::app

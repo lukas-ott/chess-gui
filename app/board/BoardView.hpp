@@ -3,8 +3,8 @@
 #include "BoardGeometry.hpp"
 #include "BoardTheme.hpp"
 #include "PieceSet.hpp"
-#include "chessgui/core/annotations.hpp"
-#include "chessgui/core/position.hpp"
+#include "kiebitz/core/annotations.hpp"
+#include "kiebitz/core/position.hpp"
 
 #include <QPoint>
 #include <QWidget>
@@ -14,7 +14,7 @@
 
 class QVariantAnimation;
 
-namespace chessgui::app {
+namespace kiebitz::app {
 
 /// The interactive chess board.
 ///
@@ -77,10 +77,10 @@ public:
 
 signals:
     /// The user played a legal move in the shown position.
-    void moveMade(chessgui::core::Move move);
+    void moveMade(kiebitz::core::Move move);
     /// The user drew or removed an arrow or square mark.
-    void drawingsChanged(const std::vector<chessgui::core::Arrow>& arrows,
-                         const std::vector<chessgui::core::SquareMark>& marks);
+    void drawingsChanged(const std::vector<kiebitz::core::Arrow>& arrows,
+                         const std::vector<kiebitz::core::SquareMark>& marks);
 
 protected:
     void paintEvent(QPaintEvent* event) override;
@@ -158,4 +158,4 @@ private:
     QVariantAnimation* m_animation = nullptr;
 };
 
-} // namespace chessgui::app
+} // namespace kiebitz::app
