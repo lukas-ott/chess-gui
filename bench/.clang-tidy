@@ -1,0 +1,4 @@
+# Benchmarks use fixed, known-valid test data like tests do (see tests/.clang-tidy).
+InheritParentConfig: true
+Checks: >
+  -bugprone-unchecked-optional-access

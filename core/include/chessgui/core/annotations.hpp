@@ -44,6 +44,12 @@ struct CommentParts {
 /// The reverse of parseComment(): "[%csl Gd4] [%cal Ge2e4] text".
 [[nodiscard]] std::string formatComment(const CommentParts& parts);
 
+/// What drawing on the board does, as on Lichess: drawing an arrow (or marking a square) that is
+/// already there in the same colour removes it; in another colour it changes the colour;
+/// otherwise it is added.
+void toggleArrow(std::vector<Arrow>& arrows, Arrow arrow);
+void toggleSquareMark(std::vector<SquareMark>& marks, SquareMark mark);
+
 /// Numeric Annotation Glyphs ($1, $2, ...): the symbol for display, e.g. 1 → "!", 14 → "⩲".
 /// Empty for NAGs without a common symbol.
 [[nodiscard]] std::string_view nagSymbol(std::uint8_t nag) noexcept;

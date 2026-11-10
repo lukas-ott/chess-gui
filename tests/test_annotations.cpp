@@ -56,6 +56,34 @@ TEST(Comment, FormatRoundTrips) {
     EXPECT_EQ(formatComment({}), "");
 }
 
+TEST(Drawing, ToggleArrow) {
+    std::vector<Arrow> arrows;
+    const Arrow green{sq("e2"), sq("e4"), MarkColor::Green};
+    toggleArrow(arrows, green);
+    ASSERT_EQ(arrows.size(), 1U);
+
+    toggleArrow(arrows, {sq("e2"), sq("e4"), MarkColor::Red}); // same squares, new colour
+    ASSERT_EQ(arrows.size(), 1U);
+    EXPECT_EQ(arrows[0].color, MarkColor::Red);
+
+    toggleArrow(arrows, {sq("e4"), sq("e2"), MarkColor::Red}); // other direction: a new arrow
+    EXPECT_EQ(arrows.size(), 2U);
+
+    toggleArrow(arrows, {sq("e2"), sq("e4"), MarkColor::Red}); // same again: removed
+    ASSERT_EQ(arrows.size(), 1U);
+    EXPECT_EQ(arrows[0].from, sq("e4"));
+}
+
+TEST(Drawing, ToggleSquareMark) {
+    std::vector<SquareMark> marks;
+    toggleSquareMark(marks, {sq("d4"), MarkColor::Green});
+    toggleSquareMark(marks, {sq("d4"), MarkColor::Blue});
+    ASSERT_EQ(marks.size(), 1U);
+    EXPECT_EQ(marks[0].color, MarkColor::Blue);
+    toggleSquareMark(marks, {sq("d4"), MarkColor::Blue});
+    EXPECT_TRUE(marks.empty());
+}
+
 TEST(Nag, Symbols) {
     EXPECT_EQ(nagSymbol(nag::kGood), "!");
     EXPECT_EQ(nagSymbol(nag::kInteresting), "!?");

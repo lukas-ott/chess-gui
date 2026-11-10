@@ -1,9 +1,10 @@
 cmake_minimum_required(VERSION 3.25)
 
-# Oldest macOS the app runs on. Must be set before project(). The spec aims for macOS 13, but
-# Homebrew's Qt is built for 14.4+, so the app can't run on anything older while it links
-# against it. Lowering this only makes sense with a Qt build that targets older macOS.
-set(CMAKE_OSX_DEPLOYMENT_TARGET "14.4" CACHE STRING "Minimum macOS version")
+# Oldest macOS the app runs on (CMAKE_OSX_DEPLOYMENT_TARGET) is deliberately not set here, so it
+# defaults to the macOS of the Mac doing the build. That matches Homebrew's Qt, whose libraries
+# are built for the machine's macOS (QtSvg on macOS 26 needs 26), so the app never claims to run
+# somewhere its Qt can't. To support older macOS (the spec aims for 13), build against the
+# official Qt installer and pass e.g. -DCMAKE_OSX_DEPLOYMENT_TARGET=13.0.
 
 project(ChessGui
     VERSION 0.1.0

@@ -4,8 +4,10 @@ A fast, native macOS chess GUI for opening preparation, written in C++20 with Qt
 It opens instantly, keeps your PGN files as the source of truth, and focuses on building
 and training opening repertoires.
 
-> Status: **M1, chess core.** Positions, FEN, SAN and the game tree with variations and
-> annotations work and are tested. The window still shows a placeholder layout; the board UI is M2.
+> Status: **M2, board.** You can play moves on the board (click or drag), step back and forth
+> with ← → Home End or the move list, draw arrows and mark squares, flip the board and pick
+> board colours, piece sets and a light or dark appearance. Full notation editing and PGN files
+> come in M3.
 
 ## Requirements (macOS)
 
@@ -47,7 +49,8 @@ bash scripts/package_macos.sh              # → build/release/package/ChessGui-
 ```
 
 This builds the release preset and copies Qt and every library it needs into `ChessGui.app`,
-so the app runs on a Mac without Homebrew or Qt (macOS 14.4+). The script fails if anything
+so the app runs on a Mac without Homebrew or Qt. It needs at least the macOS version of the
+Mac that built it, because Homebrew builds Qt for that version (see the top of `CMakeLists.txt`). The script fails if anything
 in the bundle still loads from outside it. CI builds the same DMG on every push and attaches it
 to the run as a download.
 
@@ -63,8 +66,10 @@ In CLion or VS Code (CMake Tools + clangd), just open the folder: both pick up t
 
 ```
 core/     Pure C++ chess logic: positions, FEN, SAN, game tree, annotations. No Qt.
-app/      Qt Widgets application (main window, board view, panels).
-tests/    GoogleTest unit tests (perft-verified move generation, ...).
+app/      Qt Widgets application: main window, board/ (board widget, themes, piece sets),
+          style/ (app colours and style sheet, light and dark),
+          resources/pieces/ (bundled SVG piece sets, with their licences).
+tests/    GoogleTest unit tests; tests/ui/ drives the board and window offscreen.
 bench/    Google Benchmark micro-benchmarks.
 scripts/  Dev scripts (startup timing).
 cmake/    Compiler options and pinned dependencies.

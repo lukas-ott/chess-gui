@@ -127,6 +127,35 @@ std::string formatComment(const CommentParts& parts) {
     return result;
 }
 
+namespace {
+
+template <typename T, typename SamePlace>
+void toggle(std::vector<T>& items, const T& item, SamePlace samePlace) {
+    for (auto it = items.begin(); it != items.end(); ++it) {
+        if (samePlace(*it, item)) {
+            if (it->color == item.color) {
+                items.erase(it);
+            } else {
+                it->color = item.color;
+            }
+            return;
+        }
+    }
+    items.push_back(item);
+}
+
+} // namespace
+
+void toggleArrow(std::vector<Arrow>& arrows, Arrow arrow) {
+    toggle(arrows, arrow,
+           [](const Arrow& a, const Arrow& b) { return a.from == b.from && a.to == b.to; });
+}
+
+void toggleSquareMark(std::vector<SquareMark>& marks, SquareMark mark) {
+    toggle(marks, mark,
+           [](const SquareMark& a, const SquareMark& b) { return a.square == b.square; });
+}
+
 // ---- NAGs --------------------------------------------------------------------------------------
 namespace {
 

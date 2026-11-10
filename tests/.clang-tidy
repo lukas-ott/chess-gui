@@ -1,6 +1,8 @@
-# Same rules as the project root, minus one check that doesn't fit tests: test data such as
-# Square::parse("e4") is known to be valid, and if it weren't, .value() throwing would fail the
-# test loudly, which is what a test should do.
+# Same rules as the project root, minus checks that don't fit tests:
+# - test data such as Square::parse("e4") is known to be valid, and if it weren't, .value()
+#   throwing would fail the test loudly, which is what a test should do;
+# - GoogleTest fixtures share state with their tests through protected members by design.
 InheritParentConfig: true
 Checks: >
-  -bugprone-unchecked-optional-access
+  -bugprone-unchecked-optional-access,
+  -cppcoreguidelines-non-private-member-variables-in-classes

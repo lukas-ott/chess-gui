@@ -29,6 +29,8 @@ bash scripts/package_macos.sh                    # self-contained .app + .dmg
   background and report back through signals.
 - Nothing slow at startup. Load lazily; engines start on demand.
 - Every new chess-logic feature gets unit tests. Move generation is verified with perft.
+- UI behaviour gets tests in `tests/ui/` (real mouse events, offscreen). Set
+  `CHESSGUI_SNAPSHOT_DIR=<dir>` when running `chessgui_ui_tests` to save PNGs of the board.
 - Performance-sensitive code gets a benchmark in `bench/`.
 - New Qt plugins the app needs (e.g. image formats) go into the `PLUGINS` list in
   `scripts/package_macos.sh`, or the packaged app won't have them.
@@ -41,11 +43,13 @@ bash scripts/package_macos.sh                    # self-contained .app + .dmg
 - Namespaces `chessgui::core`, `chessgui::app`, ...; classes `CamelCase`, functions
   `camelBack`, private members `m_name`, constants `kName`.
 - Files: `.hpp` / `.cpp`; public core headers under `core/include/chessgui/core/`.
+- UI colours come from `AppStyle` (app/style/): its palette, style sheet and `colors()`.
+  Don't hard-code colours in widgets (the board's square and drawing colours are the exception).
 - Prefer value types, `std::span`/`std::string_view` for views, no raw `new` outside
   Qt parent/child ownership.
 
 ## Milestones
 
-M0 skeleton (done) → M1 core (game tree, SAN/FEN; done) → M2 board UI → M3 PGN viewer/editor →
+M0 skeleton (done) → M1 core (game tree, SAN/FEN; done) → M2 board UI (done) → M3 PGN viewer/editor →
 M4 engine (= v1) → M5 library + cache → M6 repertoire → M7 training → M8 explorer + gap check
 (= v2) → M9 game import → M10 large database (= v3).

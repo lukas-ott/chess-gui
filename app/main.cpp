@@ -1,8 +1,10 @@
 #include "MainWindow.hpp"
 #include "chessgui/core/version.hpp"
+#include "style/AppStyle.hpp"
 
 #include <QApplication>
 #include <QElapsedTimer>
+#include <QSettings>
 #include <QTimer>
 
 #include <cstdio>
@@ -29,7 +31,12 @@ int main(int argc, char* argv[]) {
         QString::fromUtf8(chessgui::core::version().data(),
                           static_cast<qsizetype>(chessgui::core::version().size())));
 
-    chessgui::app::MainWindow window;
+    // Style first, with the saved appearance, so the window never flashes in the wrong colours.
+    chessgui::app::AppStyle style(app);
+    style.setAppearance(chessgui::app::AppStyle::fromString(
+        QSettings().value(QStringLiteral("app/appearance")).toString()));
+
+    chessgui::app::MainWindow window(style);
     window.show();
 
     if (envFlag("CHESSGUI_STARTUP_TIMING") || envFlag("CHESSGUI_STARTUP_EXIT")) {
