@@ -29,4 +29,12 @@ if(CHESSGUI_BUILD_APP)
     gtest_discover_tests(chessgui_ui_tests
         DISCOVERY_TIMEOUT 30
         PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+
+    # The real app, started and quit straight away (as the startup check in CI does). Quitting
+    # used to crash; in the debug preset ASan names any memory error on the way out.
+    add_test(NAME App.StartsAndQuitsCleanly COMMAND chessgui)
+    set_tests_properties(App.StartsAndQuitsCleanly PROPERTIES
+        TIMEOUT 60
+        ENVIRONMENT "QT_QPA_PLATFORM=offscreen;CHESSGUI_STARTUP_EXIT=1;\
+CHESSGUI_SETTINGS_DIR=${CMAKE_CURRENT_BINARY_DIR}/app-test-settings")
 endif()

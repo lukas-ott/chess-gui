@@ -27,6 +27,11 @@ int main(int argc, char* argv[]) {
     QApplication app(argc, argv);
     QApplication::setApplicationName(QStringLiteral("ChessGui"));
     QApplication::setOrganizationName(QStringLiteral("ChessGui"));
+    // Tests that run the real app use throwaway settings, so they never change the user's.
+    if (const QString dir = qEnvironmentVariable("CHESSGUI_SETTINGS_DIR"); !dir.isEmpty()) {
+        QSettings::setDefaultFormat(QSettings::IniFormat);
+        QSettings::setPath(QSettings::IniFormat, QSettings::UserScope, dir);
+    }
     QApplication::setApplicationVersion(
         QString::fromUtf8(chessgui::core::version().data(),
                           static_cast<qsizetype>(chessgui::core::version().size())));

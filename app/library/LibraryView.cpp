@@ -404,19 +404,26 @@ LibraryView::LibraryView(Library& library, const AppStyle& style, QWidget* paren
     });
     connect(&m_style, &AppStyle::changed, this, &LibraryView::updateIcons);
     // The column that has the keyboard gets an accent border, so it's clear where ↑ ↓ ← → go.
-    connect(qApp, &QApplication::focusChanged, this, [this](QWidget*, QWidget* now) {
-        const std::array<QWidget*, 3> owners{m_files, m_games, m_previewBoard};
-        for (std::size_t i = 0; i < m_cards.size(); ++i) {
-            const bool focused = now != nullptr && now == owners[i];
-            if (m_cards[i]->property("focused").toBool() != focused) {
-                m_cards[i]->setProperty("focused", focused);
-                m_cards[i]->style()->unpolish(m_cards[i]);
-                m_cards[i]->style()->polish(m_cards[i]);
+    m_focusOutline =
+        connect(qApp, &QApplication::focusChanged, this, [this](QWidget*, QWidget* now) {
+            const std::array<QWidget*, 3> owners{m_files, m_games, m_previewBoard};
+            for (std::size_t i = 0; i < m_cards.size(); ++i) {
+                const bool focused = now != nullptr && now == owners[i];
+                if (m_cards[i]->property("focused").toBool() != focused) {
+                    m_cards[i]->setProperty("focused", focused);
+                    m_cards[i]->style()->unpolish(m_cards[i]);
+                    m_cards[i]->style()->polish(m_cards[i]);
+                }
             }
-        }
-    });
+        });
     updateIcons();
     refreshFiles();
+}
+
+LibraryView::~LibraryView() {
+    // Qt deletes the child widgets after this destructor, and the focus moves as each one goes.
+    // The outline handler must not run then: it reads members that are already gone.
+    disconnect(m_focusOutline);
 }
 
 void LibraryView::setBoardLook(const BoardTheme& theme, const QString& pieceSet) {

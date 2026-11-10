@@ -48,6 +48,11 @@ class LibraryView : public QWidget {
 
 public:
     LibraryView(Library& library, const AppStyle& style, QWidget* parent = nullptr);
+    ~LibraryView() override;
+    LibraryView(const LibraryView&) = delete;
+    LibraryView& operator=(const LibraryView&) = delete;
+    LibraryView(LibraryView&&) = delete;
+    LibraryView& operator=(LibraryView&&) = delete;
 
     /// Selects a file by path (e.g. after opening a game from it). Does nothing if it isn't there.
     void selectFile(const QString& path);
@@ -95,8 +100,9 @@ private:
     std::size_t m_previewPly = 0;            ///< index into m_previewLine
     int m_previewRequest = 0;                ///< newer selections win over slower, older parses
 
-    std::array<QFrame*, 3> m_cards{}; ///< files, games, preview: the focused one is outlined
-    bool m_rebuilding = false;        ///< while the tree is rebuilt, its signals are ignored
+    std::array<QFrame*, 3> m_cards{};       ///< files, games, preview: the focused one is outlined
+    QMetaObject::Connection m_focusOutline; ///< to qApp's focusChanged; see ~LibraryView()
+    bool m_rebuilding = false;              ///< while the tree is rebuilt, its signals are ignored
     GameListModel* m_model = nullptr;
     QSortFilterProxyModel* m_filter = nullptr;
 };
