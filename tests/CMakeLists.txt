@@ -5,10 +5,11 @@ add_executable(chessgui_tests
     test_fen.cpp
     test_game.cpp
     test_perft.cpp
+    test_pgn.cpp
     test_san.cpp
     test_types.cpp
     test_version.cpp)
-target_link_libraries(chessgui_tests PRIVATE chessgui::core GTest::gtest_main)
+target_link_libraries(chessgui_tests PRIVATE chessgui::pgn GTest::gtest_main) # pgn brings core
 chessgui_set_warnings(chessgui_tests)
 
 gtest_discover_tests(chessgui_tests DISCOVERY_TIMEOUT 30)

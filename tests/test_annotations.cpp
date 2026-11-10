@@ -27,6 +27,13 @@ TEST(Comment, TextAroundCommandsIsKept) {
     EXPECT_EQ(parseComment("plain text").text, "plain text");
 }
 
+TEST(Comment, LineBreakInsideACommand) {
+    const auto parts = parseComment("[%csl\nRe5] [%cal\r\nGe2e4] text");
+    EXPECT_EQ(parts.squareMarks.size(), 1U);
+    EXPECT_EQ(parts.arrows.size(), 1U);
+    EXPECT_EQ(parts.text, "text");
+}
+
 TEST(Comment, OtherCommandsStayInText) {
     const auto parts = parseComment("[%clk 0:05:00] [%cal Ga1a8] Time trouble");
     EXPECT_EQ(parts.text, "[%clk 0:05:00] Time trouble");

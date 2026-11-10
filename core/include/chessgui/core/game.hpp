@@ -61,6 +61,10 @@ public:
     [[nodiscard]] std::string_view header(std::string_view name) const noexcept;
     void setHeader(std::string_view name, std::string_view value);
     void removeHeader(std::string_view name);
+    /// Replaces all headers, keeping the given order (as read from a file).
+    void setHeaders(std::vector<std::pair<std::string, std::string>> headers) {
+        m_headers = std::move(headers);
+    }
 
     // ---- Reading the tree ----------------------------------------------------------------------
     [[nodiscard]] const Position& startPosition() const noexcept { return m_start; }

@@ -66,6 +66,7 @@ In CLion or VS Code (CMake Tools + clangd), just open the folder: both pick up t
 
 ```
 core/     Pure C++ chess logic: positions, FEN, SAN, game tree, annotations. No Qt.
+pgn/      Reading, indexing and writing PGN files (fast game index, round-trip safe). No Qt.
 app/      Qt Widgets application: main window, board/ (board widget, themes, piece sets),
           style/ (app colours and style sheet, light and dark),
           resources/pieces/ (bundled SVG piece sets, with their licences).
@@ -75,7 +76,7 @@ scripts/  Dev scripts (startup timing).
 cmake/    Compiler options and pinned dependencies.
 ```
 
-Planned modules (`pgn/`, `engine/`, `library/`, `repertoire/`, `gamedb/`, `online/`) are added
+Planned modules (`engine/`, `library/`, `repertoire/`, `gamedb/`, `online/`) are added
 with their milestones.
 
 ## Roadmap

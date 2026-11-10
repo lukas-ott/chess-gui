@@ -22,7 +22,7 @@ bash scripts/package_macos.sh                    # self-contained .app + .dmg
 
 ## Rules
 
-- `core/` (and later `pgn/`, `library/`, `repertoire/`, `gamedb/`) must **never** include Qt.
+- `core/`, `pgn/` (and later `library/`, `repertoire/`, `gamedb/`) must **never** include Qt.
   Only `app/` (UI) and thin adapters may use Qt. The `ci-core` job builds core without Qt
   to enforce this.
 - No blocking work on the UI thread: parsing, I/O, search, network and engine I/O run in the

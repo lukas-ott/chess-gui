@@ -27,6 +27,7 @@ include(CompilerOptions)
 include(Dependencies)
 
 add_subdirectory(core)
+add_subdirectory(pgn)
 
 if(CHESSGUI_BUILD_APP)
     add_subdirectory(app)

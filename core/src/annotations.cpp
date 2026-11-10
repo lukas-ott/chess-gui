@@ -64,7 +64,7 @@ CommentParts parseComment(std::string_view comment) {
         }
         text.append(comment.substr(pos, start - pos));
         const auto command = trim(comment.substr(start + 2, end - start - 2));
-        const auto space = command.find(' ');
+        const auto space = command.find_first_of(" \t\r\n"); // a PGN line break may split it
         const auto name = command.substr(0, space);
         const auto args =
             space == std::string_view::npos ? std::string_view{} : trim(command.substr(space + 1));
