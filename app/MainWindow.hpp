@@ -39,6 +39,7 @@ class EnginesView;
 class DatabaseManager;
 class DatabasesView;
 class EvalBar;
+class ExplorerPanel;
 class GameInfoPanel;
 class Library;
 class LibraryView;
@@ -162,6 +163,8 @@ private:
     void startPractice(bool fromHere, int depth, bool mistakes = false);
     /// Jump to Line: opens a repertoire file at a position (its hash).
     void jumpToLine(const QString& path, quint64 position);
+    /// Opens a game (from a database) in a new tab, not tied to a file.
+    void openGameCopy(const core::Game& game);
     void goToPosition(std::uint64_t position);
     void stopPractice();
     /// The status line; `mood` > 0 right (a tick), < 0 wrong (a cross), 0 neither.
@@ -219,6 +222,7 @@ private:
     LibraryView* m_libraryView = nullptr;
     DatabaseManager* m_databases = nullptr;
     DatabasesView* m_databasesView = nullptr;
+    ExplorerPanel* m_explorer = nullptr;
     Section m_section = Section::Board;
     QButtonGroup* m_sidebar = nullptr; ///< one button per section, ids = Section
     EngineRegistry* m_engineRegistry = nullptr;

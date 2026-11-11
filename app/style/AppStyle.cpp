@@ -33,6 +33,9 @@ AppStyle::Colors AppStyle::darkColors() {
         .accentText = QColor(0x10, 0x11, 0x13),
         .good = QColor(0x51, 0xCF, 0x66),
         .bad = QColor(0xFF, 0x6B, 0x6B),
+        .whiteWins = QColor(0xE8, 0xE6, 0xE1),
+        .draws = QColor(0x80, 0x83, 0x89),
+        .blackWins = QColor(0x10, 0x11, 0x13),
     };
 }
 
@@ -49,6 +52,9 @@ AppStyle::Colors AppStyle::lightColors() {
         .accentText = QColor(0xFF, 0xFF, 0xFF),
         .good = QColor(0x2F, 0x9E, 0x44),
         .bad = QColor(0xE0, 0x31, 0x31),
+        .whiteWins = QColor(0xFF, 0xFF, 0xFF),
+        .draws = QColor(0xAD, 0xB5, 0xBD),
+        .blackWins = QColor(0x34, 0x3A, 0x40),
     };
 }
 
@@ -445,6 +451,34 @@ QLabel[role="quote"] {
 }
 QProgressBar#practiceBar { background: @raised; border: none; border-radius: 2px; }
 QProgressBar#practiceBar::chunk { background: @accent; border-radius: 2px; }
+
+/* Explorer: the moves and the top games, like the Library's lists */
+QTreeWidget#explorerMoves, QTreeWidget#explorerGames {
+    background: transparent;
+    color: @text;
+    outline: none;
+}
+QTreeWidget#explorerMoves::item, QTreeWidget#explorerGames::item {
+    padding: 5px 4px;
+    border: none;
+}
+QTreeWidget#explorerMoves QHeaderView { background: transparent; border: none; }
+QTreeWidget#explorerMoves QHeaderView::section {
+    background: transparent;
+    color: @muted;
+    border: none;
+    border-bottom: 1px solid @border;
+    padding: 2px 4px 6px 4px;
+    font-size: 10px;
+    font-weight: 600;
+}
+QTreeWidget#explorerMoves::item:hover, QTreeWidget#explorerGames::item:hover {
+    background: @raised;
+}
+QTreeWidget#explorerMoves::item:selected, QTreeWidget#explorerGames::item:selected {
+    background: @accentTint;
+    color: @accent;
+}
 
 /* Databases: the list of databases */
 QLabel[role="databaseName"] { color: @text; font-size: 13px; font-weight: 600; }

@@ -12,6 +12,7 @@
 #include <sqlite3.h>
 #include <sys/mman.h>
 #include <sys/stat.h>
+#include <tuple>
 #include <unistd.h>
 #include <unordered_map>
 #include <unordered_set>
@@ -197,9 +198,12 @@ struct DatabaseWriter::Impl {
     Statement insertName;
     std::unordered_map<std::string, std::int64_t> names;
     std::unordered_set<std::int64_t> players;
+    std::uint64_t online = 0; ///< games whose site is lichess.org or chess.com
     std::FILE* moves = nullptr;
     std::vector<std::uint64_t> offsets{0};
     std::vector<std::uint16_t> elo;
+    std::vector<std::uint16_t> whiteElo;
+    std::vector<std::uint16_t> blackElo;
     std::vector<std::uint8_t> results;
     std::vector<std::uint8_t> standard; ///< 1: from the usual start position
 
@@ -286,6 +290,11 @@ void DatabaseWriter::add(const ScannedGame& game) {
             d.players.insert(player);
         }
     }
+    if (game.site.find("lichess.org") != std::string::npos ||
+        game.site.find("chess.com") != std::string::npos ||
+        game.site.find("Chess.com") != std::string::npos) {
+        ++d.online;
+    }
     const auto bindId = [insert](int index, std::int64_t id) {
         if (id == 0) {
             sqlite3_bind_null(insert, index);
@@ -313,6 +322,8 @@ void DatabaseWriter::add(const ScannedGame& game) {
     const int rated = (game.whiteElo > 0 ? 1 : 0) + (game.blackElo > 0 ? 1 : 0);
     d.elo.push_back(
         static_cast<std::uint16_t>(rated == 0 ? 0 : (game.whiteElo + game.blackElo) / rated));
+    d.whiteElo.push_back(static_cast<std::uint16_t>(std::clamp(game.whiteElo, 0, 65535)));
+    d.blackElo.push_back(static_cast<std::uint16_t>(std::clamp(game.blackElo, 0, 65535)));
     d.results.push_back(static_cast<std::uint8_t>(game.result));
     d.standard.push_back(game.fen.empty() ? 1 : 0);
     // Commit now and then, so the transaction never grows too big.
@@ -387,8 +398,16 @@ std::string DatabaseWriter::finish(const std::function<void(double)>& progress) 
                 ++sums[(3 * (i + 1)) + 2];
             }
         }
+        // Both players' ratings, in the same order, for the explorer's averages.
+        std::vector<std::uint16_t> ratings;
+        ratings.reserve(2 * order.size());
+        for (const std::uint32_t game : order) {
+            ratings.push_back(d.whiteElo[game]);
+            ratings.push_back(d.blackElo[game]);
+        }
         if (!writeFile(pathIn(d.folder, "order.bin"), order) ||
-            !writeFile(pathIn(d.folder, "sums.bin"), sums)) {
+            !writeFile(pathIn(d.folder, "sums.bin"), sums) ||
+            !writeFile(pathIn(d.folder, "ratings.bin"), ratings)) {
             return "Couldn't write the database (is the disk full?).";
         }
     }
@@ -409,6 +428,7 @@ std::string DatabaseWriter::finish(const std::function<void(double)>& progress) 
     setMeta("source", d.info.source);
     setMeta("games", std::to_string(d.results.size()));
     setMeta("players", std::to_string(d.players.size()));
+    setMeta("online", 2 * d.online > d.results.size() ? "1" : "0");
     meta.reset(); // finished before the commit
     if (!exec(d.db, "COMMIT")) {
         return "Couldn't write the database: " + std::string(sqlite3_errmsg(d.db));
@@ -438,6 +458,7 @@ struct Database::Impl {
     MappedFile order;
     MappedFile sums;
     MappedFile elo;
+    MappedFile ratings; ///< optional: databases made before it don't have it
 
     Impl() = default;
     Impl(const Impl&) = delete;
@@ -467,6 +488,27 @@ struct Database::Impl {
         const auto* hi = std::partition_point(
             lo, last, [&](std::uint32_t game) { return head(game) <= prefix; });
         return {static_cast<std::size_t>(lo - first), static_cast<std::size_t>(hi - first)};
+    }
+    /// White's and Black's average rating in [lo, hi) of order.bin (0: none known).
+    [[nodiscard]] std::pair<int, int> averages(std::size_t lo, std::size_t hi) const {
+        if (ratings.count<std::uint16_t>() < 2 * hi) {
+            return {0, 0};
+        }
+        const auto* at = ratings.as<std::uint16_t>();
+        std::uint64_t whiteSum = 0;
+        std::uint64_t blackSum = 0;
+        std::uint64_t whiteCount = 0;
+        std::uint64_t blackCount = 0;
+        for (std::size_t i = lo; i < hi; ++i) {
+            const std::uint16_t white = at[2 * i];
+            const std::uint16_t black = at[(2 * i) + 1];
+            whiteSum += white;
+            blackSum += black;
+            whiteCount += white > 0 ? 1U : 0U;
+            blackCount += black > 0 ? 1U : 0U;
+        }
+        return {whiteCount > 0 ? static_cast<int>(whiteSum / whiteCount) : 0,
+                blackCount > 0 ? static_cast<int>(blackSum / blackCount) : 0};
     }
     /// White wins, draws and Black wins in [lo, hi) of order.bin.
     [[nodiscard]] std::array<std::uint64_t, 3> results(std::size_t lo, std::size_t hi) const {
@@ -539,6 +581,7 @@ core::Result<std::unique_ptr<Database>> Database::open(const std::string& folder
         impl->info.source = values["source"];
         impl->info.games = std::stoull("0" + values["games"]);
         impl->info.players = std::stoull("0" + values["players"]);
+        impl->info.online = values["online"] == "1"; // older databases: over the board
     }
     for (auto [file, name] :
          {std::pair{&impl->moves, "moves.bin"}, std::pair{&impl->offsets, "offsets.bin"},
@@ -548,11 +591,64 @@ core::Result<std::unique_ptr<Database>> Database::open(const std::string& folder
             return core::Error{std::string("The database is missing ") + name + "."};
         }
     }
+    impl->ratings.open(pathIn(folder, "ratings.bin")); // optional
     return std::unique_ptr<Database>(new Database(std::move(impl)));
 }
 
 const DatabaseInfo& Database::info() const {
     return m_impl->info;
+}
+
+bool Database::hasRatings() const {
+    return m_impl->ratings.count<std::uint16_t>() == 2 * m_impl->order.count<std::uint32_t>() &&
+           m_impl->order.count<std::uint32_t>() > 0;
+}
+
+std::string_view addRatings(const std::string& folder) {
+    MappedFile offsets;
+    MappedFile order;
+    if (!offsets.open(pathIn(folder, "offsets.bin")) || !order.open(pathIn(folder, "order.bin"))) {
+        return "The database is incomplete.";
+    }
+    const std::size_t games =
+        offsets.count<std::uint64_t>() > 0 ? offsets.count<std::uint64_t>() - 1 : 0;
+    std::vector<std::uint16_t> white(games, 0);
+    std::vector<std::uint16_t> black(games, 0);
+    sqlite3* db = nullptr;
+    const std::string path = pathIn(folder, "games.sqlite");
+    if (sqlite3_open_v2(path.c_str(), &db, SQLITE_OPEN_READONLY, nullptr) != SQLITE_OK) {
+        sqlite3_close(db);
+        return "Couldn't read the database.";
+    }
+    {
+        const Statement query(db, "SELECT id, white_elo, black_elo FROM games");
+        while (query.handle != nullptr && sqlite3_step(query.handle) == SQLITE_ROW) {
+            const auto id = sqlite3_column_int64(query.handle, 0);
+            if (id >= 1 && std::cmp_less_equal(id, games)) {
+                const auto index = static_cast<std::size_t>(id - 1);
+                white[index] = static_cast<std::uint16_t>(
+                    std::clamp(sqlite3_column_int(query.handle, 1), 0, 65535));
+                black[index] = static_cast<std::uint16_t>(
+                    std::clamp(sqlite3_column_int(query.handle, 2), 0, 65535));
+            }
+        }
+    }
+    sqlite3_close(db);
+    std::vector<std::uint16_t> ratings;
+    ratings.reserve(2 * order.count<std::uint32_t>());
+    const auto* sorted = order.as<std::uint32_t>();
+    for (std::size_t i = 0; i < order.count<std::uint32_t>(); ++i) {
+        ratings.push_back(sorted[i] < games ? white[sorted[i]] : 0);
+        ratings.push_back(sorted[i] < games ? black[sorted[i]] : 0);
+    }
+    // Written under another name and renamed, so a reader never sees half a file.
+    const std::string part = pathIn(folder, "ratings.bin.part");
+    if (!writeFile(part, ratings) ||
+        std::rename(part.c_str(), pathIn(folder, "ratings.bin").c_str()) != 0) {
+        std::remove(part.c_str());
+        return "Couldn't write the ratings (is the disk full?).";
+    }
+    return {};
 }
 
 std::uint64_t Database::gameCount() const {
@@ -661,6 +757,7 @@ Explored Database::explore(std::span<const core::Move> line) const {
     explored.white = total[0];
     explored.draws = total[1];
     explored.black = total[2];
+    std::tie(explored.whiteElo, explored.blackElo) = m_impl->averages(lo, hi);
     // The next moves: games that go on are sorted by their next byte, so each move is a run.
     const auto* order = m_impl->order.as<std::uint32_t>();
     const std::size_t at = prefix->size();
@@ -677,8 +774,10 @@ Explored Database::explore(std::span<const core::Move> line) const {
         const auto move = detail::decode(board, static_cast<std::uint8_t>(byte));
         if (move) {
             const auto results = m_impl->results(i, next);
+            const auto [whiteElo, blackElo] = m_impl->averages(i, next);
             explored.moves.push_back({detail::toCore(*move), chess::uci::moveToSan(board, *move),
-                                      next - i, results[0], results[1], results[2]});
+                                      next - i, results[0], results[1], results[2], whiteElo,
+                                      blackElo});
         }
         i = next;
     }
@@ -699,8 +798,12 @@ std::vector<GameInfo> Database::gamesAt(std::span<const core::Move> line, std::s
     const auto* elo = m_impl->elo.as<std::uint16_t>();
     using Entry = std::pair<std::uint16_t, std::uint32_t>; // rating, game
     std::priority_queue<Entry, std::vector<Entry>, std::greater<>> best;
+    const int human = highestHumanRating(m_impl->info);
     for (std::size_t i = lo; i < hi; ++i) {
         const Entry entry{elo[order[i]], order[i]};
+        if (std::cmp_greater(entry.first, human)) {
+            continue; // engine games would fill the list
+        }
         if (best.size() < limit) {
             best.push(entry);
         } else if (entry.first > best.top().first) {

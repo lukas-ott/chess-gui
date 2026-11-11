@@ -24,6 +24,8 @@ qt_add_library(kiebitz_ui STATIC
     databases/DatabasesView.cpp
     databases/DatabasesView.hpp
     document/GameDocument.cpp
+    explorer/ExplorerPanel.cpp
+    explorer/ExplorerPanel.hpp
     document/GameDocument.hpp
     document/PgnIo.cpp
     document/PgnIo.hpp

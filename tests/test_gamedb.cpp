@@ -173,6 +173,12 @@ TEST(GameDatabase, ImportedGamesCanBeExploredSearchedAndRead) {
     EXPECT_EQ(e4e5.games, 2U);
     ASSERT_EQ(e4e5.moves.size(), 2U); // Nc6 and Nf6
     EXPECT_TRUE(db.explore(line({"a4"})).moves.empty());
+    // Average ratings by side: Carlsen–Caruana (2830/2800) and Smith–Carlsen (2100/2850).
+    EXPECT_TRUE(db.hasRatings());
+    EXPECT_EQ(root.whiteElo, 2465);
+    EXPECT_EQ(root.blackElo, 2825);
+    EXPECT_EQ(root.moves[0].whiteElo, 2465); // 1. e4: the same two rated games
+    EXPECT_EQ(root.moves[1].whiteElo, 0);    // 1. d4: no ratings
 
     // The games of a line, best rated first.
     const auto best = db.gamesAt(line({"e4"}), 2);
@@ -189,4 +195,81 @@ TEST(GameDatabase, ImportedGamesCanBeExploredSearchedAndRead) {
     ASSERT_TRUE(game.has_value());
     EXPECT_EQ(game->header("White"), "Jones");
     EXPECT_EQ(game->mainLine().size(), 13U); // the root and 12 moves
+}
+
+TEST(GameDatabase, RatingsAreAddedToOlderDatabases) {
+    const TempFolder folder;
+    {
+        auto writer = gamedb::DatabaseWriter::create(folder.path(), {"Old", "", 0, 0});
+        ASSERT_TRUE(writer.ok());
+        gamedb::GameSplitter splitter;
+        const auto add = [&](std::string_view game) {
+            (*writer)->add(gamedb::scanGame(game));
+        };
+        splitter.feed(kGames, add);
+        splitter.finish(add);
+        EXPECT_EQ((*writer)->finish(), "");
+    }
+    // As made before ratings.bin existed.
+    std::filesystem::remove(std::filesystem::path(folder.path()) / "ratings.bin");
+    {
+        auto db = gamedb::Database::open(folder.path());
+        ASSERT_TRUE(db.ok());
+        EXPECT_FALSE((*db)->hasRatings());
+        EXPECT_EQ((*db)->explore({}).whiteElo, 0);
+        EXPECT_EQ((*db)->explore({}).games, 4U); // everything else works
+    }
+    EXPECT_EQ(gamedb::addRatings(folder.path()), "");
+    auto db = gamedb::Database::open(folder.path());
+    ASSERT_TRUE(db.ok());
+    EXPECT_TRUE((*db)->hasRatings());
+    EXPECT_EQ((*db)->explore({}).whiteElo, 2465);
+    EXPECT_EQ((*db)->explore({}).blackElo, 2825);
+}
+
+TEST(GameDatabase, OnlineDatabasesKeepHigherRatedHumans) {
+    // A 3100 blitz rating online is a human; over the board it would be an engine.
+    const std::string games = "[Site \"https://lichess.org/abc\"]\n[White \"Fast\"]\n"
+                              "[WhiteElo \"3100\"]\n[BlackElo \"3100\"]\n[Result \"1-0\"]\n\n"
+                              "1. e4 e5 1-0\n\n"
+                              "[Site \"Oslo\"]\n[White \"Engine\"]\n[WhiteElo \"3500\"]\n"
+                              "[BlackElo \"3500\"]\n[Result \"1-0\"]\n\n1. e4 c5 1-0\n";
+    const TempFolder folder;
+    {
+        auto writer = gamedb::DatabaseWriter::create(folder.path(), {"Online", "", 0, 0});
+        ASSERT_TRUE(writer.ok());
+        gamedb::GameSplitter splitter;
+        const auto add = [&](std::string_view game) {
+            (*writer)->add(gamedb::scanGame(game));
+        };
+        splitter.feed(games, add);
+        splitter.finish(add);
+        EXPECT_EQ((*writer)->finish(), "");
+    }
+    auto db = gamedb::Database::open(folder.path());
+    ASSERT_TRUE(db.ok());
+    EXPECT_FALSE((*db)->info().online);          // half online is not "mostly"
+    EXPECT_TRUE((*db)->gamesAt({}, 10).empty()); // 3100 and 3500: engines over the board
+
+    // Mostly online: the 3100 game is a human's; the 3500 one is still an engine's.
+    const TempFolder second;
+    {
+        auto writer = gamedb::DatabaseWriter::create(second.path(), {"Online", "", 0, 0});
+        ASSERT_TRUE(writer.ok());
+        gamedb::GameSplitter splitter;
+        const auto add = [&](std::string_view game) {
+            (*writer)->add(gamedb::scanGame(game));
+        };
+        splitter.feed(games + "\n[Site \"https://www.chess.com/game/1\"]\n[Result \"*\"]\n\n1. "
+                              "d4 *\n",
+                      add);
+        splitter.finish(add);
+        EXPECT_EQ((*writer)->finish(), "");
+    }
+    auto onlineDb = gamedb::Database::open(second.path());
+    ASSERT_TRUE(onlineDb.ok());
+    EXPECT_TRUE((*onlineDb)->info().online);
+    const auto top = (*onlineDb)->gamesAt({}, 10);
+    ASSERT_EQ(top.size(), 2U); // the 3100 game and the unrated one
+    EXPECT_EQ(top[0].white, "Fast");
 }

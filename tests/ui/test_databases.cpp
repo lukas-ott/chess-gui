@@ -4,6 +4,9 @@
 #include "databases/AddDatabaseDialog.hpp"
 #include "databases/DatabaseManager.hpp"
 #include "databases/DatabasesView.hpp"
+#include "explorer/ExplorerPanel.hpp"
+#include "library/Library.hpp"
+#include "repertoire/RepertoireStore.hpp"
 #include "style/AppStyle.hpp"
 
 #include <QApplication>
@@ -13,10 +16,12 @@
 #include <QLineEdit>
 #include <QListWidget>
 #include <QProcess>
+#include <QPushButton>
 #include <QSignalSpy>
 #include <QTableView>
 #include <QTemporaryDir>
 #include <QTest>
+#include <QTreeWidget>
 #include <gtest/gtest.h>
 
 namespace {
@@ -177,4 +182,69 @@ TEST(AddDatabase, AChosenFileNamesTheDatabase) {
     dialog.chooseFile(QStringLiteral("/tmp/Caissabase 2024.7z"));
     EXPECT_EQ(dialog.name(), QStringLiteral("Caissabase 2024"));
     EXPECT_EQ(dialog.path(), QStringLiteral("/tmp/Caissabase 2024.7z"));
+}
+
+TEST_F(DatabasesTest, TheExplorerShowsWhatIsPlayedAndPlaysAMove) {
+    const kiebitz::app::AppStyle style(*qApp);
+    DatabaseManager manager(path("dbs"));
+    kiebitz::app::Library library;
+    kiebitz::app::RepertoireStore repertoires(library);
+    kiebitz::app::ExplorerPanel explorer(manager, repertoires, style);
+    explorer.resize(560, 300); // as short as the tab under the board can be
+    explorer.show();
+    write(path("games.pgn"), kGames);
+    ASSERT_EQ(importAndWait(manager, path("games.pgn"), QStringLiteral("Club games")), QString());
+
+    // After 1. e4: 1... e5 twice, 1... c5 once (most played first).
+    kiebitz::core::Game game;
+    const kiebitz::core::Position start;
+    const auto e4 = game.addMove(kiebitz::core::Game::root(), start.parseSan("e4").value());
+    QSignalSpy updated(&explorer, &kiebitz::app::ExplorerPanel::updated);
+    explorer.setPosition(&game, e4, kiebitz::core::Color::White);
+    ASSERT_TRUE(updated.wait(5000));
+    const QStringList moves = explorer.moveTexts();
+    ASSERT_EQ(moves.size(), 2);
+    EXPECT_TRUE(moves[0].startsWith(u"e5 2"));
+    EXPECT_TRUE(moves[1].startsWith(u"c5 1"));
+    if (const QString dir = qEnvironmentVariable("KIEBITZ_SNAPSHOT_DIR"); !dir.isEmpty()) {
+        QTest::qWait(100);
+        explorer.grab().save(QDir(dir).filePath(QStringLiteral("explorer.png")));
+    }
+
+    // A click plays the move.
+    auto* table = explorer.findChild<QTreeWidget*>(QStringLiteral("explorerMoves"));
+    ASSERT_NE(table, nullptr);
+    QSignalSpy played(&explorer, &kiebitz::app::ExplorerPanel::movePlayed);
+    const QRect row = table->visualItemRect(table->topLevelItem(0));
+    QTest::mouseClick(table->viewport(), Qt::LeftButton, {}, row.center());
+    ASSERT_EQ(played.size(), 1);
+    EXPECT_EQ(played.front().at(0).value<kiebitz::core::Move>().uci(), "e7e5");
+}
+
+TEST_F(DatabasesTest, ADoubleClickOnATopGameOpensIt) {
+    const kiebitz::app::AppStyle style(*qApp);
+    DatabaseManager manager(path("dbs"));
+    kiebitz::app::Library library;
+    kiebitz::app::RepertoireStore repertoires(library);
+    kiebitz::app::ExplorerPanel explorer(manager, repertoires, style);
+    explorer.resize(560, 300);
+    explorer.show();
+    write(path("games.pgn"), kGames);
+    ASSERT_EQ(importAndWait(manager, path("games.pgn"), QStringLiteral("Club games")), QString());
+    const kiebitz::core::Game game;
+    QSignalSpy updated(&explorer, &kiebitz::app::ExplorerPanel::updated);
+    explorer.setPosition(&game, kiebitz::core::Game::root(), kiebitz::core::Color::White);
+    ASSERT_TRUE(updated.wait(5000));
+    QTest::mouseClick(explorer.findChild<QPushButton*>(QStringLiteral("explorerShowGames")),
+                      Qt::LeftButton);
+    auto* games = explorer.findChild<QTreeWidget*>(QStringLiteral("explorerGames"));
+    ASSERT_NE(games, nullptr);
+    ASSERT_TRUE(games->isVisible());
+    ASSERT_GT(games->topLevelItemCount(), 0);
+    const QSignalSpy opened(&explorer, &kiebitz::app::ExplorerPanel::openGameRequested);
+    const QPoint first = games->visualItemRect(games->topLevelItem(0)).center();
+    QTest::mouseClick(games->viewport(), Qt::LeftButton, {}, first);
+    EXPECT_EQ(opened.size(), 0); // one click only selects
+    QTest::mouseDClick(games->viewport(), Qt::LeftButton, {}, first);
+    EXPECT_EQ(opened.size(), 1);
 }

@@ -10,6 +10,7 @@
 #include "engine/EnginePanel.hpp"
 #include "engine/EngineRegistry.hpp"
 #include "engine/EnginesView.hpp"
+#include "explorer/ExplorerPanel.hpp"
 #include "kiebitz/core/annotations.hpp"
 #include "kiebitz/repertoire/drill.hpp"
 #include "library/Library.hpp"
@@ -381,6 +382,10 @@ void MainWindow::buildViewMenu(QMenu* menu) {
         m_board->setFlipped(on);
         m_evalBar->setFlipped(on);
         m_repertoirePanel->setViewSide(on ? core::Color::Black : core::Color::White);
+        if (const GameDocument* d = doc()) {
+            m_explorer->setPosition(&d->game, d->current,
+                                    on ? core::Color::Black : core::Color::White);
+        }
         // Remembered for other games; a game with an [Orientation] keeps its own side.
         if (const GameDocument* d = doc(); d == nullptr || d->game.header("Orientation").empty()) {
             QSettings().setValue(kFlippedKey, on);
@@ -560,13 +565,7 @@ void MainWindow::buildLayout() {
     // Game databases: big collections to search, opened on the board one game at a time.
     m_databases = new DatabaseManager({}, this);
     m_databasesView = new DatabasesView(*m_databases, m_style);
-    connect(m_databasesView, &DatabasesView::openGameRequested, this,
-            [this](const core::Game& game) {
-                auto document = std::make_unique<GameDocument>();
-                document->game = game;
-                addDocument(std::move(document));
-                showSection(Section::Board);
-            });
+    connect(m_databasesView, &DatabasesView::openGameRequested, this, &MainWindow::openGameCopy);
 
     m_enginesView = new EnginesView(*m_engineRegistry, m_style);
     m_enginesView->setObjectName(QStringLiteral("enginesView"));
@@ -804,11 +803,16 @@ QWidget* MainWindow::buildPanelsCard() {
                 m_evalBar->setVisible(running); // its space is kept: nothing else moves
             });
     panels->addTab(m_enginePanel, tr("Engine"));
-    panels->addTab(new EmptyState(IconKind::Board, tr("Opening explorer"),
-                                  tr("Coming in v2: what masters and Lichess players play here, "
-                                     "and how it scores."),
-                                  m_style),
-                   tr("Explorer"));
+    m_explorer = new ExplorerPanel(*m_databases, *m_repertoires, m_style);
+    connect(m_explorer, &ExplorerPanel::movePlayed, this, [this](core::Move move) {
+        if (!m_drill) { // in practice the explorer would give the answers away
+            playMoves({move});
+        }
+    });
+    connect(m_explorer, &ExplorerPanel::openGameRequested, this, &MainWindow::openGameCopy);
+    connect(m_explorer, &ExplorerPanel::showDatabasesRequested, this,
+            [this] { showSection(Section::Databases); });
+    panels->addTab(m_explorer, tr("Explorer"));
     m_repertoirePanel = new RepertoirePanel(*m_repertoires, m_style);
     connect(m_repertoirePanel, &RepertoirePanel::addLineRequested, this, [this](core::Color side) {
         if (const GameDocument* d = doc();
@@ -1038,6 +1042,7 @@ void MainWindow::updatePage() {
         m_enginePanel->setPosition(std::nullopt); // nothing to analyse off the board
         m_notation->setGame(nullptr, Game::root());
         m_info->setGame(nullptr);
+        m_explorer->setPosition(nullptr, Game::root(), core::Color::White);
     } else {
         showDocument();
         m_board->setFocus();
@@ -1064,8 +1069,13 @@ void MainWindow::updateSidebarIcons() {
 
 void MainWindow::closeTab(int tab) {
     GameDocument* d = docAt(tab);
-    if (d == nullptr || !maybeSave(*d)) {
+    if (d == nullptr) {
         return;
+    }
+    // No question when a tab closes: a game from a file is saved (as autosave would), any other
+    // game (a new one, one opened from a database) just goes. Quitting still asks.
+    if (inFile(*d) && !maybeSave(*d)) {
+        return; // couldn't be saved: keep it open (maybeSave said why)
     }
     m_tabs->removeTab(tab); // switches tabs first, so nothing shows the game being removed
     std::erase_if(m_documents, [d](const auto& document) { return document.get() == d; });
@@ -1622,7 +1632,9 @@ void MainWindow::showNode(NodeId id, bool animate) {
     m_enginePanel->setPosition(m_board->position());
     const bool repertoireFile =
         d->file && RepertoireStore::kindOf(*d->file) == library::FileKind::Repertoire;
-    m_repertoirePanel->setViewSide(m_board->isFlipped() ? core::Color::Black : core::Color::White);
+    const core::Color viewSide = m_board->isFlipped() ? core::Color::Black : core::Color::White;
+    m_repertoirePanel->setViewSide(viewSide);
+    m_explorer->setPosition(&d->game, id, viewSide);
     if (repertoireFile) { // your mistakes in it (read once, then kept up to date)
         const core::Color side = RepertoireStore::sideOf(*d->file);
         bool& asked = m_mistakesAsked[side == core::Color::White ? 0 : 1];
@@ -1731,6 +1743,14 @@ QString MainWindow::createFile(const QString& name, const std::string& text,
     m_library->rescan();
     openFile(path);
     return {};
+}
+
+void MainWindow::openGameCopy(const core::Game& game) {
+    // A game from a database: a new tab of its own (not tied to a file).
+    auto document = std::make_unique<GameDocument>();
+    document->game = game;
+    addDocument(std::move(document));
+    showSection(Section::Board);
 }
 
 // ---- Jump to a repertoire's line ---------------------------------------------------------------

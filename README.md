@@ -15,7 +15,9 @@ and training opening repertoires.
 > starts a drill in which the app plays the opponent. Mistakes are remembered per position (on
 > this Mac, not in the file) and can be practised on their own; `[%depth n]` in a move's comment
 > ends the lines below it at move n. Other games are checked against the repertoire of the side
-> you view the board from. The Engine tab
+> you view the board from. The Databases page holds game databases of millions of games
+> (Lumbra's Gigabase, Caissabase or your own PGN, also in .7z/.zip), and the Explorer tab shows
+> what is played in a position, how it scores and both sides' average rating. The Engine tab
 > analyses with Stockfish (one-click download) or the Lichess cloud.
 
 ## Requirements (macOS)
@@ -86,7 +88,7 @@ gamedb/   Game databases of millions of games: a compact store (one byte per mov
           streaming parallel PGN import and an opening explorer over it. No Qt.
 app/      Qt Widgets application: main window, board/ (board widget, themes, piece sets),
           library/ (library folder scan and Library tab), databases/ (Databases page,
-          imports), document/ (open games, background
+          imports), explorer/ (Explorer tab), document/ (open games, background
           file loading and saving), notation/ (move list editor), panels/ (game info),
           engine/ (engine processes, Lichess cloud, Stockfish download, Engines page and
           Engine tab),

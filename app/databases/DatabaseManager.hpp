@@ -4,6 +4,7 @@
 
 #include <QFuture>
 #include <QObject>
+#include <QSet>
 #include <QString>
 
 #include <atomic>
@@ -86,7 +87,8 @@ private:
     std::vector<DatabaseJob> m_jobs;
     std::vector<Running> m_running;
     int m_nextJob = 1;
-    int m_refresh = 0; ///< newer refreshes win
+    int m_refresh = 0;         ///< newer refreshes win
+    QSet<QString> m_upgrading; ///< databases getting their ratings (once per run)
 };
 
 } // namespace kiebitz::app

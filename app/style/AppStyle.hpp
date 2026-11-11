@@ -35,6 +35,9 @@ public:
         QColor accentText; ///< text on accent-coloured backgrounds
         QColor good;       ///< right (a correct answer in practice)
         QColor bad;        ///< wrong (a mistake in practice)
+        QColor whiteWins;  ///< result bars: White won, drawn, Black won
+        QColor draws;
+        QColor blackWins;
     };
 
     [[nodiscard]] static Colors darkColors();

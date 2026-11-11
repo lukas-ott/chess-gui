@@ -174,6 +174,14 @@ TEST_F(DocumentsTest, TheSidebarSwitchesSectionsAndTheBoardAlwaysHasAGame) {
     EXPECT_EQ(tabs->tabText(0), QStringLiteral("New game"));
 }
 
+TEST_F(DocumentsTest, ClosingATabNeverAsks) {
+    // A new game with moves, in no file: it just closes (a question would block this test).
+    play("e4");
+    action(window, QStringLiteral("Close Tab"))->trigger();
+    EXPECT_EQ(tabs->count(), 1);
+    EXPECT_EQ(tabs->tabText(0), QStringLiteral("New game"));
+}
+
 TEST_F(DocumentsTest, OpenEditAndSaveAFile) {
     writeFile(path("game.pgn"), kOneGame);
     open(path("game.pgn"));
