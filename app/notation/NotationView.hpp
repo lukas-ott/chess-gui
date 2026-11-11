@@ -65,8 +65,18 @@ protected:
 
 private:
     /// How a word looks. Each kind has its own font and colour.
-    enum class Kind : std::uint8_t { Number, MainMove, SideMove, Comment, Bracket, Result, Hint };
-    static constexpr std::size_t kKinds = 7;
+    enum class Kind : std::uint8_t {
+        Number,
+        MainMove,
+        SideMove,
+        Comment,
+        Author, ///< who wrote the comment after it
+        Clock,  ///< time left after the move, small and quiet
+        Bracket,
+        Result,
+        Hint,
+    };
+    static constexpr std::size_t kKinds = 9;
     /// How a word joins the one before it.
     enum class Join : std::uint8_t {
         Space, ///< a space; the line may break here

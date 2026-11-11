@@ -154,6 +154,7 @@ TEST_F(EngineTest, TheEnginesPageShowsCardsAndDetails) {
     auto* view = window->findChild<kiebitz::app::EnginesView*>(QStringLiteral("enginesView"));
     ASSERT_NE(view, nullptr);
     const auto cardFor = [&](const QString& name) -> QFrame* {
+        QApplication::processEvents(); // a settings change rebuilds the cards
         for (auto* card : view->findChildren<QFrame*>(QStringLiteral("engineCard"))) {
             if (card->accessibleName() == name && card->isVisible()) {
                 return card;
@@ -188,6 +189,21 @@ TEST_F(EngineTest, TheEnginesPageShowsCardsAndDetails) {
     QTest::mouseClick(up, Qt::LeftButton);
     EXPECT_EQ(window->engines().find(fake())->threads, 2);
     EXPECT_EQ(kiebitz::app::engines::load().front().threads, 2);
+    // Lines, too: the same stepper for the engine and for the cloud (which has nothing else).
+    auto* lines = view->findChild<QWidget*>(QStringLiteral("engineLines"));
+    ASSERT_NE(lines, nullptr);
+    const int before = window->engines().find(fake())->lines;
+    QTest::mouseClick(lines->findChild<QPushButton*>(QStringLiteral("stepDown")), Qt::LeftButton);
+    EXPECT_EQ(window->engines().find(fake())->lines, std::max(1, before - 1));
+    EXPECT_EQ(panel->section(fake())->lineCount(), std::max(1, before - 1));
+    click(cardFor(EnginePanel::cloudName()));
+    EXPECT_FALSE(threads->isVisibleTo(view));
+    EXPECT_TRUE(lines->isVisibleTo(view));
+    const int cloudBefore = kiebitz::app::EngineRegistry::cloudLines();
+    QTest::mouseClick(lines->findChild<QPushButton*>(QStringLiteral("stepUp")), Qt::LeftButton);
+    EXPECT_EQ(kiebitz::app::EngineRegistry::cloudLines(), std::min(5, cloudBefore + 1));
+    EXPECT_EQ(panel->section(EnginePanel::cloudName())->lineCount(), std::min(5, cloudBefore + 1));
+    click(cardFor(fake()));
     window->showSection(MainWindow::Section::Board);
     panel->setRunning(fake(), true);
     ASSERT_TRUE(waitForLines());
@@ -300,17 +316,21 @@ TEST_F(EngineTest, FollowsTheBoardAndScoresForWhite) {
 }
 
 TEST_F(EngineTest, MoreLinesAndArrowsForEach) {
-    window->engines().add(fakeEngine());
-    panel->setLineCount(3);
+    auto entry = fakeEngine();
+    entry.lines = 3; // set on the Engines page
+    window->engines().add(entry);
     panel->setRunning(fake(), true);
     ASSERT_TRUE(waitForLines(3));
     EXPECT_FALSE(lineText(3).isEmpty());
     EXPECT_TRUE(lineText(4).isEmpty());
     EXPECT_EQ(board->engineMoves().size(), 3U);
-    // Fewer lines while it runs: the engine is told, and the extra rows go.
-    panel->setLineCount(1);
+    // Fewer lines while it runs: the engine is told (no restart), and the extra rows go.
+    const auto* process = panel->section(fake())->uciEngine();
+    entry.lines = 1;
+    window->engines().add(entry);
     ASSERT_TRUE(QTest::qWaitFor([&] { return lineText(2).isEmpty(); }, 5000));
-    EXPECT_EQ(panel->lineCount(), 1);
+    EXPECT_EQ(panel->section(fake())->lineCount(), 1);
+    EXPECT_EQ(panel->section(fake())->uciEngine(), process);
 }
 
 TEST_F(EngineTest, ClickingAMoveInALinePlaysItIntoTheGame) {
@@ -418,7 +438,11 @@ TEST_F(EngineTest, Snapshots) {
     window->findChild<kiebitz::app::EnginesView*>()->select(fake());
     save(QStringLiteral("engines-page"));
     window->showSection(MainWindow::Section::Board);
-    panel->setLineCount(2);
+    for (const QString& name : {fake(), QStringLiteral("FakeFish 2")}) {
+        auto entry = *window->engines().find(name);
+        entry.lines = 2;
+        window->engines().add(entry);
+    }
     play("e4");
     play("e5");
     panel->setRunning(fake(), true);

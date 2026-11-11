@@ -1,9 +1,11 @@
 #include "AppStyle.hpp"
 
 #include <QApplication>
+#include <QEvent>
 #include <QPalette>
 #include <QStyleFactory>
 #include <QStyleHints>
+#include <QWidget>
 
 #include <array>
 #include <utility>
@@ -40,12 +42,24 @@ AppStyle::Colors AppStyle::lightColors() {
 
 AppStyle::AppStyle(QApplication& app) : QObject(&app), m_app(app) {
     QApplication::setStyle(QStyleFactory::create(QStringLiteral("Fusion")));
+    app.installEventFilter(this);
     connect(QGuiApplication::styleHints(), &QStyleHints::colorSchemeChanged, this, [this] {
         if (m_appearance == Appearance::System && !m_applying) {
             apply();
         }
     });
     apply();
+}
+
+bool AppStyle::eventFilter(QObject* watched, QEvent* event) {
+    // A tooltip's window is square; without a see-through background its rounded label would
+    // sit on square dark corners. Set before the tooltip first shows (polish comes first).
+    if (event->type() == QEvent::Polish && watched->inherits("QTipLabel")) {
+        if (auto* tip = qobject_cast<QWidget*>(watched)) {
+            tip->setAttribute(Qt::WA_TranslucentBackground);
+        }
+    }
+    return QObject::eventFilter(watched, event);
 }
 
 void AppStyle::setAppearance(Appearance appearance) {
@@ -226,7 +240,10 @@ QScrollBar::handle:hover { background: @dimmed; }
 QScrollBar::add-line, QScrollBar::sub-line { width: 0; height: 0; }
 QScrollBar::add-page, QScrollBar::sub-page { background: transparent; }
 
-QToolTip { background: @raised; color: @text; border: 1px solid @border; padding: 4px 6px; }
+/* Tooltips: a small rounded label (see eventFilter: their window is made see-through so the
+   corners can be round) */
+QToolTip { background: @raised; color: @text; border: 1px solid @border; border-radius: 7px;
+           padding: 5px 9px; font-size: 12px; }
 
 /* Page headers (Library, Engines): style/PageHeader */
 QLabel[role="pageTitle"] { color: @text; font-size: 22px; font-weight: 700; }

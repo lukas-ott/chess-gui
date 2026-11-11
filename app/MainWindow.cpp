@@ -23,9 +23,11 @@
 #include <QClipboard>
 #include <QCloseEvent>
 #include <QColorDialog>
+#include <QCoreApplication>
 #include <QDir>
 #include <QDragEnterEvent>
 #include <QDropEvent>
+#include <QElapsedTimer>
 #include <QFileDialog>
 #include <QFileInfo>
 #include <QFrame>
@@ -133,6 +135,9 @@ MainWindow::MainWindow(AppStyle& style, QWidget* parent)
     m_notationRefresh.setSingleShot(true);
     m_notationRefresh.setInterval(300);
     connect(&m_notationRefresh, &QTimer::timeout, this, &MainWindow::refreshNotation);
+    m_autosave.setSingleShot(true);
+    m_autosave.setInterval(1000);
+    connect(&m_autosave, &QTimer::timeout, this, &MainWindow::autosave);
 
     buildLayout();
     restoreState(); // before the menus, which show the board's current settings
@@ -872,9 +877,75 @@ void MainWindow::closeTab(int tab) {
     updateTitles();
 }
 
+bool MainWindow::inFile(const GameDocument& document) {
+    return document.file && !document.file->path.isEmpty() && document.gameIndex >= 0 &&
+           document.file->hasText;
+}
+
+void MainWindow::autosave() {
+    m_autosave.stop();
+    std::vector<std::shared_ptr<PgnFile>> files;
+    for (const auto& d : m_documents) {
+        if (!d->modified || !inFile(*d)) {
+            continue;
+        }
+        if (m_writing.contains(d->file->path)) {
+            m_autosave.start(); // its file is still being written: try again in a moment
+            continue;
+        }
+        std::optional<std::string> text =
+            pgnio::replaceGame(*d->file, d->gameIndex, pgn::writeGame(d->game));
+        if (!text) {
+            continue;
+        }
+        // Into the shared text now, so another tab of the same file builds on this change.
+        d->file->text = std::move(*text);
+        d->file->games = pgn::indexGames(d->file->text);
+        d->modified = false;
+        if (std::find(files.begin(), files.end(), d->file) == files.end()) {
+            files.push_back(d->file);
+        }
+    }
+    for (const auto& file : files) {
+        const QString path = file->path;
+        m_writing << path;
+        whenReady(this, pgnio::write(path, file->text), [this, path](const QString& error) {
+            m_writing.removeOne(path);
+            if (!error.isEmpty()) {
+                QMessageBox::warning(this, tr("Couldn't save"), error);
+                emit fileError(error);
+                return;
+            }
+            emit fileSaved(path);
+        });
+    }
+    updateTitles();
+}
+
 bool MainWindow::maybeSave(GameDocument& document) {
     if (!document.modified) {
         return true;
+    }
+    if (inFile(document)) { // saved anyway a moment later: do it now, and wait for it
+        // An autosave of this file still being written must not land after this one.
+        QElapsedTimer waited;
+        waited.start();
+        while (m_writing.contains(document.file->path) && waited.elapsed() < 5000) {
+            QCoreApplication::processEvents(QEventLoop::ExcludeUserInputEvents, 50);
+        }
+        std::optional<std::string> text =
+            pgnio::replaceGame(*document.file, document.gameIndex, pgn::writeGame(document.game));
+        if (text) {
+            const QString error = pgnio::write(document.file->path, *text).result();
+            if (error.isEmpty()) {
+                document.file->text = std::move(*text);
+                document.file->games = pgn::indexGames(document.file->text);
+                document.modified = false;
+                return true;
+            }
+            QMessageBox::warning(this, tr("Couldn't save"), error);
+        }
+        return false;
     }
     for (int tab = 0; tab < m_tabs->count(); ++tab) {
         if (docAt(tab) == &document) {
@@ -927,17 +998,12 @@ void MainWindow::save() {
     if (d == nullptr) {
         return;
     }
-    if (!d->file || d->file->path.isEmpty() || d->gameIndex < 0) {
+    if (!inFile(*d)) {
         saveAs();
         return;
     }
-    std::optional<std::string> text =
-        pgnio::replaceGame(*d->file, d->gameIndex, pgn::writeGame(d->game));
-    if (!text) { // never happens: tabs only hold files with their text (see PgnFile::hasText)
-        QMessageBox::warning(this, tr("Couldn't save"), tr("The file couldn't be read again."));
-        return;
-    }
-    writeDocument(*d, d->file->path, std::move(*text), nullptr);
+    d->modified = true; // ⌘S always writes, even right after an autosave
+    autosave();
 }
 
 void MainWindow::saveAs() {
@@ -1000,9 +1066,16 @@ void MainWindow::writeDocument(GameDocument& document, const QString& path, std:
 }
 
 void MainWindow::setModified() {
-    if (GameDocument* d = doc(); d != nullptr && !d->modified) {
+    GameDocument* d = doc();
+    if (d == nullptr) {
+        return;
+    }
+    if (!d->modified) {
         d->modified = true;
         updateTitles();
+    }
+    if (inFile(*d)) {
+        m_autosave.start(); // (again): saves a second after the last change
     }
 }
 

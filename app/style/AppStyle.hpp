@@ -40,6 +40,8 @@ public:
 
     /// Applies an appearance now and follows the system setting from then on if it's System.
     void setAppearance(Appearance appearance);
+    /// Makes tooltips see-through, so their rounded corners show (installed on the app).
+    bool eventFilter(QObject* watched, QEvent* event) override;
     [[nodiscard]] Appearance appearance() const noexcept { return m_appearance; }
     [[nodiscard]] bool isDark() const noexcept { return m_dark; }
     [[nodiscard]] const Colors& colors() const noexcept { return m_colors; }

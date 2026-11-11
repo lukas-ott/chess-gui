@@ -109,3 +109,33 @@ TEST(Nag, FromSymbol) {
 }
 
 } // namespace
+
+TEST(CommentDisplay, ClockIsKeptApartAndShortened) {
+    EXPECT_EQ(displayComment("[%clk 1:24:00]"), (CommentDisplay{"", "1:24:00", ""}));
+    EXPECT_EQ(displayComment("[%clk 0:47:00]").clock, "47:00");
+    EXPECT_EQ(displayComment("[%clk 0:05:00]").clock, "5:00");
+    EXPECT_EQ(displayComment("[%clk 0:00:09.2]").clock, "0:09");
+}
+
+TEST(CommentDisplay, OtherCommandsAreLeftOut) {
+    EXPECT_EQ(displayComment("[%eval 0.31] [%emt 0:00:05] Good idea [%evp 1,2]"),
+              (CommentDisplay{"Good idea", "", ""}));
+}
+
+TEST(CommentDisplay, AuthorFromAnno) {
+    // As in a study exported from Lichess: who wrote the text, then the text, then the clock.
+    const auto shown = displayComment("[%anno \"jonathanlund123\", jonathanlund123] trengte du å "
+                                      "bruke en halvtime på a6? [%clk 1:05:00]");
+    EXPECT_EQ(shown.author, "jonathanlund123");
+    EXPECT_EQ(shown.text, "trengte du å bruke en halvtime på a6?");
+    EXPECT_EQ(shown.clock, "1:05:00");
+    EXPECT_EQ(displayComment("[%anno Anna] hi").author, "Anna");
+}
+
+TEST(CommentDisplay, PlainTextIsTidied) {
+    EXPECT_EQ(displayComment("  A plan\n worth   knowing "),
+              (CommentDisplay{"A plan worth knowing", "", ""}));
+    EXPECT_EQ(displayComment("Unfinished [%clk 1:00"), // no closing bracket: shown as written
+              (CommentDisplay{"Unfinished [%clk 1:00", "", ""}));
+    EXPECT_EQ(displayComment(""), CommentDisplay{});
+}

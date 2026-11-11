@@ -8,7 +8,6 @@
 #include <optional>
 #include <vector>
 
-class QButtonGroup;
 class QToolButton;
 class QVBoxLayout;
 
@@ -48,9 +47,6 @@ public:
     /// The primary engine's lines (empty when nothing runs).
     [[nodiscard]] const std::vector<engine::Info>& lines() const;
 
-    void setLineCount(int lines);
-    [[nodiscard]] int lineCount() const noexcept { return m_multiPv; }
-
     [[nodiscard]] static QString cloudName();
 
 signals:
@@ -74,10 +70,8 @@ private:
     const AppStyle& m_style;
     std::vector<EngineSection*> m_sections; ///< the user's engines in order, then the cloud
     std::optional<core::Position> m_position;
-    int m_multiPv = 3;
     QStringList m_lastRunning; ///< what Space starts again
 
-    QButtonGroup* m_lineButtons = nullptr; ///< 1–5 lines: a segmented control
     QToolButton* m_manage = nullptr;
     QWidget* m_noEngine = nullptr; ///< "no engine on this Mac yet", with a way to get one
     QVBoxLayout* m_sectionLayout = nullptr;

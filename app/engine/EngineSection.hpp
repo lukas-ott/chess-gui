@@ -39,7 +39,9 @@ public:
     void setRunning(bool running);
     [[nodiscard]] bool isRunning() const noexcept { return m_running; }
     void setLineCount(int lines);
-    /// New settings for a UCI engine: a running one restarts with them.
+    [[nodiscard]] int lineCount() const noexcept { return m_multiPv; }
+    /// New settings for a UCI engine: a running one restarts if its process settings changed
+    /// (path, threads, hash); a new line count just goes to the engine.
     void setEntry(const EngineEntry& entry);
 
     /// The lines on show, best first; empty when off.
@@ -53,7 +55,7 @@ public:
     /// Plays the first `plies` moves of line `line` (what clicking a move in it does).
     void playLine(int line, int plies);
 
-    static constexpr int kMaxLines = 5;
+    static constexpr int kMaxLines = engines::kMaxLines;
 
 signals:
     /// Started, stopped, or new lines: the board may need to show something else.

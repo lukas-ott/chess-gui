@@ -1,5 +1,6 @@
 #include "kiebitz/core/annotations.hpp"
 
+#include <algorithm>
 #include <array>
 #include <initializer_list>
 #include <span>
@@ -204,6 +205,74 @@ std::optional<std::uint8_t> nagFromSymbol(std::string_view symbol) noexcept {
         }
     }
     return std::nullopt;
+}
+
+namespace {
+
+/// "0:47:00" → "47:00", "1:24:00" stays, "0:00:09.2" → "0:09": no zero hours, no fractions.
+std::string shortClock(std::string_view clock) {
+    clock = trim(clock);
+    clock = clock.substr(0, clock.find('.'));
+    if (std::count(clock.begin(), clock.end(), ':') == 2 && clock.starts_with("0:")) {
+        clock.remove_prefix(2);
+        if (clock.size() == 5 && clock.front() == '0') { // "05:00" → "5:00"
+            clock.remove_prefix(1);
+        }
+    }
+    return std::string(clock);
+}
+
+/// [%anno "jonathanlund123", jonathanlund123]: the name, quoted or up to the comma.
+std::string annotator(std::string_view args) {
+    args = trim(args);
+    if (args.starts_with('"')) {
+        args.remove_prefix(1);
+        return std::string(args.substr(0, args.find('"')));
+    }
+    return std::string(trim(args.substr(0, args.find(','))));
+}
+
+} // namespace
+
+CommentDisplay displayComment(std::string_view comment) {
+    CommentDisplay result;
+    std::string text;
+    std::size_t pos = 0;
+    while (pos < comment.size()) {
+        const auto start = comment.find("[%", pos);
+        const auto end = start == std::string_view::npos ? start : comment.find(']', start);
+        if (end == std::string_view::npos) { // no (complete) command left
+            text += comment.substr(pos);
+            break;
+        }
+        text += comment.substr(pos, start - pos);
+        text += ' ';
+        const std::string_view command = comment.substr(start + 2, end - start - 2);
+        const auto split = command.find_first_of(" \t");
+        const std::string_view name = command.substr(0, split);
+        const std::string_view args =
+            split == std::string_view::npos ? std::string_view() : command.substr(split + 1);
+        if (name == "clk") {
+            result.clock = shortClock(args);
+        } else if (name == "anno") {
+            result.author = annotator(args);
+        }
+        pos = end + 1;
+    }
+    // One space between words, none at the ends.
+    for (std::size_t i = 0; i < text.size();) {
+        const auto word = text.find_first_not_of(" \t\r\n", i);
+        if (word == std::string::npos) {
+            break;
+        }
+        const auto after = text.find_first_of(" \t\r\n", word);
+        if (!result.text.empty()) {
+            result.text += ' ';
+        }
+        result.text += text.substr(word, after - word);
+        i = after == std::string::npos ? text.size() : after;
+    }
+    return result;
 }
 
 } // namespace kiebitz::core

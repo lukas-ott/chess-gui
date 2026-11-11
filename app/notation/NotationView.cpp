@@ -78,9 +78,15 @@ void NotationView::updateFonts() {
         for (std::size_t k = 0; k < kKinds; ++k) {
             const auto kind = static_cast<Kind>(k);
             QFont f = font();
-            f.setPixelSize(small ? kVariationPixels : kMainPixels);
+            int pixels = small ? kVariationPixels : kMainPixels;
+            if (kind == Kind::Clock) {
+                pixels -= 4;
+            } else if (kind == Kind::Author) {
+                pixels -= 2;
+            }
+            f.setPixelSize(pixels);
             QFont::Weight weight = QFont::Normal;
-            if (kind == Kind::MainMove) {
+            if (kind == Kind::MainMove || kind == Kind::Author) {
                 weight = QFont::DemiBold;
             } else if (kind == Kind::Result) {
                 weight = QFont::Bold;
@@ -162,20 +168,32 @@ void NotationView::rebuild() {
         spaceOwed = false;
         nbspOwed = false;
     };
+    // A comment as people read it: the clock right after the move, then who wrote it (from a
+    // Lichess study's [%anno]), then the text, without the [%...] commands tools put in. True
+    // if it showed some text (then the next move gets its number again).
     const auto comment = [&](const std::string& value) {
         if (value.empty()) {
-            return;
+            return false;
+        }
+        const core::CommentDisplay shown = core::displayComment(value);
+        if (!shown.clock.empty()) {
+            nbspOwed = spaceOwed; // stays with its move
+            add(QString::fromStdString(shown.clock), Kind::Clock);
+        }
+        if (!shown.author.empty()) {
+            add(QString::fromStdString(shown.author) + QLatin1Char(':'), Kind::Author);
         }
         for (const QString& part :
-             QString::fromStdString(value).split(QLatin1Char(' '), Qt::SkipEmptyParts)) {
+             QString::fromStdString(shown.text).split(QLatin1Char(' '), Qt::SkipEmptyParts)) {
             add(part, Kind::Comment);
         }
+        return !shown.text.empty() || !shown.author.empty();
     };
     const auto move = [&](NodeId id, bool forceNumber, bool mainLine) {
         const core::Node& node = game.node(id);
-        comment(node.commentBefore);
+        const bool textBefore = comment(node.commentBefore);
         const bool white = game.mover(id) == core::Color::White;
-        if (white || forceNumber || !node.commentBefore.empty()) {
+        if (white || forceNumber || textBefore) {
             add(QString::number(game.moveNumber(id)) +
                     (white ? QStringLiteral(".") : QStringLiteral("…")),
                 Kind::Number);
@@ -188,8 +206,7 @@ void NotationView::rebuild() {
         // The game itself stands out (heavier, full colour); alternatives are quieter.
         m_moveWord[id] = static_cast<int>(m_words.size());
         add(std::move(san), mainLine ? Kind::MainMove : Kind::SideMove, id);
-        comment(node.comment);
-        return !node.comment.empty(); // after a comment the next move shows its number
+        return comment(node.comment); // after a comment the next move shows its number
     };
 
     // Writes the moves after `parent`. At depth 0 (the main line) each set of alternatives
@@ -404,6 +421,8 @@ void NotationView::paintEvent(QPaintEvent* event) {
             QColor color = c.muted;
             if (word.kind == Kind::MainMove) {
                 color = c.text;
+            } else if (word.kind == Kind::Clock) {
+                color = c.dimmed;
             }
             if (i == currentWord) { // accent text on a soft accent tint
                 const QFontMetricsF metrics(

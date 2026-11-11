@@ -5,7 +5,6 @@
 #include "style/AppStyle.hpp"
 #include "style/Icons.hpp"
 
-#include <QButtonGroup>
 #include <QFrame>
 #include <QHBoxLayout>
 #include <QLabel>
@@ -20,7 +19,6 @@
 namespace kiebitz::app {
 namespace {
 
-constexpr auto kLinesKey = "engine/lines";
 constexpr auto kRunningKey = "engine/lastRunning";
 
 } // namespace
@@ -32,15 +30,13 @@ QString EnginePanel::cloudName() {
 EnginePanel::EnginePanel(EngineRegistry& registry, const AppStyle& style, QWidget* parent)
     : QWidget(parent), m_registry(registry), m_style(style) {
     const QSettings settings;
-    m_multiPv = std::clamp(settings.value(QString::fromLatin1(kLinesKey), 3).toInt(), 1,
-                           EngineSection::kMaxLines);
     m_lastRunning = settings.value(QString::fromLatin1(kRunningKey)).toStringList();
 
     auto* layout = new QVBoxLayout(this);
     layout->setContentsMargins(10, 8, 10, 8);
     layout->setSpacing(6);
 
-    // Top: how many lines each engine shows, and the way to the Engines page.
+    // Top: the way to the Engines page (where each engine's settings are, its lines too).
     auto* header = new QHBoxLayout;
     header->setSpacing(6);
     m_noEngine = new QWidget;
@@ -57,29 +53,6 @@ EnginePanel::EnginePanel(EngineRegistry& registry, const AppStyle& style, QWidge
     getOne->setCursor(Qt::PointingHandCursor);
     connect(getOne, &QPushButton::clicked, this, &EnginePanel::manageEnginesRequested);
     noEngineLayout->addWidget(getOne);
-    // How many lines each engine shows: a segmented control, 1 to 5.
-    auto* lines = new QWidget;
-    lines->setObjectName(QStringLiteral("engineLines"));
-    lines->setProperty("role", "segmented");
-    lines->setToolTip(tr("Lines per engine"));
-    auto* linesLayout = new QHBoxLayout(lines);
-    linesLayout->setContentsMargins(2, 2, 2, 2);
-    linesLayout->setSpacing(2);
-    m_lineButtons = new QButtonGroup(this);
-    m_lineButtons->setExclusive(true);
-    for (int n = 1; n <= EngineSection::kMaxLines; ++n) {
-        auto* segment = new QPushButton(QString::number(n));
-        segment->setObjectName(QStringLiteral("lines%1").arg(n));
-        segment->setProperty("role", "segment");
-        segment->setCheckable(true);
-        segment->setFocusPolicy(Qt::NoFocus);
-        segment->setChecked(n == m_multiPv);
-        m_lineButtons->addButton(segment, n);
-        linesLayout->addWidget(segment);
-    }
-    connect(m_lineButtons, &QButtonGroup::idClicked, this, &EnginePanel::setLineCount);
-    auto* linesLabel = new QLabel(tr("Lines"));
-    linesLabel->setProperty("role", "engineStatus");
     m_manage = new QToolButton;
     m_manage->setObjectName(QStringLiteral("manageEngines"));
     m_manage->setProperty("role", "icon");
@@ -90,8 +63,6 @@ EnginePanel::EnginePanel(EngineRegistry& registry, const AppStyle& style, QWidge
     connect(m_manage, &QToolButton::clicked, this, &EnginePanel::manageEnginesRequested);
     header->addWidget(m_noEngine);
     header->addStretch();
-    header->addWidget(linesLabel);
-    header->addWidget(lines);
     header->addWidget(m_manage);
     layout->addLayout(header);
 
@@ -138,12 +109,14 @@ void EnginePanel::rebuildSections() {
             if (entry) {
                 const EngineEntry* now = m_registry.find(name);
                 existing->setEntry(*now); // restarts it if its settings changed while running
+            } else if (existing->lineCount() != EngineRegistry::cloudLines()) {
+                existing->setLineCount(EngineRegistry::cloudLines());
             }
             sections.push_back(existing);
             continue;
         }
         auto* created = new EngineSection(name, entry, m_style);
-        created->setLineCount(m_multiPv);
+        created->setLineCount(entry ? entry->lines : EngineRegistry::cloudLines());
         created->setPosition(m_position);
         connect(created, &EngineSection::changed, this, &EnginePanel::publish);
         connect(created, &EngineSection::playRequested, this, &EnginePanel::playRequested);
@@ -229,18 +202,6 @@ const std::vector<engine::Info>& EnginePanel::lines() const {
     static const std::vector<engine::Info> kNone;
     const EngineSection* s = primary();
     return s != nullptr ? s->lines() : kNone;
-}
-
-void EnginePanel::setLineCount(int lines) {
-    lines = std::clamp(lines, 1, EngineSection::kMaxLines);
-    m_multiPv = lines;
-    if (auto* segment = m_lineButtons->button(lines)) {
-        segment->setChecked(true);
-    }
-    QSettings().setValue(QString::fromLatin1(kLinesKey), lines);
-    for (auto* s : m_sections) {
-        s->setLineCount(lines);
-    }
 }
 
 void EnginePanel::publish() {

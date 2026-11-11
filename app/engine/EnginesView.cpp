@@ -275,15 +275,28 @@ EnginesView::EnginesView(EngineRegistry& registry, const AppStyle& style, QWidge
     m_hash->setRange(16, 16384);
     m_hash->setSingleStep(64);
     m_hash->setSuffix(tr(" MB"));
-    settingsRow->addWidget(setting(tr("THREADS"), m_threads));
-    settingsRow->addWidget(setting(tr("HASH"), m_hash));
+    m_lines = new Stepper;
+    m_lines->setObjectName(QStringLiteral("engineLines"));
+    m_lines->setRange(1, engines::kMaxLines);
+    m_processSettings = new QWidget;
+    auto* processRow = new QHBoxLayout(m_processSettings);
+    processRow->setContentsMargins(0, 0, 0, 0);
+    processRow->setSpacing(24);
+    processRow->addWidget(setting(tr("THREADS"), m_threads));
+    processRow->addWidget(setting(tr("HASH"), m_hash));
+    settingsRow->addWidget(setting(tr("LINES"), m_lines));
+    settingsRow->addWidget(m_processSettings);
     settingsRow->addStretch();
     const auto save = [this] {
-        if (const EngineEntry* current = m_registry.find(m_selected)) {
+        if (m_selected == EnginePanel::cloudName()) {
+            m_registry.setCloudLines(m_lines->value());
+        } else if (const EngineEntry* current = m_registry.find(m_selected)) {
             EngineEntry entry = *current;
             entry.threads = m_threads->value();
             entry.hashMb = m_hash->value();
-            if (entry.threads != current->threads || entry.hashMb != current->hashMb) {
+            entry.lines = m_lines->value();
+            if (entry.threads != current->threads || entry.hashMb != current->hashMb ||
+                entry.lines != current->lines) {
                 m_registry.add(entry);
             }
         }
@@ -291,6 +304,7 @@ EnginesView::EnginesView(EngineRegistry& registry, const AppStyle& style, QWidge
     // Saved (and a running engine restarted with it) once a value is chosen, not per keystroke.
     connect(m_threads, &Stepper::valueChanged, this, save);
     connect(m_hash, &Stepper::valueChanged, this, save);
+    connect(m_lines, &Stepper::valueChanged, this, save);
     pageLayout->addWidget(m_settings);
 
     auto* buttons = new QHBoxLayout;
@@ -426,9 +440,10 @@ void EnginesView::showDetails() {
     m_detailName->setText(m_selected);
     m_detailIcon->setPixmap(
         makeIcon(cloud ? IconKind::Cloud : IconKind::Engine, c.text, c.dimmed, 36).pixmap(36, 36));
-    m_settings->setVisible(!cloud);
+    m_processSettings->setVisible(!cloud); // the cloud only has its line count
     m_remove->setVisible(!cloud);
     if (cloud) {
+        m_lines->setValue(EngineRegistry::cloudLines());
         m_detailSubtitle->setText(QStringLiteral("lichess.org"));
         m_detailAbout->setVisible(true);
         m_detailAbout->setText(tr("Deep evaluations Lichess has already computed, for positions "
@@ -441,6 +456,7 @@ void EnginesView::showDetails() {
     m_detailAbout->setVisible(false);
     m_threads->setValue(entry->threads);
     m_hash->setValue(entry->hashMb);
+    m_lines->setValue(entry->lines);
 }
 
 void EnginesView::updateIcons() {

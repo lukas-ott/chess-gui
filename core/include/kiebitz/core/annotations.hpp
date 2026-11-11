@@ -44,6 +44,19 @@ struct CommentParts {
 /// The reverse of parseComment(): "[%csl Gd4] [%cal Ge2e4] text".
 [[nodiscard]] std::string formatComment(const CommentParts& parts);
 
+/// A comment as the move list shows it. Lichess, chess.com and other tools put commands into
+/// comments: [%clk 1:24:00] (clock), [%emt 0:00:05] (time used), [%eval 0.31] (engine),
+/// [%anno "name", name] (who wrote the text after it). The text keeps only what a person wrote;
+/// the clock and author are kept apart; other commands are left out. Display only: the game
+/// keeps the comment as it was, so nothing is lost when it's saved.
+struct CommentDisplay {
+    std::string text;   ///< what a person wrote, without commands
+    std::string clock;  ///< time left after the move, shortened: "1:24:00", "47:00", "0:09"
+    std::string author; ///< who wrote the text, or empty
+    friend bool operator==(const CommentDisplay&, const CommentDisplay&) = default;
+};
+[[nodiscard]] CommentDisplay displayComment(std::string_view comment);
+
 /// What drawing on the board does, as on Lichess: drawing an arrow (or marking a square) that is
 /// already there in the same colour removes it; in another colour it changes the colour;
 /// otherwise it is added.

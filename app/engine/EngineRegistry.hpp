@@ -26,6 +26,9 @@ public:
     /// Adds an engine, or replaces the one with the same name.
     void add(const EngineEntry& entry);
     void remove(const QString& name);
+    /// How many lines the Lichess cloud shows (it has no entry of its own).
+    [[nodiscard]] static int cloudLines();
+    void setCloudLines(int lines);
 
     /// Asks the program at `path` for its name in the background ("uci" → "id name …"), which
     /// also shows whether it is a UCI engine at all, then adds it (added() or failed()).

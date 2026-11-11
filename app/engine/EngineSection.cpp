@@ -186,7 +186,15 @@ void EngineSection::setLineCount(int lines) {
 }
 
 void EngineSection::setEntry(const EngineEntry& entry) {
+    const bool restart = !m_entry || m_entry->path != entry.path ||
+                         m_entry->threads != entry.threads || m_entry->hashMb != entry.hashMb;
     m_entry = entry;
+    if (m_multiPv != entry.lines) {
+        setLineCount(entry.lines);
+    }
+    if (!restart) {
+        return;
+    }
     if (m_running) {
         setRunning(false);
         dropSource();

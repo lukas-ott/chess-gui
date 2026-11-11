@@ -19,6 +19,17 @@ const EngineEntry* EngineRegistry::find(const QString& name) const {
     return it == m_engines.end() ? nullptr : &*it;
 }
 
+int EngineRegistry::cloudLines() {
+    return engines::cloudLines();
+}
+
+void EngineRegistry::setCloudLines(int lines) {
+    if (lines != engines::cloudLines()) {
+        engines::setCloudLines(lines);
+        emit changed();
+    }
+}
+
 void EngineRegistry::add(const EngineEntry& entry) {
     const auto it = std::find_if(m_engines.begin(), m_engines.end(),
                                  [&](const auto& e) { return e.name == entry.name; });

@@ -60,6 +60,8 @@ private:
     QWidget* m_settings = nullptr;
     Stepper* m_threads = nullptr;
     Stepper* m_hash = nullptr;
+    Stepper* m_lines = nullptr;
+    QWidget* m_processSettings = nullptr; ///< threads and hash (not for the cloud)
     QPushButton* m_remove = nullptr;
 };
 

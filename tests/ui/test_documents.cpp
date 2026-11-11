@@ -416,6 +416,52 @@ TEST_F(DocumentsTest, SavingOneGameLeavesTheOthersAlone) {
     EXPECT_EQ((*games)[2].header("White"), "Third");
 }
 
+TEST_F(DocumentsTest, ChangesToAFileSaveThemselves) {
+    writeFile(path("game.pgn"), kOneGame);
+    open(path("game.pgn"));
+    action(window, QStringLiteral("Go to End"))->trigger();
+    QSignalSpy saved(&window, &MainWindow::fileSaved);
+    play("Nc6"); // no ⌘S: saved a moment after the last change
+    ASSERT_TRUE(saved.wait(5000));
+    const auto game = pgn::parseGame(readFile(path("game.pgn")));
+    ASSERT_TRUE(game.ok());
+    EXPECT_EQ(game->mainLine().size(), 5U); // root + e4 e5 Nf3 Nc6
+    EXPECT_FALSE(tabs->tabText(tabs->currentIndex()).startsWith(u"• "));
+}
+
+TEST_F(DocumentsTest, ClosingATabSavesItsChangesWithoutAsking) {
+    writeFile(path("game.pgn"), kOneGame);
+    open(path("game.pgn"));
+    action(window, QStringLiteral("Go to End"))->trigger();
+    play("Nc6");
+    action(window, QStringLiteral("Close Tab"))->trigger(); // would block if it asked
+    const auto game = pgn::parseGame(readFile(path("game.pgn")));
+    ASSERT_TRUE(game.ok());
+    EXPECT_EQ(game->mainLine().size(), 5U);
+}
+
+TEST_F(DocumentsTest, MoveListShowsClocksAndWhoWroteAComment) {
+    // As exported from a Lichess study: clocks after every move, a friend's note with [%anno].
+    QFile file(path("study.pgn"));
+    ASSERT_TRUE(file.open(QIODevice::WriteOnly));
+    file.write("[Event \"Study\"]\n[Result \"*\"]\n\n1. e4 { [%clk 1:24:00] } e5 { [%eval 0.3] "
+               "[%anno \"jonathanlund123\", jonathanlund123] trengte du å bruke en halvtime på "
+               "a6? [%clk 0:47:00] } 2. Nf3 { [%clk 1:23:30] } *\n");
+    file.close();
+    open(path("study.pgn"));
+    notation->resize(420, 200);
+    const QString text = notation->plainText().replace(QChar(0xA0), QLatin1Char(' '));
+    EXPECT_EQ(text, QStringLiteral("1. e4 1:24:00 e5 47:00 jonathanlund123: trengte du å bruke en "
+                                   "halvtime på a6? 2. Nf3 1:23:30"));
+    if (const QString dir = qEnvironmentVariable("KIEBITZ_SNAPSHOT_DIR"); !dir.isEmpty()) {
+        QImage image(notation->size() * 2, QImage::Format_ARGB32_Premultiplied);
+        image.setDevicePixelRatio(2);
+        image.fill(style.colors().surface); // the list is see-through; this is what's behind it
+        notation->render(&image);
+        image.save(QDir(dir).filePath(QStringLiteral("comments.png")));
+    }
+}
+
 TEST_F(DocumentsTest, TwoTabsOfOneLibraryFileKeepEachOthersChanges) {
     writeFile(path("three.pgn"), kThreeGames);
     scanLibrary();

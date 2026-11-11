@@ -110,8 +110,13 @@ private:
     void updatePage();
     void updateSidebarIcons();
     void closeTab(int tab);
-    /// Asks to save a modified game. False if the user cancelled.
+    /// Before a game closes: a game from a file is saved right away (it autosaves anyway); a
+    /// new one asks whether and where to save it. False if the user cancelled.
     bool maybeSave(GameDocument& document);
+    /// Writes every changed game that lives in a file (autosave; ⌘S does it at once). Games of
+    /// the same file go into its text one after another, then the file is written once.
+    void autosave();
+    [[nodiscard]] static bool inFile(const GameDocument& document);
     void save();
     void saveAs();
     void writeDocument(GameDocument& document, const QString& path, std::string text,
@@ -181,6 +186,8 @@ private:
     QWidget* m_forkPanel = nullptr;
     QVBoxLayout* m_forkLayout = nullptr;
     QTimer m_notationRefresh; ///< typing a comment re-renders the notation after a pause
+    QTimer m_autosave;        ///< a second after the last change, changed games are saved
+    QStringList m_writing;    ///< files being written now (the next autosave waits for them)
     int m_choice = 0;         ///< chosen continuation at a branch point (index into the children)
 
     QAction* m_backAction = nullptr;

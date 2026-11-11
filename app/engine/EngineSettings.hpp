@@ -12,6 +12,10 @@ struct EngineEntry {
     QString path; ///< the executable; never shown in the UI
     int threads = defaultThreads();
     int hashMb = 256;
+    int lines = defaultLines(); ///< how many lines (MultiPV) it shows
+
+    /// Lines for a new engine: what the user last chose for the Engine tab, else 3.
+    [[nodiscard]] static int defaultLines();
 
     /// Half the CPU cores (at least 1): fast, and leaves the Mac responsive.
     [[nodiscard]] static int defaultThreads();
@@ -19,6 +23,11 @@ struct EngineEntry {
 
 /// The engine list, stored in the settings.
 namespace engines {
+
+constexpr int kMaxLines = 5;
+/// Lines for the Lichess cloud, which isn't in the list.
+[[nodiscard]] int cloudLines();
+void setCloudLines(int lines);
 
 [[nodiscard]] std::vector<EngineEntry> load();
 void save(const std::vector<EngineEntry>& list);
