@@ -42,10 +42,16 @@ qt_add_library(kiebitz_ui STATIC
     library/Library.hpp
     library/LibraryView.cpp
     library/LibraryView.hpp
+    library/NewFileDialog.cpp
+    library/NewFileDialog.hpp
     notation/NotationView.cpp
     notation/NotationView.hpp
     panels/GameInfoPanel.cpp
     panels/GameInfoPanel.hpp
+    repertoire/RepertoireStore.cpp
+    repertoire/RepertoireStore.hpp
+    repertoire/RepertoirePanel.cpp
+    repertoire/RepertoirePanel.hpp
     style/AppStyle.cpp
     style/AppStyle.hpp
     style/Icons.cpp
@@ -59,7 +65,7 @@ qt_add_library(kiebitz_ui STATIC
     widgets/Stepper.hpp)
 target_include_directories(kiebitz_ui PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")
 target_link_libraries(kiebitz_ui PUBLIC Qt6::Widgets Qt6::Svg Qt6::Concurrent Qt6::Network
-    kiebitz::pgn kiebitz::engine kiebitz::library)
+    kiebitz::pgn kiebitz::engine kiebitz::library kiebitz::repertoire)
 kiebitz_set_warnings(kiebitz_ui)
 
 # Piece SVGs are compiled into the binary (":/pieces/<set>/wK.svg"), so the app has no loose
@@ -69,6 +75,12 @@ qt_add_resources(kiebitz_ui "pieces"
     PREFIX "/pieces"
     BASE "${CMAKE_CURRENT_SOURCE_DIR}/resources/pieces"
     FILES ${piece_svgs})
+
+# Opening names (lichess-org/chess-openings, CC0), read on first use by RepertoireStore.
+qt_add_resources(kiebitz_ui "openings"
+    PREFIX "/openings"
+    BASE "${CMAKE_CURRENT_SOURCE_DIR}/resources/openings"
+    FILES "${CMAKE_CURRENT_SOURCE_DIR}/resources/openings/openings.tsv")
 
 # The app icon (made from resources/icon/Kiebitz.svg by scripts/make_icon.sh).
 set(kiebitz_icon "${CMAKE_CURRENT_SOURCE_DIR}/resources/icon/Kiebitz.icns")

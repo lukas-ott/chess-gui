@@ -16,10 +16,17 @@ enum class IconKind : std::uint8_t {
     Last,
     Close,
     Folder,
-    Board,   ///< a pawn: the board and its games (sidebar)
-    Library, ///< two stacked pages: the files (sidebar)
-    Engine,  ///< a chip (sidebar, engine cards)
-    Cloud,   ///< the Lichess cloud
+    File,      ///< a page with a folded corner (a PGN file in the Library)
+    Branch,    ///< one line splitting in two: a repertoire file
+    Trophy,    ///< a cup: a tournament file
+    Puzzle,    ///< a puzzle piece: a puzzle file
+    Check,     ///< a tick: right
+    NewFile,   ///< a page with a plus
+    NewFolder, ///< a folder with a plus
+    Board,     ///< a pawn: the board and its games (sidebar)
+    Library,   ///< two stacked pages: the files (sidebar)
+    Engine,    ///< a chip (sidebar, engine cards)
+    Cloud,     ///< the Lichess cloud
     Plus,
 };
 

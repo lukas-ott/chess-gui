@@ -1,6 +1,7 @@
 # kiebitz_pgn: reading and writing PGN files. Like core, it must never depend on Qt.
 
 add_library(kiebitz_pgn
+    src/edit.cpp
     src/reader.cpp
     src/tokenizer.cpp
     src/tokenizer.hpp

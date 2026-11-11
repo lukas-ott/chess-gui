@@ -18,20 +18,25 @@ EmptyState::EmptyState(IconKind icon, const QString& title, const QString& hint,
     m_icon->setAlignment(Qt::AlignCenter);
     m_icon->setFixedSize(64, 64);
     layout->addWidget(m_icon, 0, Qt::AlignHCenter);
-    auto* titleLabel = new QLabel(title);
-    titleLabel->setProperty("role", "emptyTitle");
-    titleLabel->setAlignment(Qt::AlignCenter);
-    layout->addWidget(titleLabel);
-    if (!hint.isEmpty()) {
-        auto* hintLabel = new QLabel(hint);
-        hintLabel->setProperty("role", "emptyHint");
-        hintLabel->setAlignment(Qt::AlignCenter);
-        hintLabel->setWordWrap(true);
-        layout->addWidget(hintLabel);
-    }
+    m_title = new QLabel;
+    m_title->setProperty("role", "emptyTitle");
+    m_title->setAlignment(Qt::AlignCenter);
+    layout->addWidget(m_title);
+    m_hint = new QLabel;
+    m_hint->setProperty("role", "emptyHint");
+    m_hint->setAlignment(Qt::AlignCenter);
+    m_hint->setWordWrap(true);
+    layout->addWidget(m_hint);
     layout->addStretch();
+    setText(title, hint);
     connect(&m_style, &AppStyle::changed, this, &EmptyState::updateIcon);
     updateIcon();
+}
+
+void EmptyState::setText(const QString& title, const QString& hint) {
+    m_title->setText(title);
+    m_hint->setText(hint);
+    m_hint->setVisible(!hint.isEmpty());
 }
 
 void EmptyState::updateIcon() {

@@ -334,3 +334,27 @@ TEST(PgnWrite, FenGamesKeepTheirStart) {
 }
 
 } // namespace
+
+TEST(PgnEdit, SetsAHeaderInEveryGameAndKeepsTheRest) {
+    const std::string text = "[Event \"A\"]\n[Result \"*\"]\n\n1. e4  {keep   spacing} *\n\n"
+                             "[Event \"B\"]\n[Repertoire \"Black\"]\n[Result \"*\"]\n\n1. d4 *\n";
+    const std::string marked = pgn::setHeaderInAllGames(text, "Repertoire", "White");
+    EXPECT_EQ(marked, "[Event \"A\"]\n[Result \"*\"]\n[Repertoire \"White\"]\n\n1. e4  {keep   "
+                      "spacing} *\n\n[Event \"B\"]\n[Repertoire \"White\"]\n[Result \"*\"]\n\n1. "
+                      "d4 *\n");
+    const auto games = pgn::indexGames(marked);
+    ASSERT_EQ(games.size(), 2U);
+    EXPECT_EQ(games[0].header("Repertoire"), "White");
+    EXPECT_EQ(games[1].header("Repertoire"), "White");
+
+    // Removing it gives back the first game exactly, and the second without the line.
+    const std::string unmarked = pgn::setHeaderInAllGames(marked, "Repertoire", std::nullopt);
+    EXPECT_EQ(unmarked, "[Event \"A\"]\n[Result \"*\"]\n\n1. e4  {keep   spacing} *\n\n"
+                        "[Event \"B\"]\n[Result \"*\"]\n\n1. d4 *\n");
+}
+
+TEST(PgnEdit, GameWithoutHeadersGetsOne) {
+    const std::string marked = pgn::setHeaderInAllGames("1. e4 e5 *\n", "Repertoire", "Black");
+    EXPECT_EQ(marked, "[Repertoire \"Black\"]\n\n1. e4 e5 *\n");
+    EXPECT_EQ(pgn::indexGames(marked).front().header("Repertoire"), "Black");
+}

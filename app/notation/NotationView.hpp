@@ -37,6 +37,11 @@ public:
     /// Moves the highlight. Cheap: doesn't rebuild the text.
     void setCurrent(core::NodeId current);
 
+    /// Two ways to show the moves: flowing text (the default), or rows (number, White, Black)
+    /// with comments and variations as blocks in between, as En Croissant shows them.
+    void setRows(bool rows);
+    [[nodiscard]] bool rows() const noexcept { return m_rows; }
+
     /// The text as shown, one paragraph per line (for tests and copying).
     [[nodiscard]] QString plainText() const;
     /// Where a move is drawn, in viewport coordinates (empty if it isn't in the list).
@@ -93,10 +98,18 @@ private:
         qreal width = 0;
         int line = 0; ///< laid out: index into m_lines
     };
+    /// How a paragraph is laid out.
+    enum class Style : std::uint8_t {
+        Flow, ///< words wrapped like text
+        Row,  ///< rows view: number, White's move, Black's move in columns
+        Note, ///< rows view: a comment between the rows
+    };
     struct Paragraph {
         int first = 0; ///< words [first, end)
         int end = 0;
         bool variation = false;
+        Style style = Style::Flow;
+        bool blackOnly = false; ///< a row that starts with Black's move ("5 … Nf6")
     };
     struct Line {
         int top = 0; ///< in content coordinates
@@ -104,6 +117,7 @@ private:
         int first = 0; ///< words [first, end)
         int end = 0;
         bool small = false;
+        bool bar = false; ///< rows view: a variation block, with a line at its left
     };
 
     void rebuild();
@@ -139,6 +153,7 @@ private:
 
     core::NodeId m_pressed = core::kNoNode; ///< a click goes to the move it started on
     int m_hovered = -1;                     ///< the move word under the mouse
+    bool m_rows = false;                    ///< the rows view
 };
 
 } // namespace kiebitz::app

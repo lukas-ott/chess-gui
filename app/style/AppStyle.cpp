@@ -1,10 +1,13 @@
 #include "AppStyle.hpp"
 
 #include <QApplication>
+#include <QComboBox>
 #include <QEvent>
+#include <QFrame>
 #include <QPalette>
 #include <QStyleFactory>
 #include <QStyleHints>
+#include <QStyledItemDelegate>
 #include <QWidget>
 
 #include <array>
@@ -23,6 +26,8 @@ AppStyle::Colors AppStyle::darkColors() {
         .dimmed = QColor(0x5C, 0x5F, 0x66),
         .accent = QColor(0x4D, 0xAB, 0xF7),
         .accentText = QColor(0x10, 0x11, 0x13),
+        .good = QColor(0x51, 0xCF, 0x66),
+        .bad = QColor(0xFF, 0x6B, 0x6B),
     };
 }
 
@@ -37,6 +42,8 @@ AppStyle::Colors AppStyle::lightColors() {
         .dimmed = QColor(0xAD, 0xB5, 0xBD),
         .accent = QColor(0x22, 0x8B, 0xE6),
         .accentText = QColor(0xFF, 0xFF, 0xFF),
+        .good = QColor(0x2F, 0x9E, 0x44),
+        .bad = QColor(0xE0, 0x31, 0x31),
     };
 }
 
@@ -57,6 +64,22 @@ bool AppStyle::eventFilter(QObject* watched, QEvent* event) {
     if (event->type() == QEvent::Polish && watched->inherits("QTipLabel")) {
         if (auto* tip = qobject_cast<QWidget*>(watched)) {
             tip->setAttribute(Qt::WA_TranslucentBackground);
+        }
+    }
+    if (event->type() == QEvent::Polish) {
+        // Dropdown lists: rows drawn by the style sheet (the default delegate paints them in
+        // the system highlight), and a see-through window so the list's corners can be round.
+        if (auto* combo = qobject_cast<QComboBox*>(watched);
+            combo != nullptr && !combo->property("styledRows").toBool()) {
+            combo->setProperty("styledRows", true);
+            combo->setItemDelegate(new QStyledItemDelegate(combo));
+        }
+        if (watched->inherits("QComboBoxPrivateContainer")) {
+            if (auto* frame = qobject_cast<QFrame*>(watched)) {
+                frame->setAttribute(Qt::WA_TranslucentBackground);
+                frame->setFrameShape(QFrame::NoFrame);
+                frame->setContentsMargins(0, 0, 0, 0);
+            }
         }
     }
     return QObject::eventFilter(watched, event);
@@ -242,8 +265,8 @@ QScrollBar::add-page, QScrollBar::sub-page { background: transparent; }
 
 /* Tooltips: a small rounded label (see eventFilter: their window is made see-through so the
    corners can be round) */
-QToolTip { background: @raised; color: @text; border: 1px solid @border; border-radius: 7px;
-           padding: 5px 9px; font-size: 12px; }
+QToolTip { background: @text; color: @window; border: none; border-radius: 5px;
+           padding: 4px 8px; font-size: 12px; }
 
 /* Page headers (Library, Engines): style/PageHeader */
 QLabel[role="pageTitle"] { color: @text; font-size: 22px; font-weight: 700; }
@@ -298,6 +321,14 @@ QToolButton[role="icon"]:hover { background: @raised; }
 QToolButton[role="icon"][outlined="true"] { border-color: @border; background: @surface; }
 QToolButton[role="icon"]::menu-indicator { image: none; }
 
+/* Repertoire: the "3 to check" button opens a menu of problems; a small pill */
+QToolButton#repertoireProblems {
+    background: @raised; color: @text; border: 1px solid @border; border-radius: 6px;
+    padding: 3px 9px; font-size: 12px;
+}
+QToolButton#repertoireProblems:hover { border-color: @accent; }
+QToolButton#repertoireProblems::menu-indicator { image: none; width: 0; }
+
 /* Segmented controls (lines per engine) and steppers (− value +): a 32 px track with
    28 px segments inside it; the chosen segment is raised, as in macOS and Lichess pickers */
 QWidget[role="segmented"], QWidget[role="stepper"] {
@@ -347,6 +378,28 @@ QAbstractSpinBox QLineEdit, QComboBox QLineEdit {
 /* Engine tab */
 QLabel[role="engineStatus"] { color: @muted; font-size: 12px; }
 QLabel[role="pvLine"] { color: @text; font-size: 14px; }
+
+/* Practice: the status (green when right, red when wrong), the file's explanation as a quote,
+   and a thin bar for the lines done. */
+QLabel[role="practiceStatus"] { color: @text; font-size: 15px; font-weight: 600; }
+QLabel[role="practiceStatus"][mood="good"] { color: @good; }
+QLabel[role="practiceStatus"][mood="bad"] { color: @bad; }
+QLabel[role="quote"] {
+    color: @muted;
+    font-size: 13px;
+    font-style: italic;
+    border-left: 2px solid @dimmed;
+    padding: 2px 0 2px 10px;
+}
+QProgressBar#practiceBar { background: @raised; border: none; border-radius: 2px; }
+QProgressBar#practiceBar::chunk { background: @accent; border-radius: 2px; }
+
+/* Library: a repertoire's numbers in tiles, and the openings in it */
+QFrame[statTile="true"] { background: @raised; border: none; border-radius: 8px; }
+QLabel[role="statCaption"] { color: @muted; font-size: 11px; }
+QLabel[role="statValue"] { color: @text; font-size: 20px; font-weight: 600; }
+QTreeWidget#repertoireOpenings { background: transparent; color: @text; outline: none; }
+QTreeWidget#repertoireOpenings::item { padding: 4px 2px; border: none; }
 /* A score chip in the colours of the side that is better, as Lichess shows it */
 QLabel[role="scorePill"] {
     border-radius: 6px;
@@ -378,6 +431,21 @@ QFrame[engineCard="true"]:hover { border-color: @muted; }
 QFrame[engineCard="true"][selected="true"] { border-color: @accent; }
 QLabel[role="cardName"] { color: @text; font-size: 15px; font-weight: 600; }
 QLabel[role="statTitle"] { color: @muted; font-size: 11px; font-weight: 600; }
+
+/* Info tab: label and value rows; a value looks like text until it is hovered or edited */
+QLabel[role="infoLabel"] { color: @muted; font-size: 12px; min-width: 64px; }
+QLineEdit[role="inlineField"], QComboBox[role="inlineField"] {
+    background: transparent;
+    border: 1px solid transparent;
+    border-radius: 6px;
+    padding: 3px 8px;
+    min-height: 22px;
+}
+QLineEdit[role="inlineField"]:hover, QComboBox[role="inlineField"]:hover { background: @raised; }
+QLineEdit[role="inlineField"]:focus, QComboBox[role="inlineField"]:focus {
+    background: @window;
+    border-color: @accent;
+}
 QLabel[role="statValue"] { color: @text; font-size: 15px; font-weight: 600; }
 QScrollArea#engineCards, QWidget#engineCardsContent { background: transparent; }
 QScrollArea#engineSections, QWidget#engineSectionsContent { background: transparent; }
@@ -411,9 +479,22 @@ QLineEdit:focus, QPlainTextEdit#commentBox:focus, QComboBox:focus, QSpinBox:focu
 QLineEdit:disabled { color: @dimmed; }
 QComboBox::drop-down { border: none; width: 18px; }
 QComboBox QAbstractItemView {
-    background: @surface; color: @text; border: 1px solid @border;
-    selection-background-color: @accentTint; selection-color: @accent;
+    background: @surface;
+    color: @text;
+    border: 1px solid @border;
+    border-radius: 8px;
+    padding: 4px;
+    outline: none;
+    font-size: 13px;
 }
+QComboBox QAbstractItemView::item {
+    min-height: 26px;
+    padding: 0 8px;
+    border: none;
+    border-radius: 6px;
+}
+QComboBox QAbstractItemView::item:hover,
+QComboBox QAbstractItemView::item:selected { background: @accentTint; color: @accent; }
 
 /* Library: file list and games table */
 QTreeWidget#libraryFiles {
@@ -482,7 +563,9 @@ QStatusBar::item { border: none; }
     };
     const QColor tint = mix(colors.accent, colors.surface, 0.18F);
     const QColor hover = mix(colors.accent, colors.text, 0.85F);
-    const std::array<std::pair<const char*, QColor>, 11> names{{
+    const std::array<std::pair<const char*, QColor>, 13> names{{
+        {"@good", colors.good},
+        {"@bad", colors.bad},
         {"@window", colors.window},
         {"@surface", colors.surface},
         {"@raised", colors.raised},

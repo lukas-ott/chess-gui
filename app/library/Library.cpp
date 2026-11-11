@@ -60,6 +60,7 @@ std::shared_ptr<PgnFile> indexOnly(const QString& path, std::vector<pgn::GameEnt
 
 struct Listing {
     std::vector<LibraryFile> files;
+    QStringList folders; ///< every subfolder, relative ("Openings/Black"), empty ones too
     qint64 milliseconds = 0;
 };
 
@@ -104,6 +105,11 @@ Listing list(const QString& folder, const std::vector<LibraryFile>& known,
     std::sort(result.files.begin(), result.files.end(), [](const auto& a, const auto& b) {
         return QString::localeAwareCompare(a.name, b.name) < 0;
     });
+    QDirIterator dirs(folder, QDir::Dirs | QDir::NoDotAndDotDot, QDirIterator::Subdirectories);
+    while (dirs.hasNext()) {
+        result.folders << QDir(folder).relativeFilePath(dirs.next());
+    }
+    result.folders.sort();
     result.milliseconds = timer.elapsed();
     return result;
 }
@@ -210,12 +216,14 @@ void Library::startScan() {
         Listing listing = watcher->result();
         // Nothing new (the watcher also fires for changes that aren't PGN files): leave the
         // views alone, so nothing is rebuilt under the user's hands.
-        const bool same = m_reportedGeneration == generation &&
-                          std::equal(m_files.begin(), m_files.end(), listing.files.begin(),
-                                     listing.files.end(), [](const auto& a, const auto& b) {
-                                         return a.path == b.path && a.pgn == b.pgn;
-                                     });
+        const bool same =
+            m_reportedGeneration == generation &&
+            std::equal(
+                m_files.begin(), m_files.end(), listing.files.begin(), listing.files.end(),
+                [](const auto& a, const auto& b) { return a.path == b.path && a.pgn == b.pgn; }) &&
+            m_folders == listing.folders;
         m_files = std::move(listing.files);
+        m_folders = std::move(listing.folders);
         watch();
         if (same) {
             m_scanning = false;

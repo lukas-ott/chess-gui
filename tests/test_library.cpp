@@ -1,3 +1,4 @@
+#include "kiebitz/library/file_kind.hpp"
 #include "kiebitz/library/index_cache.hpp"
 
 #include <gtest/gtest.h>
@@ -145,4 +146,18 @@ TEST(IndexCache, DamagedFileStartsAfresh) {
 TEST(IndexCache, UnwritableLocationFails) {
     const auto cache = IndexCache::open("/nonexistent-folder/for/sure/cache.sqlite");
     EXPECT_FALSE(cache);
+}
+
+TEST(FileKind, ReadFromTheHeaders) {
+    using kiebitz::library::FileKind;
+    using kiebitz::library::kindOf;
+    const auto games = [](std::vector<std::pair<std::string, std::string>> headers) {
+        return std::vector<GameEntry>{{0, 1, std::move(headers)}};
+    };
+    EXPECT_EQ(kindOf(games({{"FileType", "Repertoire"}})), FileKind::Repertoire);
+    EXPECT_EQ(kindOf(games({{"FileType", "puzzle"}})), FileKind::Puzzle); // any case
+    EXPECT_EQ(kindOf(games({{"Repertoire", "Old marking"}})), FileKind::Repertoire);
+    EXPECT_EQ(kindOf(games({{"White", "Carlsen"}})), FileKind::Game);
+    EXPECT_EQ(kindOf({}), FileKind::Game);
+    EXPECT_EQ(kiebitz::library::nameOf(FileKind::Tournament), "Tournament");
 }

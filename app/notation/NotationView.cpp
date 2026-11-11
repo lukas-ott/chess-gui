@@ -156,13 +156,15 @@ void NotationView::rebuild() {
         nbspOwed = false;
     };
     // A new paragraph, unless the current one is still empty (then it just changes style).
-    const auto paragraph = [&](bool isVariation) {
+    const auto paragraph = [&](bool isVariation, Style style = Style::Flow) {
         Paragraph& last = m_paragraphs.back();
         last.end = static_cast<int>(m_words.size());
         if (last.end > last.first) {
-            m_paragraphs.push_back({last.end, last.end, isVariation});
+            m_paragraphs.push_back({last.end, last.end, isVariation, style, false});
         } else {
             last.variation = isVariation;
+            last.style = style;
+            last.blackOnly = false;
         }
         variation = isVariation;
         spaceOwed = false;
@@ -235,8 +237,63 @@ void NotationView::rebuild() {
         }
     };
 
-    comment(game.node(core::Game::root()).comment);
-    line(core::Game::root(), 0, true);
+    // Rows: the main line two moves to a row, its comments and variations as blocks in between.
+    const auto rowsView = [&] {
+        const auto note = [&](const std::string& value) { // a comment as its own paragraph
+            const core::CommentDisplay shown = core::displayComment(value);
+            if (shown.text.empty() && shown.author.empty()) {
+                return false;
+            }
+            paragraph(false, Style::Note);
+            comment(value);
+            return true;
+        };
+        note(game.node(core::Game::root()).comment);
+        bool rowOpen = false;
+        for (NodeId node = game.mainChild(core::Game::root()); node != core::kNoNode;
+             node = game.mainChild(node)) {
+            const core::Node& n = game.node(node);
+            const bool white = game.mover(node) == core::Color::White;
+            if (note(n.commentBefore)) {
+                rowOpen = false;
+            }
+            if (white || !rowOpen) {
+                paragraph(false, Style::Row);
+                add(QString::number(game.moveNumber(node)), Kind::Number);
+                if (!white) {
+                    add(QStringLiteral("…"), Kind::Number);
+                    m_paragraphs.back().blackOnly = true;
+                }
+                rowOpen = true;
+            }
+            QString san = QString::fromStdString(n.san);
+            for (const auto nag : n.nags) {
+                san += nagText(nag);
+            }
+            m_moveWord[node] = static_cast<int>(m_words.size());
+            add(std::move(san), Kind::MainMove, node);
+            if (note(n.comment)) {
+                rowOpen = false;
+            }
+            for (NodeId alt = game.nextSibling(node); alt != core::kNoNode;
+                 alt = game.nextSibling(alt)) {
+                paragraph(true);
+                line(alt, 1, move(alt, true, false));
+                rowOpen = false;
+            }
+            if (!white) {
+                rowOpen = false; // Black's move ends the row
+            }
+        }
+        paragraph(false, Style::Note);
+    };
+
+    if (m_rows) {
+        rowsView();
+    } else {
+        comment(game.node(core::Game::root()).comment);
+        line(core::Game::root(), 0, true);
+    }
     if (game.mainChild(core::Game::root()) == core::kNoNode) {
         for (const QString& part :
              tr("Play a move on the board to start.").split(QLatin1Char(' '))) {
@@ -269,12 +326,31 @@ void NotationView::layoutWords() {
         const auto size = static_cast<std::size_t>(p.variation ? 1 : 0);
         const int height = m_lineHeight[size];
         const qreal space = m_spaceWidth[size];
-        const auto left = static_cast<qreal>(kMargin + (p.variation ? kVariationIndent : 0));
+        if (p.style == Style::Row) {
+            // Columns: the number, then White's and Black's moves sharing the rest.
+            const qreal numberColumn = 40;
+            const qreal whiteX = kMargin + numberColumn;
+            const qreal blackX =
+                whiteX +
+                (std::max(120.0, static_cast<qreal>(width - (2 * kMargin)) - numberColumn) / 2);
+            const std::array<qreal, 3> columns{static_cast<qreal>(kMargin), whiteX, blackX};
+            for (int i = p.first; i < p.end; ++i) {
+                Word& word = m_words[static_cast<std::size_t>(i)];
+                word.x = columns[static_cast<std::size_t>(std::min(i - p.first, 2))];
+                word.line = static_cast<int>(m_lines.size());
+            }
+            m_lines.push_back(Line{y, height, p.first, p.end, false, false});
+            y += height;
+            continue;
+        }
+        const bool bar = m_rows && p.variation;
+        const auto left =
+            static_cast<qreal>(kMargin + (p.variation ? kVariationIndent : 0) + (bar ? 6 : 0));
         const qreal room = std::max(40.0, static_cast<qreal>(width - kMargin) - left);
         if (p.variation) {
             y += kVariationGap;
         }
-        Line current{y, height, p.first, p.first, p.variation};
+        Line current{y, height, p.first, p.first, p.variation, bar};
         qreal x = 0;
         for (int i = p.first; i < p.end; ++i) {
             Word& word = m_words[static_cast<std::size_t>(i)];
@@ -294,7 +370,7 @@ void NotationView::layoutWords() {
                         current.end = i;
                         m_lines.push_back(current);
                         y += height;
-                        current = Line{y, height, i, i, p.variation};
+                        current = Line{y, height, i, i, p.variation, bar};
                         x = 0;
                     } else {
                         x += gap;
@@ -385,6 +461,13 @@ QString NotationView::plainText() const {
 
 // ---- Highlight and painting --------------------------------------------------------------------
 
+void NotationView::setRows(bool rows) {
+    if (rows != m_rows) {
+        m_rows = rows;
+        rebuild();
+    }
+}
+
 void NotationView::setCurrent(NodeId current) {
     m_current = current;
     scrollToMove(current);
@@ -415,6 +498,10 @@ void NotationView::paintEvent(QPaintEvent* event) {
     tint.setAlphaF(0.22F);
     for (; line != m_lines.end() && line->top - scroll < area.bottom(); ++line) {
         const auto size = static_cast<std::size_t>(line->small ? 1 : 0);
+        if (line->bar) { // rows view: a variation block's line at its left
+            const qreal x = kMargin + kVariationIndent - 6;
+            painter.fillRect(QRectF(x, line->top - scroll, 2, line->height), c.border);
+        }
         const qreal baseline = static_cast<qreal>(line->top - scroll) + m_ascent[size];
         for (int i = line->first; i < line->end; ++i) {
             const Word& word = m_words[static_cast<std::size_t>(i)];

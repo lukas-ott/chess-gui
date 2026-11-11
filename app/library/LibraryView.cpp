@@ -1,8 +1,11 @@
 #include "LibraryView.hpp"
 
 #include "Library.hpp"
+#include "NewFileDialog.hpp"
 #include "board/BoardView.hpp"
 #include "document/PgnIo.hpp"
+#include "kiebitz/repertoire/summary.hpp"
+#include "repertoire/RepertoireStore.hpp"
 #include "style/AppStyle.hpp"
 #include "style/Icons.hpp"
 #include "style/Layout.hpp"
@@ -11,6 +14,9 @@
 
 #include <QAbstractTableModel>
 #include <QApplication>
+#include <QComboBox>
+#include <QDir>
+#include <QDropEvent>
 #include <QFileInfo>
 #include <QFutureWatcher>
 #include <QHBoxLayout>
@@ -19,6 +25,9 @@
 #include <QKeyEvent>
 #include <QLabel>
 #include <QLineEdit>
+#include <QLocale>
+#include <QMenu>
+#include <QMessageBox>
 #include <QPushButton>
 #include <QSettings>
 #include <QSortFilterProxyModel>
@@ -28,11 +37,13 @@
 #include <QTableView>
 #include <QTreeWidget>
 #include <QVBoxLayout>
+#include <QtConcurrent/QtConcurrentRun>
 
 #include <algorithm>
 #include <array>
 #include <functional>
 #include <map>
+#include <span>
 
 namespace kiebitz::app {
 /// A one-line label that cuts its text off with "…" when there isn't room, instead of forcing
@@ -64,12 +75,56 @@ private:
 
 namespace {
 
+using library::FileKind;
+
 // Tree item data
-constexpr int kKindRole = Qt::UserRole;      ///< kFolder or kFile
-constexpr int kKeyRole = Qt::UserRole + 1;   ///< folder: relative path; file: absolute path
-constexpr int kIndexRole = Qt::UserRole + 2; ///< file: index into Library::files()
+constexpr int kKindRole = Qt::UserRole;         ///< kFolder or kFile
+constexpr int kKeyRole = Qt::UserRole + 1;      ///< folder: relative path; file: absolute path
+constexpr int kIndexRole = Qt::UserRole + 2;    ///< file: index into Library::files()
+constexpr int kFileKindRole = Qt::UserRole + 3; ///< file: its library::FileKind
+constexpr int kSideRole = Qt::UserRole + 4;     ///< file: the side a repertoire is for (0 = White)
 constexpr int kFolder = 1;
 constexpr int kFile = 2;
+
+// The selection card's pages
+constexpr int kNothing = 0;
+constexpr int kFolderPage = 1;
+constexpr int kGamesPage = 2;
+constexpr int kRepertoirePage = 3;
+
+/// Each type of file has its own icon (Kiebitz's own line icons).
+IconKind iconOf(FileKind kind) {
+    switch (kind) {
+    case FileKind::Repertoire:
+        return IconKind::Branch;
+    case FileKind::Tournament:
+        return IconKind::Trophy;
+    case FileKind::Puzzle:
+        return IconKind::Puzzle;
+    case FileKind::Other:
+        return IconKind::File;
+    case FileKind::Game:
+        break;
+    }
+    return IconKind::Board;
+}
+
+QString typeName(FileKind kind, core::Color side) {
+    switch (kind) {
+    case FileKind::Repertoire:
+        return side == core::Color::White ? QObject::tr("Repertoire for White")
+                                          : QObject::tr("Repertoire for Black");
+    case FileKind::Tournament:
+        return QObject::tr("Tournament");
+    case FileKind::Puzzle:
+        return QObject::tr("Puzzles");
+    case FileKind::Other:
+        return QObject::tr("Other");
+    case FileKind::Game:
+        break;
+    }
+    return QObject::tr("Games");
+}
 
 constexpr auto kExpandedKey = "library/expandedFolders";
 constexpr auto kFoldingSavedKey = "library/foldingSaved"; // an empty list can't say "saved"
@@ -79,8 +134,21 @@ QString toQString(std::string_view text) {
     return value == u"?" || value == u"????.??.??" ? QString() : value;
 }
 
+/// "Sicilian Defense: Najdorf Variation" from a game's headers, else its ECO code.
+QString openingOf(const pgn::GameEntry& game) {
+    QString opening = toQString(game.header("Opening"));
+    if (const QString variation = toQString(game.header("Variation")); !variation.isEmpty()) {
+        opening += (opening.isEmpty() ? QString() : QStringLiteral(": ")) + variation;
+    }
+    return opening.isEmpty() ? toQString(game.header("ECO")) : opening;
+}
+
 QString gamesText(int count) {
     return count == 1 ? QObject::tr("1 game") : QObject::tr("%1 games").arg(count);
+}
+
+QString number(std::size_t value) {
+    return QLocale().toString(static_cast<qulonglong>(value));
 }
 
 QLabel* label(const QString& text, const char* role) {
@@ -97,83 +165,194 @@ QFrame* card() {
 
 } // namespace
 
-/// Games as a table: #, White, Black, Result, Date, Event. A row is one game of one file, so a
-/// folder's games from many files fit in the same table. Reads straight from each file's index,
-/// so thousands of games show at once.
+namespace {
+
+/// The file tree. Files and folders can be dragged onto a folder (or onto a file, meaning its
+/// folder, or onto empty space, meaning the top); the move itself happens on disk, and the
+/// library's rescan shows it, so the tree never shows a move that didn't work.
+class FileTree : public QTreeWidget {
+public:
+    using QTreeWidget::QTreeWidget;
+    /// Called on a drop: the dragged item and the target folder item (null = the top).
+    std::function<void(QTreeWidgetItem* dragged, QTreeWidgetItem* folder)> onDrop;
+
+protected:
+    void dropEvent(QDropEvent* event) override {
+        QTreeWidgetItem* dragged = currentItem();
+        QTreeWidgetItem* target = itemAt(event->position().toPoint());
+        if (target != nullptr && target->data(0, kKindRole).toInt() != kFolder) {
+            target = target->parent();
+        }
+        event->setDropAction(Qt::IgnoreAction); // the tree is rebuilt from the disk
+        event->accept();
+        if (dragged != nullptr && onDrop) {
+            onDrop(dragged, target);
+        }
+    }
+};
+
+} // namespace
+
+/// One file's games as a table whose columns fit the file's type:
+///   games and other files: #, White, Black, Result, Date, Opening, Event;
+///   a tournament: #, Round, White, Black, Result, Date, Opening;
+///   puzzles: #, Puzzle, To move, Date.
+/// Reads straight from the file's index, so thousands of games show at once.
 class GameListModel : public QAbstractTableModel {
 public:
-    struct Row {
-        std::shared_ptr<PgnFile> file;
-        int index = 0;
+    enum class Column : std::uint8_t {
+        Number,
+        White,
+        Black,
+        Result,
+        Date,
+        Opening,
+        Event,
+        Round,
+        Name,
+        ToMove
     };
 
     using QAbstractTableModel::QAbstractTableModel;
 
-    void setRows(std::vector<Row> rows) {
+    void setFile(std::shared_ptr<PgnFile> file, FileKind kind) {
         beginResetModel();
-        m_rows = std::move(rows);
+        m_file = std::move(file);
+        switch (kind) {
+        case FileKind::Tournament:
+            m_columns = {Column::Number, Column::Round, Column::White,  Column::Black,
+                         Column::Result, Column::Date,  Column::Opening};
+            break;
+        case FileKind::Puzzle:
+            m_columns = {Column::Number, Column::Name, Column::ToMove, Column::Date};
+            break;
+        case FileKind::Game:
+        case FileKind::Repertoire:
+        case FileKind::Other:
+            m_columns = {Column::Number, Column::White,   Column::Black, Column::Result,
+                         Column::Date,   Column::Opening, Column::Event};
+            break;
+        }
         endResetModel();
     }
-    [[nodiscard]] const Row* row(int r) const {
-        return r >= 0 && static_cast<std::size_t>(r) < m_rows.size()
-                   ? &m_rows[static_cast<std::size_t>(r)]
-                   : nullptr;
+    [[nodiscard]] const std::shared_ptr<PgnFile>& file() const { return m_file; }
+    [[nodiscard]] Column column(int section) const {
+        return m_columns[static_cast<std::size_t>(section)];
+    }
+    /// Columns that take the spare width (names); the others fit their content.
+    [[nodiscard]] bool stretches(int section) const {
+        const Column c = column(section);
+        return c == Column::White || c == Column::Black || c == Column::Opening ||
+               c == Column::Event || c == Column::Name;
     }
 
     [[nodiscard]] int rowCount(const QModelIndex& parent = {}) const override {
-        return parent.isValid() ? 0 : static_cast<int>(m_rows.size());
+        return parent.isValid() || !m_file ? 0 : static_cast<int>(m_file->games.size());
     }
     [[nodiscard]] int columnCount(const QModelIndex& parent = {}) const override {
-        return parent.isValid() ? 0 : static_cast<int>(kColumns.size());
+        return parent.isValid() ? 0 : static_cast<int>(m_columns.size());
     }
     [[nodiscard]] QVariant data(const QModelIndex& index, int role) const override {
-        const Row* r = row(index.row());
-        if (r == nullptr) {
+        if (!m_file || index.row() < 0 || index.row() >= rowCount()) {
             return {};
         }
-        if (role == Qt::TextAlignmentRole && (index.column() == 0 || index.column() == 4)) {
+        const Column c = column(index.column());
+        if (role == Qt::TextAlignmentRole &&
+            (c == Column::Number || c == Column::Result || c == Column::Round)) {
             return QVariant::fromValue(Qt::AlignCenter);
         }
         if (role != Qt::DisplayRole && role != Qt::ToolTipRole) {
             return {};
         }
-        if (index.column() == 0) {
+        const auto& game = m_file->games[static_cast<std::size_t>(index.row())];
+        switch (c) {
+        case Column::Number:
             return index.row() + 1;
+        case Column::White:
+            // Opening files and studies often name no players: a row is never blank.
+            if (toQString(game.header("White")).isEmpty() &&
+                toQString(game.header("Black")).isEmpty()) {
+                return fallbackName(index.row());
+            }
+            return toQString(game.header("White"));
+        case Column::Black:
+            return toQString(game.header("Black"));
+        case Column::Result:
+            return toQString(game.header("Result"));
+        case Column::Date:
+            return toQString(game.header("Date"));
+        case Column::Opening:
+            return openingOf(game);
+        case Column::Event:
+            return toQString(game.header("Event"));
+        case Column::Round:
+            return toQString(game.header("Round"));
+        case Column::Name: {
+            const QString white = toQString(game.header("White"));
+            const QString black = toQString(game.header("Black"));
+            if (white.isEmpty() && black.isEmpty()) {
+                return fallbackName(index.row());
+            }
+            return white + QStringLiteral(" – ") + black;
         }
-        const auto& game = r->file->games[static_cast<std::size_t>(r->index)];
-        // The file's name comes first: opening files and studies often name no players, and
-        // a row should never be blank.
-        if (index.column() == 1) {
-            return QFileInfo(r->file->path).completeBaseName();
+        case Column::ToMove: {
+            // The side to move is the second field of the FEN; without one, White starts.
+            const auto fields = toQString(game.header("FEN")).split(QLatin1Char(' '));
+            return fields.size() > 1 && fields[1] == u"b" ? QObject::tr("Black")
+                                                          : QObject::tr("White");
         }
-        return toQString(game.header(kColumns[static_cast<std::size_t>(index.column())].header));
+        }
+        return {};
     }
     [[nodiscard]] QVariant headerData(int section, Qt::Orientation orientation,
                                       int role) const override {
         if (orientation != Qt::Horizontal || role != Qt::DisplayRole) {
             return {};
         }
-        return QObject::tr(kColumns[static_cast<std::size_t>(section)].title);
+        switch (column(section)) {
+        case Column::Number:
+            return QStringLiteral("#");
+        case Column::White:
+            return QObject::tr("WHITE");
+        case Column::Black:
+            return QObject::tr("BLACK");
+        case Column::Result:
+            return QObject::tr("RESULT");
+        case Column::Date:
+            return QObject::tr("DATE");
+        case Column::Opening:
+            return QObject::tr("OPENING");
+        case Column::Event:
+            return QObject::tr("EVENT");
+        case Column::Round:
+            return QObject::tr("ROUND");
+        case Column::Name:
+            return QObject::tr("PUZZLE");
+        case Column::ToMove:
+            return QObject::tr("TO MOVE");
+        }
+        return {};
+    }
+
+    /// A game without players: its event, the file's name for a one-game file, or "Game 3".
+    [[nodiscard]] QString fallbackName(int row) const {
+        const auto& game = m_file->games[static_cast<std::size_t>(row)];
+        if (const QString event = toQString(game.header("Event")); !event.isEmpty()) {
+            return event;
+        }
+        return m_file->games.size() == 1 ? QFileInfo(m_file->path).completeBaseName()
+                                         : QObject::tr("Game %1").arg(row + 1);
     }
 
 private:
-    struct Column {
-        const char* title;
-        const char* header;
-    };
-    static constexpr std::array<Column, 7> kColumns{{{"#", ""},
-                                                     {"FILE", ""},
-                                                     {"WHITE", "White"},
-                                                     {"BLACK", "Black"},
-                                                     {"RESULT", "Result"},
-                                                     {"DATE", "Date"},
-                                                     {"EVENT", "Event"}}};
-    std::vector<Row> m_rows;
+    std::shared_ptr<PgnFile> m_file;
+    std::vector<Column> m_columns;
 };
 
-LibraryView::LibraryView(Library& library, const AppStyle& style, QWidget* parent)
-    : QWidget(parent), m_library(library), m_style(style), m_model(new GameListModel(this)),
-      m_filter(new QSortFilterProxyModel(this)) {
+LibraryView::LibraryView(Library& library, RepertoireStore& store, const AppStyle& style,
+                         QWidget* parent)
+    : QWidget(parent), m_library(library), m_store(store), m_style(style),
+      m_model(new GameListModel(this)), m_filter(new QSortFilterProxyModel(this)) {
     auto* layout = new QVBoxLayout(this);
     layout->setContentsMargins(layout::kPage);
     layout->setSpacing(layout::kPageSpacing);
@@ -189,10 +368,26 @@ LibraryView::LibraryView(Library& library, const AppStyle& style, QWidget* paren
     m_header->addAction(m_folderButton);
     layout->addWidget(m_header);
 
-    // ---- Files: a folder tree ------------------------------------------------------------------
-    m_files = new QTreeWidget;
+    // ---- Files: a folder tree, a search and a type filter --------------------------------------
+    auto* tree = new FileTree;
+    tree->onDrop = [this](QTreeWidgetItem* dragged, QTreeWidgetItem* folder) {
+        const QString key = dragged->data(0, kKeyRole).toString();
+        const QString path = dragged->data(0, kKindRole).toInt() == kFile
+                                 ? key
+                                 : QDir(m_library.folder()).filePath(key);
+        const QString error =
+            moveToFolder({path}, folder != nullptr ? folder->data(0, kKeyRole).toString() : "");
+        if (!error.isEmpty()) {
+            QMessageBox::warning(this, tr("Couldn't move"), error);
+        }
+    };
+    m_files = tree;
     m_files->setObjectName(QStringLiteral("libraryFiles"));
-    m_files->setColumnCount(2);
+    m_files->setDragEnabled(true);
+    m_files->setAcceptDrops(true);
+    m_files->setDropIndicatorShown(true);
+    m_files->setDragDropMode(QAbstractItemView::InternalMove);
+    m_files->setColumnCount(1);
     m_files->setHeaderHidden(true);
     m_files->setFrameShape(QFrame::NoFrame);
     m_files->setIndentation(14);
@@ -200,9 +395,6 @@ LibraryView::LibraryView(Library& library, const AppStyle& style, QWidget* paren
     m_files->setAnimated(true);
     m_files->setTextElideMode(Qt::ElideRight);
     m_files->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
-    m_files->header()->setStretchLastSection(false);
-    m_files->header()->setSectionResizeMode(0, QHeaderView::Stretch);
-    m_files->header()->setSectionResizeMode(1, QHeaderView::ResizeToContents);
     m_files->installEventFilter(this);
     connect(m_files, &QTreeWidget::currentItemChanged, this, [this] {
         if (!m_rebuilding) {
@@ -211,15 +403,120 @@ LibraryView::LibraryView(Library& library, const AppStyle& style, QWidget* paren
     });
     connect(m_files, &QTreeWidget::itemExpanded, this, &LibraryView::rememberExpanded);
     connect(m_files, &QTreeWidget::itemCollapsed, this, &LibraryView::rememberExpanded);
+    // Double-click a file: open it (a folder folds, as usual).
+    connect(m_files, &QTreeWidget::itemDoubleClicked, this, [this](QTreeWidgetItem* item) {
+        if (const auto file = fileOf(item)) {
+            emit openGameRequested(file, 0);
+        }
+    });
+    // Right-click a folder or file to set its type.
+    m_files->setContextMenuPolicy(Qt::CustomContextMenu);
+    connect(m_files, &QWidget::customContextMenuRequested, this, [this](QPoint at) {
+        QTreeWidgetItem* item = m_files->itemAt(at);
+        if (item == nullptr) {
+            return;
+        }
+        // A file, or every file in a folder (one file per opening is the usual way).
+        QStringList paths;
+        const std::function<void(QTreeWidgetItem*)> collect = [&](QTreeWidgetItem* node) {
+            if (node->data(0, kKindRole).toInt() == kFile) {
+                paths << node->data(0, kKeyRole).toString();
+            }
+            for (int i = 0; i < node->childCount(); ++i) {
+                collect(node->child(i));
+            }
+        };
+        collect(item);
+        if (paths.isEmpty()) {
+            return;
+        }
+        QMenu menu(this);
+        if (const auto file = fileOf(item)) {
+            menu.addAction(tr("Open"), this, [this, file] { emit openGameRequested(file, 0); });
+            menu.addSeparator();
+        }
+        QMenu* type = menu.addMenu(tr("File Type"));
+        const int current =
+            item->data(0, kKindRole).toInt() == kFile ? item->data(0, kFileKindRole).toInt() : -1;
+        const int currentSide = item->data(0, kSideRole).toInt();
+        const auto add = [&](const QString& text, FileKind kind, int side) {
+            auto* action = type->addAction(text, this, [this, paths, kind, side] {
+                emit fileKindRequested(paths, static_cast<int>(kind), side);
+            });
+            action->setCheckable(true);
+            action->setChecked(current == static_cast<int>(kind) &&
+                               (side < 0 || side == currentSide));
+        };
+        add(tr("Game"), FileKind::Game, -1);
+        add(tr("Repertoire for White"), FileKind::Repertoire, 0);
+        add(tr("Repertoire for Black"), FileKind::Repertoire, 1);
+        add(tr("Tournament"), FileKind::Tournament, -1);
+        add(tr("Puzzles"), FileKind::Puzzle, -1);
+        add(tr("Other"), FileKind::Other, -1);
+        menu.exec(m_files->viewport()->mapToGlobal(at));
+    });
+
+    m_fileSearch = new QLineEdit;
+    m_fileSearch->setObjectName(QStringLiteral("libraryFileSearch"));
+    m_fileSearch->setPlaceholderText(tr("Search files"));
+    m_fileSearch->setClearButtonEnabled(true);
+    connect(m_fileSearch, &QLineEdit::textChanged, this, [this](const QString& text) {
+        if (text.isEmpty()) {
+            refreshFiles(); // back to the folders as they were folded
+        } else {
+            applyFilters();
+        }
+    });
+    m_typeFilter = new QComboBox;
+    m_typeFilter->setObjectName(QStringLiteral("libraryTypeFilter"));
+    m_typeFilter->setFocusPolicy(Qt::NoFocus);
+    m_typeFilter->addItem(tr("All types"), -1);
+    m_typeFilter->addItem(tr("Games"), static_cast<int>(FileKind::Game));
+    m_typeFilter->addItem(tr("Repertoires"), static_cast<int>(FileKind::Repertoire));
+    m_typeFilter->addItem(tr("Tournaments"), static_cast<int>(FileKind::Tournament));
+    m_typeFilter->addItem(tr("Puzzles"), static_cast<int>(FileKind::Puzzle));
+    m_typeFilter->addItem(tr("Other"), static_cast<int>(FileKind::Other));
+    connect(m_typeFilter, &QComboBox::currentIndexChanged, this, &LibraryView::applyFilters);
+
     auto* filesCard = card();
     m_cards[0] = filesCard;
     auto* filesBox = new QVBoxLayout(filesCard);
     filesBox->setContentsMargins(layout::kCard);
     filesBox->setSpacing(layout::kCardSpacing);
-    filesBox->addWidget(label(tr("FILES"), "cardTitle"));
+    // New File and New Folder go into the selected folder (or the selected file's).
+    const std::array<std::pair<const char*, QString>, 2> newButtons{
+        {{"libraryNewFile", tr("New File… (⌘N)")}, {"libraryNewFolder", tr("New Folder…")}}};
+    for (std::size_t i = 0; i < newButtons.size(); ++i) {
+        auto* button = new QPushButton;
+        button->setObjectName(QString::fromLatin1(newButtons[i].first));
+        button->setProperty("role", "secondary");
+        button->setToolTip(newButtons[i].second);
+        button->setFocusPolicy(Qt::NoFocus);
+        button->setFixedWidth(layout::kControlHeight);
+        m_newButtons[i] = button;
+    }
+    connect(m_newButtons[0], &QPushButton::clicked, this,
+            [this] { emit newFileRequested(QDir(m_library.folder()).filePath(targetFolder())); });
+    connect(m_newButtons[1], &QPushButton::clicked, this, &LibraryView::askNewFolder);
+    auto* filters = new QHBoxLayout;
+    filters->setSpacing(6);
+    filters->addWidget(m_fileSearch, 1);
+    filters->addWidget(m_typeFilter);
+    filters->addWidget(m_newButtons[0]);
+    filters->addWidget(m_newButtons[1]);
+    filesBox->addLayout(filters);
     filesBox->addWidget(m_files, 1);
 
-    // ---- Games ---------------------------------------------------------------------------------
+    // ---- The selection -------------------------------------------------------------------------
+    m_detail = new QStackedWidget;
+    m_detail->setObjectName(QStringLiteral("libraryDetail"));
+    m_detail->addWidget(new EmptyState(IconKind::File, tr("No file selected"), {}, m_style));
+    m_folderState = new EmptyState(IconKind::Folder, {}, {}, m_style);
+    m_detail->addWidget(m_folderState);
+
+    // Games: a title row, the table, the preview under it.
+    m_gamesIcon = new QLabel;
+    m_gamesIcon->setFixedSize(22, 22);
     m_listTitle = new ElidedLabel;
     m_listTitle->setObjectName(QStringLiteral("libraryListTitle"));
     m_listTitle->setProperty("role", "sectionTitle");
@@ -227,10 +524,11 @@ LibraryView::LibraryView(Library& library, const AppStyle& style, QWidget* paren
     m_listCount = label(QString(), "emptyHint");
     m_listCount->setObjectName(QStringLiteral("libraryListCount"));
     m_search = new QLineEdit;
-    m_search->setPlaceholderText(tr("Search files, players, events"));
+    m_search->setObjectName(QStringLiteral("librarySearchGames"));
+    m_search->setPlaceholderText(tr("Search players, events, openings"));
     m_search->setClearButtonEnabled(true);
-    m_search->setMinimumWidth(240);
-    m_search->setMaximumWidth(300);
+    m_search->setMinimumWidth(200);
+    m_search->setMaximumWidth(280);
     m_filter->setSourceModel(m_model);
     m_filter->setFilterCaseSensitivity(Qt::CaseInsensitive);
     m_filter->setFilterKeyColumn(-1); // any column
@@ -248,54 +546,26 @@ LibraryView::LibraryView(Library& library, const AppStyle& style, QWidget* paren
     m_games->setAlternatingRowColors(true);
     m_games->setWordWrap(false);
     m_games->verticalHeader()->hide();
-    m_games->verticalHeader()->setDefaultSectionSize(34);
+    m_games->verticalHeader()->setDefaultSectionSize(32);
     m_games->horizontalHeader()->setHighlightSections(false);
-    // The columns share the width (no sideways scrolling): names and event stretch, the short
-    // columns fit their content.
+    m_games->horizontalHeader()->setDefaultAlignment(Qt::AlignLeft | Qt::AlignVCenter);
+    // The columns share the width (no sideways scrolling).
     m_games->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
     m_games->setTextElideMode(Qt::ElideRight);
-    for (const int column : {1, 2, 3, 6}) {
-        m_games->horizontalHeader()->setSectionResizeMode(column, QHeaderView::Stretch);
-    }
-    for (const int column : {0, 4, 5}) {
-        m_games->horizontalHeader()->setSectionResizeMode(column, QHeaderView::ResizeToContents);
-    }
-    m_games->horizontalHeader()->setDefaultAlignment(Qt::AlignLeft | Qt::AlignVCenter);
     m_games->installEventFilter(this);
     connect(m_games, &QTableView::doubleClicked, this, &LibraryView::openSelectedGame);
     connect(m_games->selectionModel(), &QItemSelectionModel::currentRowChanged, this,
             &LibraryView::showPreview);
 
-    auto* gamesCard = card();
-    m_cards[1] = gamesCard;
-    auto* gamesBox = new QVBoxLayout(gamesCard);
-    gamesBox->setContentsMargins(layout::kCard);
-    gamesBox->setSpacing(layout::kCardSpacing);
-    auto* gamesHeader = new QHBoxLayout;
-    auto* titles = new QVBoxLayout;
-    titles->setSpacing(0);
-    titles->addWidget(m_listTitle);
-    titles->addWidget(m_listCount);
-    gamesHeader->addLayout(titles, 1);
-    gamesHeader->addWidget(m_search);
-    gamesBox->addLayout(gamesHeader);
-    gamesBox->addWidget(m_games, 1);
-
-    // ---- Preview -------------------------------------------------------------------------------
     m_previewBoard = new BoardView;
     m_previewBoard->setInteractive(false);
     m_previewBoard->setObjectName(QStringLiteral("previewBoard"));
     m_previewBoard->setFocusPolicy(Qt::StrongFocus); // a click on it takes the arrow keys
     m_previewBoard->installEventFilter(this);
     m_previewBoard->setShowCoordinates(false);
-    m_previewBoard->setMinimumSize(200, 200);
-    // As tall as it is wide, at the top of the card: details follow right underneath.
-    QSizePolicy square(QSizePolicy::Preferred, QSizePolicy::Preferred);
-    square.setHeightForWidth(true);
-    m_previewBoard->setSizePolicy(square);
+    m_previewBoard->setFixedSize(212, 212);
     m_previewMove = label(QString(), "emptyHint");
     m_previewMove->setObjectName(QStringLiteral("previewMove"));
-    m_previewMove->setAlignment(Qt::AlignCenter);
     auto* stepRow = new QHBoxLayout;
     stepRow->setSpacing(6);
     for (const auto& [tip, plies] :
@@ -313,6 +583,7 @@ LibraryView::LibraryView(Library& library, const AppStyle& style, QWidget* paren
         stepRow->addWidget(button);
         m_previewButtons.push_back(button);
     }
+    stepRow->addStretch();
     m_previewButtons[1]->setObjectName(QStringLiteral("previewBack"));
     m_previewPlayers = label(QString(), "previewPlayers");
     m_previewPlayers->setObjectName(QStringLiteral("previewPlayers"));
@@ -320,43 +591,154 @@ LibraryView::LibraryView(Library& library, const AppStyle& style, QWidget* paren
     m_previewDetails = label(QString(), "emptyHint");
     m_previewDetails->setWordWrap(true);
     auto* open = new QPushButton(tr("Open Game"));
+    open->setObjectName(QStringLiteral("libraryOpenGame"));
     open->setProperty("role", "primary");
     connect(open, &QPushButton::clicked, this, &LibraryView::openSelectedGame);
+    auto* openRow = new QHBoxLayout;
+    openRow->addWidget(open);
+    openRow->addStretch();
 
-    auto* details = new QWidget;
-    auto* detailsBox = new QVBoxLayout(details);
-    detailsBox->setContentsMargins(0, 0, 0, 0);
-    detailsBox->setSpacing(8);
-    detailsBox->addWidget(m_previewBoard);
-    detailsBox->addWidget(m_previewMove);
-    detailsBox->addLayout(stepRow);
-    detailsBox->addSpacing(4);
-    detailsBox->addWidget(m_previewPlayers);
-    detailsBox->addWidget(m_previewDetails);
-    detailsBox->addSpacing(4);
-    detailsBox->addWidget(open);
-    detailsBox->addStretch(1);
+    auto* previewInfo = new QVBoxLayout;
+    previewInfo->setSpacing(6);
+    previewInfo->addWidget(m_previewPlayers);
+    previewInfo->addWidget(m_previewDetails);
+    previewInfo->addSpacing(6);
+    previewInfo->addWidget(m_previewMove);
+    previewInfo->addLayout(stepRow);
+    previewInfo->addStretch();
+    previewInfo->addLayout(openRow);
+    auto* previewGame = new QWidget;
+    auto* previewRow = new QHBoxLayout(previewGame);
+    previewRow->setContentsMargins(0, 0, 0, 0);
+    previewRow->setSpacing(16);
+    previewRow->addWidget(m_previewBoard, 0, Qt::AlignTop);
+    previewRow->addLayout(previewInfo, 1);
     m_preview = new QStackedWidget;
-    m_preview->addWidget(new EmptyState(IconKind::Board, tr("No game selected"), {}, m_style));
-    m_preview->addWidget(details);
+    m_preview->addWidget(label(tr("Select a game to see it here."), "emptyHint"));
+    m_preview->addWidget(previewGame);
+    m_preview->setFixedHeight(212);
 
-    auto* previewCard = card();
-    m_cards[2] = previewCard;
-    auto* previewBox = new QVBoxLayout(previewCard);
-    previewBox->setContentsMargins(layout::kCard);
-    previewBox->setSpacing(layout::kCardSpacing);
-    previewBox->addWidget(label(tr("PREVIEW"), "cardTitle"));
-    previewBox->addWidget(m_preview, 1);
+    auto* gamesPage = new QWidget;
+    auto* gamesBox = new QVBoxLayout(gamesPage);
+    gamesBox->setContentsMargins(0, 0, 0, 0);
+    gamesBox->setSpacing(layout::kCardSpacing);
+    auto* gamesHeader = new QHBoxLayout;
+    gamesHeader->setSpacing(10);
+    gamesHeader->addWidget(m_gamesIcon, 0, Qt::AlignTop);
+    auto* titles = new QVBoxLayout;
+    titles->setSpacing(0);
+    titles->addWidget(m_listTitle);
+    titles->addWidget(m_listCount);
+    gamesHeader->addLayout(titles, 1);
+    gamesHeader->addWidget(m_search);
+    gamesBox->addLayout(gamesHeader);
+    gamesBox->addWidget(m_games, 1);
+    gamesBox->addSpacing(4);
+    gamesBox->addWidget(m_preview);
+    m_detail->addWidget(gamesPage);
+
+    // Repertoire: what's in it, and buttons to open and practise it.
+    m_repIcon = new QLabel;
+    m_repIcon->setFixedSize(22, 22);
+    m_repTitle = new ElidedLabel;
+    m_repTitle->setObjectName(QStringLiteral("libraryRepertoireTitle"));
+    m_repTitle->setProperty("role", "sectionTitle");
+    m_repTitle->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
+    m_repSubtitle = label(QString(), "emptyHint");
+    m_repSubtitle->setObjectName(QStringLiteral("libraryRepertoireSubtitle"));
+    auto* openFile = new QPushButton(tr("Open"));
+    openFile->setObjectName(QStringLiteral("libraryOpenRepertoire"));
+    openFile->setProperty("role", "secondary");
+    connect(openFile, &QPushButton::clicked, this, [this] {
+        if (m_file) {
+            emit openGameRequested(m_file, 0);
+        }
+    });
+    auto* practice = new QPushButton(tr("Practice"));
+    practice->setObjectName(QStringLiteral("libraryPractice"));
+    practice->setProperty("role", "primary");
+    connect(practice, &QPushButton::clicked, this, [this] {
+        if (m_file) {
+            emit practiceRequested(m_file);
+        }
+    });
+    auto* repHeader = new QHBoxLayout;
+    repHeader->setSpacing(10);
+    repHeader->addWidget(m_repIcon, 0, Qt::AlignTop);
+    auto* repTitles = new QVBoxLayout;
+    repTitles->setSpacing(0);
+    repTitles->addWidget(m_repTitle);
+    repTitles->addWidget(m_repSubtitle);
+    repHeader->addLayout(repTitles, 1);
+    repHeader->addWidget(openFile, 0, Qt::AlignTop);
+    repHeader->addWidget(practice, 0, Qt::AlignTop);
+
+    auto* stats = new QHBoxLayout;
+    stats->setSpacing(10);
+    const std::array<QString, 3> captions{tr("Positions to practise"), tr("Lines"),
+                                          tr("Longest line")};
+    for (std::size_t i = 0; i < captions.size(); ++i) {
+        auto* tile = new QFrame;
+        tile->setProperty("statTile", true);
+        auto* tileBox = new QVBoxLayout(tile);
+        tileBox->setContentsMargins(12, 10, 12, 10);
+        tileBox->setSpacing(2);
+        tileBox->addWidget(label(captions[i], "statCaption"));
+        m_repStats[i] = label(QString(), "statValue");
+        tileBox->addWidget(m_repStats[i]);
+        stats->addWidget(tile, 1);
+    }
+    m_repStatus = label(QString(), "emptyHint");
+    m_repOpenings = new QTreeWidget;
+    m_repOpenings->setObjectName(QStringLiteral("repertoireOpenings"));
+    m_repOpenings->setColumnCount(2);
+    m_repOpenings->setHeaderHidden(true);
+    m_repOpenings->setRootIsDecorated(false);
+    m_repOpenings->setFrameShape(QFrame::NoFrame);
+    m_repOpenings->setSelectionMode(QAbstractItemView::NoSelection);
+    m_repOpenings->setFocusPolicy(Qt::NoFocus);
+    m_repOpenings->setUniformRowHeights(true);
+    m_repOpenings->setTextElideMode(Qt::ElideRight);
+    m_repOpenings->header()->setStretchLastSection(false);
+    m_repOpenings->header()->setSectionResizeMode(0, QHeaderView::Stretch);
+    m_repOpenings->header()->setSectionResizeMode(1, QHeaderView::ResizeToContents);
+
+    auto* repertoirePage = new QWidget;
+    auto* repBox = new QVBoxLayout(repertoirePage);
+    repBox->setContentsMargins(0, 0, 0, 0);
+    repBox->setSpacing(layout::kCardSpacing);
+    repBox->addLayout(repHeader);
+    repBox->addSpacing(4);
+    repBox->addLayout(stats);
+    repBox->addSpacing(8);
+    repBox->addWidget(label(tr("OPENINGS IN THIS FILE"), "cardTitle"));
+    repBox->addWidget(m_repStatus);
+    repBox->addWidget(m_repOpenings, 1);
+    m_detail->addWidget(repertoirePage);
+    connect(&m_store, &RepertoireStore::changed, this, [this] {
+        if (m_detail->currentIndex() == kRepertoirePage) {
+            refreshRepertoire();
+        }
+    });
+    connect(&m_store, &RepertoireStore::openingsReady, this, [this] {
+        if (m_detail->currentIndex() == kRepertoirePage) {
+            refreshRepertoire();
+        }
+    });
+
+    auto* detailCard = card();
+    m_cards[1] = detailCard;
+    auto* detailBox = new QVBoxLayout(detailCard);
+    detailBox->setContentsMargins(layout::kCard);
+    detailBox->addWidget(m_detail);
 
     auto* splitter = new QSplitter(Qt::Horizontal);
     splitter->addWidget(filesCard);
-    splitter->addWidget(gamesCard);
-    splitter->addWidget(previewCard);
+    splitter->addWidget(detailCard);
     splitter->setChildrenCollapsible(false);
     splitter->setStretchFactor(0, 0);
     splitter->setStretchFactor(1, 1);
-    splitter->setStretchFactor(2, 0);
-    splitter->setSizes({270, 580, 320});
+    splitter->setSizes({320, 860});
 
     // ---- Empty library -------------------------------------------------------------------------
     auto* empty = new QWidget;
@@ -414,14 +796,15 @@ LibraryView::LibraryView(Library& library, const AppStyle& style, QWidget* paren
         refreshFiles();
     });
     connect(&m_style, &AppStyle::changed, this, &LibraryView::updateIcons);
-    // The column that has the keyboard gets an accent border, so it's clear where ↑ ↓ ← → go.
+    // The card that has the keyboard gets an accent border, so it's clear where ↑ ↓ ← → go.
     m_focusOutline =
         connect(qApp, &QApplication::focusChanged, this, [this](QWidget*, QWidget* now) {
-            const std::array<QWidget*, 3> owners{m_files, m_games, m_previewBoard};
+            const std::array<bool, 2> focused{now != nullptr && now == m_files,
+                                              now != nullptr &&
+                                                  (now == m_games || now == m_previewBoard)};
             for (std::size_t i = 0; i < m_cards.size(); ++i) {
-                const bool focused = now != nullptr && now == owners[i];
-                if (m_cards[i]->property("focused").toBool() != focused) {
-                    m_cards[i]->setProperty("focused", focused);
+                if (m_cards[i]->property("focused").toBool() != focused[i]) {
+                    m_cards[i]->setProperty("focused", focused[i]);
                     m_cards[i]->style()->unpolish(m_cards[i]);
                     m_cards[i]->style()->polish(m_cards[i]);
                 }
@@ -437,6 +820,35 @@ LibraryView::~LibraryView() {
     disconnect(m_focusOutline);
 }
 
+void LibraryView::applyFilters() {
+    // Files of other types, or whose names don't match the search, are hidden, and so are
+    // folders left empty. While searching, the folders with matches open.
+    const int wanted = m_typeFilter->currentData().toInt();
+    const QString search = m_fileSearch->text().trimmed();
+    const std::function<bool(QTreeWidgetItem*)> show = [&](QTreeWidgetItem* item) {
+        bool visible = false;
+        if (item->data(0, kKindRole).toInt() == kFile) {
+            visible = (wanted < 0 || item->data(0, kFileKindRole).toInt() == wanted) &&
+                      (search.isEmpty() || item->text(0).contains(search, Qt::CaseInsensitive));
+        } else {
+            for (int i = 0; i < item->childCount(); ++i) {
+                visible = show(item->child(i)) || visible;
+            }
+            if (visible && !search.isEmpty()) {
+                item->setExpanded(true);
+            }
+        }
+        item->setHidden(!visible);
+        return visible;
+    };
+    const bool rebuilding = m_rebuilding;
+    m_rebuilding = true; // opening folders for a search isn't remembered
+    for (int i = 0; i < m_files->topLevelItemCount(); ++i) {
+        show(m_files->topLevelItem(i));
+    }
+    m_rebuilding = rebuilding;
+}
+
 void LibraryView::setBoardLook(const BoardTheme& theme, const QString& pieceSet) {
     m_previewBoard->setTheme(theme);
     m_previewBoard->setPieceSet(pieceSet);
@@ -445,21 +857,39 @@ void LibraryView::setBoardLook(const BoardTheme& theme, const QString& pieceSet)
 void LibraryView::updateIcons() {
     const auto& c = m_style.colors();
     m_folderButton->setIcon(makeIcon(IconKind::Folder, c.text, c.dimmed));
+    m_newButtons[0]->setIcon(makeIcon(IconKind::NewFile, c.text, c.dimmed));
+    m_newButtons[1]->setIcon(makeIcon(IconKind::NewFolder, c.text, c.dimmed));
     const std::array<IconKind, 4> kinds{IconKind::First, IconKind::Previous, IconKind::Next,
                                         IconKind::Last};
     for (std::size_t i = 0; i < m_previewButtons.size(); ++i) {
         m_previewButtons[i]->setIcon(makeIcon(kinds[i], c.text, c.dimmed, 14));
     }
-    // Folder icons in the tree follow the colours too.
     const QIcon folder = makeIcon(IconKind::Folder, c.muted, c.dimmed);
     for (QTreeWidgetItemIterator it(m_files); *it != nullptr; ++it) {
-        if ((*it)->data(0, kKindRole).toInt() == kFolder) {
+        const int kind = (*it)->data(0, kKindRole).toInt();
+        if (kind == kFolder) {
             (*it)->setIcon(0, folder);
+        } else if (kind == kFile) {
+            const auto fileKind = static_cast<FileKind>((*it)->data(0, kFileKindRole).toInt());
+            (*it)->setIcon(0, makeIcon(iconOf(fileKind), c.muted, c.dimmed));
         }
     }
+    m_gamesIcon->setPixmap(makeIcon(iconOf(m_kind), c.text, c.dimmed, 22).pixmap(22, 22));
+    m_repIcon->setPixmap(makeIcon(IconKind::Branch, c.text, c.dimmed, 22).pixmap(22, 22));
 }
 
 // ---- Files tree --------------------------------------------------------------------------------
+
+std::shared_ptr<PgnFile> LibraryView::fileOf(const QTreeWidgetItem* item) const {
+    if (item == nullptr || item->data(0, kKindRole).toInt() != kFile) {
+        return nullptr;
+    }
+    const auto& files = m_library.files();
+    const int index = item->data(0, kIndexRole).toInt();
+    return index >= 0 && static_cast<std::size_t>(index) < files.size()
+               ? files[static_cast<std::size_t>(index)].pgn
+               : nullptr;
+}
 
 void LibraryView::refreshFiles() {
     // What was selected (by folder or file), to select it again after rebuilding.
@@ -471,11 +901,13 @@ void LibraryView::refreshFiles() {
     m_folderButton->setText(QFileInfo(m_library.folder()).fileName());
 
     const auto& files = m_library.files();
-    if (files.empty()) {
+    if (files.empty() && m_library.folders().isEmpty()) {
         m_files->clear();
         // "Empty" only once the folder has really been looked at, never while it loads.
         m_pages->setCurrentIndex(m_library.isScanning() ? 0 : 1);
-        m_model->setRows({});
+        m_file.reset();
+        m_model->setFile(nullptr, FileKind::Game);
+        m_detail->setCurrentIndex(kNothing);
         return;
     }
     m_pages->setCurrentIndex(0);
@@ -485,13 +917,11 @@ void LibraryView::refreshFiles() {
     const QSettings settings;
     const bool firstTime = !settings.value(QString::fromLatin1(kFoldingSavedKey), false).toBool();
     const QStringList expanded = settings.value(QString::fromLatin1(kExpandedKey)).toStringList();
-    const QIcon folderIcon =
-        makeIcon(IconKind::Folder, m_style.colors().muted, m_style.colors().dimmed);
-    const QColor countColor = m_style.colors().muted;
+    const auto& c = m_style.colors();
+    const QIcon folderIcon = makeIcon(IconKind::Folder, c.muted, c.dimmed);
 
     // Folders first (parents before children, alphabetical), then the files into them.
     std::map<QString, QTreeWidgetItem*> folders; // relative path → item; "" = top level
-    std::map<QString, int> folderGames;
     const std::function<QTreeWidgetItem*(const QString&)> folderItem =
         [&](const QString& path) -> QTreeWidgetItem* {
         if (path.isEmpty() || path == u".") {
@@ -507,13 +937,10 @@ void LibraryView::refreshFiles() {
         item->setIcon(0, folderIcon);
         item->setData(0, kKindRole, kFolder);
         item->setData(0, kKeyRole, path);
-        QFont font = item->font(0);
-        font.setWeight(QFont::DemiBold);
-        item->setFont(0, font);
         folders.emplace(path, item);
         return item;
     };
-    QStringList folderPaths;
+    QStringList folderPaths = m_library.folders(); // empty folders too
     for (const auto& file : files) {
         const QString path = QFileInfo(file.name).path();
         if (path != u"." && !folderPaths.contains(path)) {
@@ -530,29 +957,37 @@ void LibraryView::refreshFiles() {
         const QFileInfo info(files[i].name);
         QTreeWidgetItem* parent = folderItem(info.path());
         auto* item = parent != nullptr ? new QTreeWidgetItem(parent) : new QTreeWidgetItem(m_files);
-        const int games = static_cast<int>(files[i].pgn ? files[i].pgn->games.size() : 0);
         item->setText(0, info.completeBaseName());
-        item->setToolTip(0, info.completeBaseName());
-        item->setText(1, files[i].pgn ? QString::number(games) : QStringLiteral("…")); // reading
-        item->setForeground(1, countColor);
-        item->setTextAlignment(1, Qt::AlignRight | Qt::AlignVCenter);
         item->setData(0, kKindRole, kFile);
         item->setData(0, kKeyRole, files[i].path);
         item->setData(0, kIndexRole, static_cast<int>(i));
-        for (QString path = info.path(); path != u"." && !path.isEmpty();
-             path = QFileInfo(path).path()) {
-            folderGames[path] += games;
-        }
+        const FileKind kind =
+            files[i].pgn ? RepertoireStore::kindOf(*files[i].pgn) : FileKind::Game;
+        const core::Color side =
+            files[i].pgn ? RepertoireStore::sideOf(*files[i].pgn) : core::Color::White;
+        item->setData(0, kFileKindRole, static_cast<int>(kind));
+        item->setData(0, kSideRole, side == core::Color::White ? 0 : 1);
+        item->setIcon(0, makeIcon(iconOf(kind), c.muted, c.dimmed));
+        item->setToolTip(0,
+                         info.completeBaseName() + QStringLiteral("  ·  ") + typeName(kind, side));
     }
     for (const auto& [path, item] : folders) {
-        item->setText(1, QString::number(folderGames[path]));
-        item->setForeground(1, countColor);
-        item->setTextAlignment(1, Qt::AlignRight | Qt::AlignVCenter);
         // Remembered folding; the first time, only the top-level folders are open.
         item->setExpanded(firstTime ? item->parent() == nullptr : expanded.contains(path));
     }
     m_rebuilding = false;
+    applyFilters();
 
+    // A folder just made: select it, with the folders around it open.
+    if (!m_selectAfterScan.isEmpty()) {
+        if (const auto it = folders.find(m_selectAfterScan); it != folders.end()) {
+            selectedKey = m_selectAfterScan;
+            m_selectAfterScan.clear();
+            for (QTreeWidgetItem* up = it->second->parent(); up != nullptr; up = up->parent()) {
+                up->setExpanded(true);
+            }
+        }
+    }
     // Select what was selected before, or else the first file.
     QTreeWidgetItem* select = nullptr;
     for (QTreeWidgetItemIterator it(m_files); *it != nullptr; ++it) {
@@ -565,7 +1000,7 @@ void LibraryView::refreshFiles() {
         // The first file that can be seen (not inside a closed folder), else the first item.
         for (QTreeWidgetItemIterator it(m_files); *it != nullptr; ++it) {
             const bool hidden = (*it)->parent() != nullptr && !(*it)->parent()->isExpanded();
-            if ((*it)->data(0, kKindRole).toInt() == kFile && !hidden) {
+            if ((*it)->data(0, kKindRole).toInt() == kFile && !hidden && !(*it)->isHidden()) {
                 select = *it;
                 break;
             }
@@ -582,17 +1017,20 @@ void LibraryView::refreshFiles() {
             select = up;
         }
     }
+    m_rebuilding = true; // one showSelection() below, not one per change
     m_files->setCurrentItem(select);
+    m_rebuilding = false;
     showSelection();
-    // The same file or folder as before: stay on the game that was selected.
+    // The same file as before: stay on the game that was selected.
     if (select != nullptr && select->data(0, kKeyRole).toString() == selectedKey &&
-        selectedGame > 0 && selectedGame < m_filter->rowCount()) {
+        m_detail->currentIndex() == kGamesPage && selectedGame > 0 &&
+        selectedGame < m_filter->rowCount()) {
         m_games->setCurrentIndex(m_filter->index(selectedGame, 1));
     }
 }
 
 void LibraryView::rememberExpanded() {
-    if (m_rebuilding) {
+    if (m_rebuilding || !m_fileSearch->text().isEmpty()) {
         return;
     }
     QStringList expanded;
@@ -615,57 +1053,239 @@ void LibraryView::selectFile(const QString& path) {
     }
 }
 
+// ---- The selection -----------------------------------------------------------------------------
+
 void LibraryView::showSelection() {
-    // A file lists its games; a folder lists the games of the files directly in it. Files in its
-    // subfolders show when that subfolder is opened.
-    std::vector<GameListModel::Row> rows;
     const QTreeWidgetItem* item = m_files->currentItem();
-    int fileCount = 0;
-    int folderCount = 0;
-    if (item != nullptr) {
-        const auto& files = m_library.files();
-        const auto addFile = [&](const QTreeWidgetItem* fileItem) {
-            const int index = fileItem->data(0, kIndexRole).toInt();
-            if (index < 0 || static_cast<std::size_t>(index) >= files.size()) {
-                return;
-            }
-            const auto& pgn = files[static_cast<std::size_t>(index)].pgn;
-            for (std::size_t g = 0; pgn && g < pgn->games.size(); ++g) {
-                rows.push_back({pgn, static_cast<int>(g)});
-            }
-            ++fileCount;
-        };
-        if (item->data(0, kKindRole).toInt() == kFile) {
-            addFile(item);
-        } else {
-            for (int i = 0; i < item->childCount(); ++i) {
-                if (item->child(i)->data(0, kKindRole).toInt() == kFile) {
-                    addFile(item->child(i));
-                } else {
-                    ++folderCount;
-                }
-            }
-        }
-        m_listTitle->setFullText(item->text(0));
+    if (item == nullptr) {
+        m_file.reset();
+        m_detail->setCurrentIndex(kNothing);
+        return;
     }
-    const bool folder = item != nullptr && item->data(0, kKindRole).toInt() == kFolder;
-    const int games = static_cast<int>(rows.size());
-    m_model->setRows(std::move(rows));
-    QStringList count{gamesText(games)};
-    if (folder) {
-        count << (fileCount == 1 ? tr("1 file") : tr("%1 files").arg(fileCount));
-        if (folderCount > 0) {
-            count << (folderCount == 1 ? tr("1 folder") : tr("%1 folders").arg(folderCount));
-        }
+    if (item->data(0, kKindRole).toInt() == kFolder) {
+        m_file.reset();
+        showFolder(*item);
+        return;
     }
-    m_listCount->setText(count.join(QStringLiteral("  ·  ")));
-    m_games->resizeColumnToContents(0);
+    const auto file = fileOf(item);
+    if (!file) {
+        m_detail->setCurrentIndex(kNothing);
+        return;
+    }
+    const auto kind = static_cast<FileKind>(item->data(0, kFileKindRole).toInt());
+    if (kind == FileKind::Repertoire) {
+        showRepertoire(file);
+    } else {
+        showGames(file, kind);
+    }
+}
+
+void LibraryView::showFolder(const QTreeWidgetItem& item) {
+    int files = 0;
+    int folders = 0;
+    for (int i = 0; i < item.childCount(); ++i) {
+        if (item.child(i)->isHidden()) {
+            continue;
+        }
+        ++(item.child(i)->data(0, kKindRole).toInt() == kFile ? files : folders);
+    }
+    QStringList parts;
+    if (folders > 0) {
+        parts << (folders == 1 ? tr("1 folder") : tr("%1 folders").arg(folders));
+    }
+    parts << (files == 1 ? tr("1 file") : tr("%1 files").arg(files));
+    m_folderState->setText(item.text(0), parts.join(QStringLiteral("  ·  ")));
+    m_detail->setCurrentIndex(kFolderPage);
+}
+
+void LibraryView::showGames(const std::shared_ptr<PgnFile>& file, FileKind kind) {
+    const bool sameFile = m_file == file && m_kind == kind;
+    m_file = file;
+    m_kind = kind;
+    m_detail->setCurrentIndex(kGamesPage);
+    const auto& c = m_style.colors();
+    m_gamesIcon->setPixmap(makeIcon(iconOf(kind), c.text, c.dimmed, 22).pixmap(22, 22));
+    m_listTitle->setFullText(QFileInfo(file->path).completeBaseName());
+    const int games = static_cast<int>(file->games.size());
+    m_listCount->setText(typeName(kind, core::Color::White) + QStringLiteral("  ·  ") +
+                         gamesText(games));
+    if (sameFile) {
+        return; // the same table: keep the selected game and the search
+    }
+    m_model->setFile(file, kind);
+    auto* header = m_games->horizontalHeader();
+    for (int column = 0; column < m_model->columnCount(); ++column) {
+        header->setSectionResizeMode(column, m_model->stretches(column)
+                                                 ? QHeaderView::Stretch
+                                                 : QHeaderView::ResizeToContents);
+    }
     // Preview the first game straight away.
     if (m_filter->rowCount() > 0) {
         m_games->setCurrentIndex(m_filter->index(0, 1));
     } else {
         m_preview->setCurrentIndex(0);
     }
+}
+
+void LibraryView::showRepertoire(const std::shared_ptr<PgnFile>& file) {
+    m_file = file;
+    m_kind = FileKind::Repertoire;
+    m_detail->setCurrentIndex(kRepertoirePage);
+    m_repTitle->setFullText(QFileInfo(file->path).completeBaseName());
+    const core::Color side = RepertoireStore::sideOf(*file);
+    const int games = static_cast<int>(file->games.size());
+    m_repSubtitle->setText(games > 1 ? typeName(FileKind::Repertoire, side) +
+                                           QStringLiteral("  ·  ") + tr("%1 chapters").arg(games)
+                                     : typeName(FileKind::Repertoire, side));
+    m_store.loadOpenings();
+    refreshRepertoire();
+}
+
+void LibraryView::refreshRepertoire() {
+    if (!m_file) {
+        return;
+    }
+    const int request = ++m_summaryRequest;
+    const RepertoireFile* built = m_store.builtFile(m_file->path);
+    if (built == nullptr) {
+        // Not read yet (or its type just changed): the store says when it's there.
+        for (QLabel* stat : m_repStats) {
+            stat->setText(QStringLiteral("…"));
+        }
+        m_repOpenings->clear();
+        m_repStatus->setText(tr("Reading the repertoire…"));
+        m_repStatus->show();
+        return;
+    }
+    // Summed up in the background, from copies (the store may rebuild meanwhile).
+    std::vector<core::Game> games = built->games;
+    const core::Color side = RepertoireStore::sideOf(*m_file);
+    const auto names = m_store.sharedOpenings();
+    // Owned by the view and deleted when done (deleteLater); the analyzer can't see that.
+    auto* watcher = new QFutureWatcher<repertoire::Summary>(
+        this); // NOLINT(clang-analyzer-cplusplus.NewDeleteLeaks)
+    connect(watcher, &QFutureWatcher<repertoire::Summary>::finished, this,
+            [this, watcher, request, named = names != nullptr] {
+                watcher->deleteLater();
+                if (request != m_summaryRequest) {
+                    return;
+                }
+                const repertoire::Summary summary = watcher->result();
+                m_repStats[0]->setText(number(summary.positions));
+                m_repStats[1]->setText(number(summary.lines));
+                m_repStats[2]->setText(summary.deepestMove > 0
+                                           ? tr("move %1").arg(summary.deepestMove)
+                                           : QStringLiteral("–"));
+                m_repOpenings->clear();
+                for (const auto& opening : summary.openings) {
+                    auto* item = new QTreeWidgetItem(m_repOpenings);
+                    item->setText(0, QString::fromStdString(opening.name));
+                    item->setToolTip(0, item->text(0));
+                    item->setText(1, opening.positions == 1
+                                         ? tr("1 position")
+                                         : tr("%1 positions").arg(number(opening.positions)));
+                    item->setForeground(1, m_style.colors().muted);
+                }
+                QString status;
+                if (!named) {
+                    status = tr("Looking up the opening names…");
+                } else if (summary.openings.empty()) {
+                    status = tr("No named openings in this file yet.");
+                }
+                m_repStatus->setText(status);
+                m_repStatus->setVisible(!m_repStatus->text().isEmpty());
+            });
+    watcher->setFuture(QtConcurrent::run([games = std::move(games), side, names] {
+        return repertoire::summarize(games, side, names.get());
+    }));
+} // NOLINT(clang-analyzer-cplusplus.NewDeleteLeaks)
+
+// ---- New folders, moving -----------------------------------------------------------------------
+
+QString LibraryView::targetFolder() const {
+    const QTreeWidgetItem* item = m_files->currentItem();
+    if (item == nullptr) {
+        return {};
+    }
+    if (item->data(0, kKindRole).toInt() == kFolder) {
+        return item->data(0, kKeyRole).toString();
+    }
+    const QString folder =
+        QFileInfo(QDir(m_library.folder()).relativeFilePath(item->data(0, kKeyRole).toString()))
+            .path();
+    return folder == u"." ? QString() : folder;
+}
+
+void LibraryView::askNewFolder() {
+    NewFolderDialog dialog(this);
+    if (dialog.exec() != QDialog::Accepted || dialog.name().isEmpty()) {
+        return;
+    }
+    if (const QString error = createFolder(targetFolder(), dialog.name()); !error.isEmpty()) {
+        QMessageBox::warning(this, tr("New Folder"), error);
+    }
+}
+
+QString LibraryView::createFolder(const QString& parent, const QString& name) {
+    if (name.contains(QLatin1Char('/')) || name.startsWith(QLatin1Char('.'))) {
+        return tr("A folder name can't contain “/” or start with a dot.");
+    }
+    const QString relative = parent.isEmpty() ? name : parent + QLatin1Char('/') + name;
+    const QDir root(m_library.folder());
+    if (QFileInfo::exists(root.filePath(relative))) {
+        return tr("There already is something called “%1” there.").arg(name);
+    }
+    if (!root.mkpath(relative)) {
+        return tr("The folder “%1” couldn't be made.").arg(name);
+    }
+    m_selectAfterScan = relative;
+    m_library.rescan();
+    return {};
+}
+
+QString LibraryView::moveToFolder(const QStringList& paths, const QString& folder) {
+    const QDir root(m_library.folder());
+    const QString target = QDir::cleanPath(root.filePath(folder));
+    for (const QString& path : paths) {
+        const QString from = QDir::cleanPath(path);
+        const QFileInfo info(from);
+        const QString to = QDir(target).filePath(info.fileName());
+        if (QDir::cleanPath(info.path()) == target) {
+            continue; // already there
+        }
+        if (info.isDir() && (target == from || target.startsWith(from + QLatin1Char('/')))) {
+            return tr("A folder can't go into itself.");
+        }
+        if (QFileInfo::exists(to)) {
+            return tr("There already is a “%1” in that folder.").arg(info.fileName());
+        }
+        if (!QDir().rename(from, to)) {
+            return tr("“%1” couldn't be moved.").arg(info.fileName());
+        }
+        emit pathMoved(from, to);
+        if (info.isDir()) {
+            m_selectAfterScan = root.relativeFilePath(to); // keep the folder in view
+        }
+    }
+    m_library.rescan();
+    return {};
+}
+
+QStringList LibraryView::repertoireStats() const {
+    QStringList result;
+    for (const QLabel* stat : m_repStats) {
+        result << stat->text();
+    }
+    return result;
+}
+
+QStringList LibraryView::repertoireOpenings() const {
+    QStringList result;
+    for (int i = 0; i < m_repOpenings->topLevelItemCount(); ++i) {
+        const auto* item = m_repOpenings->topLevelItem(i);
+        result << item->text(0) + QStringLiteral("  ") + item->text(1);
+    }
+    return result;
 }
 
 // ---- Keyboard ----------------------------------------------------------------------------------
@@ -716,15 +1336,16 @@ int LibraryView::selectedRow() const {
 }
 
 void LibraryView::showPreview() {
-    const GameListModel::Row* row = m_model->row(selectedRow());
+    const int index = selectedRow();
+    const std::shared_ptr<PgnFile> file = m_model->file();
     m_previewGame.reset();
     m_previewLine.clear();
-    if (row == nullptr) {
+    if (!file || index < 0) {
         m_preview->setCurrentIndex(0);
         return;
     }
     // Headers come from the index; the moves need the game parsed (in the background).
-    const auto& entry = row->file->games[static_cast<std::size_t>(row->index)];
+    const auto& entry = file->games[static_cast<std::size_t>(index)];
     const auto player = [&](const char* name, const char* elo) {
         QString text = toQString(entry.header(name));
         if (text.isEmpty()) {
@@ -737,7 +1358,8 @@ void LibraryView::showPreview() {
     };
     const bool noPlayers =
         toQString(entry.header("White")).isEmpty() && toQString(entry.header("Black")).isEmpty();
-    m_previewPlayers->setText(noPlayers ? QFileInfo(row->file->path).completeBaseName()
+    const QString title = m_model->fallbackName(index);
+    m_previewPlayers->setText(noPlayers ? title
                                         : player("White", "WhiteElo") + QStringLiteral("  –  ") +
                                               player("Black", "BlackElo"));
     QStringList details;
@@ -768,7 +1390,8 @@ void LibraryView::showPreview() {
         }
         m_previewGame = std::move(parsed.game);
         m_previewLine = m_previewGame->mainLine();
-        m_previewPly = m_previewLine.size() - 1; // start at the final position
+        // A game starts at its final position; a puzzle at the position to solve.
+        m_previewPly = m_kind == FileKind::Puzzle ? 0 : m_previewLine.size() - 1;
         const int moves = (m_previewGame->ply(m_previewLine.back()) + 1) / 2;
         if (moves > 0) {
             const QString count = moves == 1 ? tr("1 move") : tr("%1 moves").arg(moves);
@@ -779,7 +1402,7 @@ void LibraryView::showPreview() {
         }
         showPreviewPly(false);
     });
-    watcher->setFuture(pgnio::parse(row->file, row->index));
+    watcher->setFuture(pgnio::parse(file, index));
 } // NOLINT(clang-analyzer-cplusplus.NewDeleteLeaks)
 
 void LibraryView::stepPreview(int plies) {
@@ -826,8 +1449,8 @@ void LibraryView::showPreviewPly(bool animate) {
 }
 
 void LibraryView::openSelectedGame() {
-    if (const GameListModel::Row* row = m_model->row(selectedRow())) {
-        emit openGameRequested(row->file, row->index);
+    if (const int index = selectedRow(); index >= 0 && m_model->file()) {
+        emit openGameRequested(m_model->file(), index);
     }
 }
 

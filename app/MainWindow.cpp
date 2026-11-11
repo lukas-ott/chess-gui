@@ -8,10 +8,15 @@
 #include "engine/EnginePanel.hpp"
 #include "engine/EngineRegistry.hpp"
 #include "engine/EnginesView.hpp"
+#include "kiebitz/core/annotations.hpp"
+#include "kiebitz/repertoire/drill.hpp"
 #include "library/Library.hpp"
 #include "library/LibraryView.hpp"
+#include "library/NewFileDialog.hpp"
 #include "notation/NotationView.hpp"
 #include "panels/GameInfoPanel.hpp"
+#include "repertoire/RepertoirePanel.hpp"
+#include "repertoire/RepertoireStore.hpp"
 #include "style/AppStyle.hpp"
 #include "style/Icons.hpp"
 #include "style/Layout.hpp"
@@ -24,6 +29,7 @@
 #include <QCloseEvent>
 #include <QColorDialog>
 #include <QCoreApplication>
+#include <QDateTime>
 #include <QDir>
 #include <QDragEnterEvent>
 #include <QDropEvent>
@@ -41,6 +47,7 @@
 #include <QMessageBox>
 #include <QMimeData>
 #include <QPlainTextEdit>
+#include <QProgressBar>
 #include <QPushButton>
 #include <QScrollArea>
 #include <QSettings>
@@ -48,6 +55,7 @@
 #include <QSplitter>
 #include <QStackedWidget>
 #include <QStatusBar>
+#include <QStyle>
 #include <QTabBar>
 #include <QTabWidget>
 #include <QTextCursor>
@@ -66,6 +74,27 @@ namespace {
 using namespace Qt::StringLiterals;
 using core::Game;
 using core::NodeId;
+
+/// "10… dxe6": a move of the game as the move list numbers it.
+QString moveLabel(const Game& game, NodeId node) {
+    const bool white = game.mover(node) == core::Color::White;
+    return QStringLiteral("%1%2 %3")
+        .arg(game.moveNumber(node))
+        .arg(white ? QStringLiteral(".") : QStringLiteral("…"))
+        .arg(QString::fromStdString(game.node(node).san));
+}
+
+/// The comments on a move as a reader sees them (no clocks or commands), or empty.
+QString explanation(const Game& game, NodeId node) {
+    QStringList parts;
+    for (const std::string* comment : {&game.node(node).commentBefore, &game.node(node).comment}) {
+        const core::CommentDisplay shown = core::displayComment(*comment);
+        if (!shown.text.empty()) {
+            parts << QString::fromStdString(shown.text);
+        }
+    }
+    return parts.join(QLatin1Char(' '));
+}
 
 // QSettings keys (compile-time constants: nothing to construct at startup)
 constexpr auto kThemeKey = "board/theme"_L1;
@@ -139,6 +168,29 @@ MainWindow::MainWindow(AppStyle& style, QWidget* parent)
     m_autosave.setInterval(1000);
     connect(&m_autosave, &QTimer::timeout, this, &MainWindow::autosave);
 
+    // Repertoires: built from the Library's marked files. Before it edits a file, open games
+    // write their pending changes into it; after, they reload from it.
+    m_repertoires = new RepertoireStore(*m_library, this);
+    m_repertoires->setBeforeEdit([this] { autosave(); });
+    m_repertoires->setOpenText([this](const QString& path) -> std::shared_ptr<PgnFile> {
+        for (const auto& d : m_documents) {
+            if (d->file && d->file->hasText && d->file->path == path) {
+                return d->file;
+            }
+        }
+        return nullptr;
+    });
+    connect(m_repertoires, &RepertoireStore::fileEdited, this, &MainWindow::reloadGamesOf);
+    connect(m_repertoires, &RepertoireStore::failed, this, [this](const QString& message) {
+        QMessageBox::warning(this, tr("Repertoire"), message);
+    });
+    connect(m_repertoires, &RepertoireStore::openingsReady, this, &MainWindow::updateMovesTitle);
+    connect(m_repertoires, &RepertoireStore::changed, this, [this] {
+        if (const GameDocument* d = doc()) {
+            showNode(d->current, false); // the Repertoire tab's book status
+        }
+    });
+
     buildLayout();
     restoreState(); // before the menus, which show the board's current settings
     buildMenus();
@@ -188,6 +240,7 @@ void MainWindow::buildFileMenu() {
     auto* menu = menuBar()->addMenu(tr("&File"));
     menu->addAction(tr("New &Tab"), QKeySequence::AddTab, this,
                     [this] { addDocument(std::make_unique<GameDocument>()); });
+    menu->addAction(tr("&New File…"), QKeySequence::New, this, [this] { newFile(); });
     menu->addAction(tr("&Open…"), QKeySequence::Open, this, [this] {
         const QStringList paths = QFileDialog::getOpenFileNames(
             this, tr("Open PGN"), m_library->folder(), tr("PGN files (*.pgn);;All files (*)"));
@@ -201,6 +254,7 @@ void MainWindow::buildFileMenu() {
                     [this] { showSection(Section::Board); });
     menu->addAction(tr("&Engines"), QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_E), this,
                     [this] { showSection(Section::Engines); });
+    menu->addSeparator();
     menu->addSeparator();
     auto* saveAction = menu->addAction(tr("&Save"), QKeySequence::Save, this, &MainWindow::save);
     auto* saveAsAction =
@@ -304,13 +358,17 @@ void MainWindow::buildViewMenu(QMenu* menu) {
     menu->addSeparator();
 
     auto* flipAction = menu->addAction(tr("&Flip Board"));
+    m_flipAction = flipAction;
     flipAction->setShortcut(Qt::Key_F); // letters work in the macOS menu bar (unlike arrows)
     flipAction->setCheckable(true);
     flipAction->setChecked(m_board->isFlipped());
     connect(flipAction, &QAction::toggled, this, [this](bool on) {
         m_board->setFlipped(on);
         m_evalBar->setFlipped(on);
-        QSettings().setValue(kFlippedKey, on);
+        // Remembered for other games; a game with an [Orientation] keeps its own side.
+        if (const GameDocument* d = doc(); d == nullptr || d->game.header("Orientation").empty()) {
+            QSettings().setValue(kFlippedKey, on);
+        }
     });
 
     auto* coordinatesAction = menu->addAction(tr("Show &Coordinates"));
@@ -421,8 +479,50 @@ void MainWindow::buildLayout() {
     tabLayout->addWidget(newTab);
     tabLayout->addStretch();
 
-    m_libraryView = new LibraryView(*m_library, m_style);
+    m_libraryView = new LibraryView(*m_library, *m_repertoires, m_style);
     connect(m_libraryView, &LibraryView::openGameRequested, this, &MainWindow::openGame);
+    // Practise from the Library: open the file, then start once its tab is there.
+    connect(m_libraryView, &LibraryView::practiceRequested, this,
+            [this](const std::shared_ptr<PgnFile>& file) {
+                m_practiceOnOpen = file->path;
+                openGame(file, 0);
+                if (const GameDocument* d = doc();
+                    d != nullptr && d->file && d->file->path == m_practiceOnOpen) {
+                    m_practiceOnOpen.clear(); // it was open already
+                    startPractice(false, m_repertoirePanel->practiceDepth());
+                }
+            });
+    connect(this, &MainWindow::fileOpened, this, [this](const QString& path) {
+        if (!m_practiceOnOpen.isEmpty() && path == m_practiceOnOpen) {
+            m_practiceOnOpen.clear();
+            startPractice(false, m_repertoirePanel->practiceDepth());
+        }
+    });
+    connect(m_libraryView, &LibraryView::fileKindRequested, this,
+            [this](const QStringList& paths, int kind, int side) {
+                m_repertoires->setKind(
+                    paths, static_cast<library::FileKind>(kind),
+                    side < 0 ? std::nullopt
+                             : std::optional(side == 0 ? core::Color::White : core::Color::Black));
+            });
+    connect(m_libraryView, &LibraryView::newFileRequested, this,
+            [this](const QString& folder) { newFile(folder); });
+    // A file or folder moved in the Library: its open tabs save to where it is now.
+    connect(m_libraryView, &LibraryView::pathMoved, this,
+            [this](const QString& from, const QString& to) {
+                for (const auto& d : m_documents) {
+                    if (!d->file) {
+                        continue;
+                    }
+                    QString& path = d->file->path;
+                    if (path == from) {
+                        path = to;
+                    } else if (path.startsWith(from + QLatin1Char('/'))) {
+                        path = to + path.mid(from.size());
+                    }
+                }
+                updateTitles();
+            });
     connect(m_libraryView, &LibraryView::changeFolderRequested, this,
             &MainWindow::chooseLibraryFolder);
 
@@ -500,7 +600,11 @@ QWidget* MainWindow::buildAnalysisPage() {
         });
 
     m_sideSplitter = new QSplitter(Qt::Vertical);
-    m_sideSplitter->addWidget(buildMovesCard());
+    // The moves, or (while practising a repertoire) the practice card in their place.
+    m_movesStack = new QStackedWidget;
+    m_movesStack->addWidget(buildMovesCard());
+    m_movesStack->addWidget(buildPracticeCard());
+    m_sideSplitter->addWidget(m_movesStack);
     m_sideSplitter->addWidget(buildPanelsCard());
     m_sideSplitter->setChildrenCollapsible(false);
     m_sideSplitter->setStretchFactor(0, 2);
@@ -540,7 +644,35 @@ QWidget* MainWindow::buildMovesCard() {
     auto* layout = new QVBoxLayout(frame);
     layout->setContentsMargins(layout::kCard);
     layout->setSpacing(layout::kCardSpacing);
-    layout->addWidget(label(tr("MOVES"), "cardTitle"));
+    m_movesTitle = label(tr("MOVES"), "cardTitle");
+    m_movesTitle->setObjectName(QStringLiteral("movesTitle"));
+    // The title, and how to show the moves: flowing text or rows (remembered).
+    auto* titleRow = new QHBoxLayout;
+    titleRow->addWidget(m_movesTitle, 1);
+    auto* views = new QWidget;
+    views->setObjectName(QStringLiteral("notationViews"));
+    views->setProperty("role", "segmented");
+    auto* viewsLayout = new QHBoxLayout(views);
+    viewsLayout->setContentsMargins(2, 2, 2, 2);
+    viewsLayout->setSpacing(2);
+    auto* viewGroup = new QButtonGroup(views);
+    const bool rows = QSettings().value(QStringLiteral("notation/rows"), false).toBool();
+    for (const auto& [id, text, tip] :
+         {std::tuple{0, tr("Text"), tr("Moves as flowing text")},
+          std::tuple{1, tr("Rows"), tr("Moves in rows, with comments and variations between")}}) {
+        auto* segment = new QPushButton(text);
+        segment->setObjectName(id == 0 ? QStringLiteral("notationText")
+                                       : QStringLiteral("notationRows"));
+        segment->setProperty("role", "segment");
+        segment->setCheckable(true);
+        segment->setChecked((id == 1) == rows);
+        segment->setFocusPolicy(Qt::NoFocus);
+        segment->setToolTip(tip);
+        viewGroup->addButton(segment, id);
+        viewsLayout->addWidget(segment);
+    }
+    titleRow->addWidget(views);
+    layout->addLayout(titleRow);
 
     m_notation = new NotationView(m_style);
     connect(m_notation, &NotationView::nodeActivated, this,
@@ -554,6 +686,11 @@ QWidget* MainWindow::buildMovesCard() {
     connect(m_notation, &NotationView::nagsCleared, this, &MainWindow::clearNags);
     connect(m_notation, &NotationView::commentEditRequested, this, &MainWindow::editComment);
     m_notation->setMinimumHeight(200); // always room for a good few lines of moves
+    m_notation->setRows(rows);
+    connect(viewGroup, &QButtonGroup::idClicked, this, [this](int id) {
+        m_notation->setRows(id == 1);
+        QSettings().setValue(QStringLiteral("notation/rows"), id == 1);
+    });
     layout->addWidget(m_notation, 1);
 
     // The current move's comment, edited in place, under a header naming the move.
@@ -628,10 +765,19 @@ QWidget* MainWindow::buildPanelsCard() {
                                      "and how it scores."),
                                   m_style),
                    tr("Explorer"));
-    panels->addTab(new EmptyState(IconKind::Library, tr("Repertoire"),
-                                  tr("Coming in v2: build your lines, find the gaps, train them."),
-                                  m_style),
-                   tr("Repertoire"));
+    m_repertoirePanel = new RepertoirePanel(*m_repertoires, m_style);
+    connect(m_repertoirePanel, &RepertoirePanel::addLineRequested, this, [this](core::Color side) {
+        if (const GameDocument* d = doc();
+            d != nullptr && addLineAsking(side, lineTo(d->game, d->current))) {
+            statusBar()->showMessage(side == core::Color::White
+                                         ? tr("Added to your White repertoire")
+                                         : tr("Added to your Black repertoire"),
+                                     kStatusMs);
+        }
+    });
+    connect(m_repertoirePanel, &RepertoirePanel::practiceRequested, this,
+            &MainWindow::startPractice);
+    panels->addTab(m_repertoirePanel, tr("Repertoire"));
     m_info = new GameInfoPanel;
     connect(m_info, &GameInfoPanel::headerEdited, this, &MainWindow::onHeaderEdited);
     // The game details scroll when the panel is short, so they never take height from the moves.
@@ -829,6 +975,9 @@ void MainWindow::showSection(Section section) {
 void MainWindow::updatePage() {
     m_notationRefresh.stop();
     const GameDocument* d = doc();
+    if (m_drill && (d == nullptr || d->id != m_drillDocument)) {
+        stopPractice(); // another tab or page: practice ends
+    }
     for (auto* action : m_gameActions) {
         action->setEnabled(d != nullptr);
     }
@@ -1350,10 +1499,30 @@ void MainWindow::setUpPosition() {
 
 // ---- Showing the game --------------------------------------------------------------------------
 
+void MainWindow::orientBoard(const GameDocument& document) {
+    const QString side = toQString(document.game.header("Orientation"));
+    bool flipped = QSettings().value(kFlippedKey, false).toBool();
+    if (side.compare(u"black", Qt::CaseInsensitive) == 0) {
+        flipped = true;
+    } else if (side.compare(u"white", Qt::CaseInsensitive) == 0) {
+        flipped = false;
+    }
+    if (m_board->isFlipped() != flipped) {
+        m_board->setFlipped(flipped);
+        m_evalBar->setFlipped(flipped);
+    }
+    if (m_flipAction != nullptr) {
+        const QSignalBlocker block(m_flipAction);
+        m_flipAction->setChecked(flipped);
+    }
+}
+
 void MainWindow::showDocument() {
     const GameDocument* d = doc();
+    orientBoard(*d);
     m_notation->setGame(&d->game, d->current);
-    m_info->setGame(&d->game);
+    m_info->setGame(&d->game,
+                    d->file && RepertoireStore::kindOf(*d->file) == library::FileKind::Repertoire);
     showNode(d->current, false);
 }
 
@@ -1366,7 +1535,7 @@ void MainWindow::refreshNotation() {
 
 void MainWindow::showNode(NodeId id, bool animate) {
     GameDocument* d = doc();
-    if (d == nullptr) {
+    if (d == nullptr || m_drill) { // while practising, the practice drives the board
         return;
     }
     d->current = id;
@@ -1397,11 +1566,392 @@ void MainWindow::showNode(NodeId id, bool animate) {
     updateFork();
     updateNavigation();
     m_enginePanel->setPosition(m_board->position());
+    const bool repertoireFile =
+        d->file && RepertoireStore::kindOf(*d->file) == library::FileKind::Repertoire;
+    m_repertoirePanel->setGame(&d->game, id, repertoireFile,
+                               d->file ? RepertoireStore::sideOf(*d->file) : core::Color::White);
+    updateMovesTitle();
+}
+
+std::vector<core::Move> MainWindow::lineTo(const Game& game, NodeId id) {
+    std::vector<core::Move> line;
+    for (const NodeId node : game.path(id)) {
+        if (node != Game::root()) {
+            line.push_back(game.node(node).move);
+        }
+    }
+    return line;
+}
+
+void MainWindow::updateMovesTitle() {
+    // "MOVES · Sicilian Defense: Najdorf Variation": the opening the game is in at this move.
+    const GameDocument* d = doc();
+    QString title = tr("MOVES");
+    if (d != nullptr) {
+        m_repertoires->loadOpenings();
+        if (const auto* names = m_repertoires->openings()) {
+            if (const auto* named =
+                    names->along(d->game.startPosition(), lineTo(d->game, d->current))) {
+                title += QStringLiteral("  ·  ") + QString::fromStdString(named->name);
+            }
+        }
+    }
+    m_movesTitle->setText(title);
+}
+
+// ---- Repertoires -------------------------------------------------------------------------------
+
+bool MainWindow::addLineAsking(core::Color side, const std::vector<core::Move>& line) {
+    auto added = m_repertoires->addLine(side, line, false);
+    if (added.outcome == RepertoireStore::Outcome::Conflict) {
+        // Our side should have one answer per position; a second one only on purpose.
+        core::Position position;
+        for (int k = 0; k < added.ply; ++k) {
+            position.play(line[static_cast<std::size_t>(k)]);
+        }
+        QStringList answers;
+        for (const auto& move : added.expected) {
+            answers << QString::fromStdString(move.san);
+        }
+        const QString played =
+            QString::fromStdString(position.san(line[static_cast<std::size_t>(added.ply)]));
+        const auto answer = QMessageBox::question(
+            this, tr("A second answer?"),
+            tr("Your repertoire already answers this position with %1. Add %2 as another "
+               "answer?")
+                .arg(answers.join(tr(" and ")), played),
+            QMessageBox::Yes | QMessageBox::Cancel, QMessageBox::Cancel);
+        if (answer != QMessageBox::Yes) {
+            return false;
+        }
+        added = m_repertoires->addLine(side, line, true);
+    }
+    if (added.outcome == RepertoireStore::Outcome::NoFile) {
+        statusBar()->showMessage(tr("The repertoire is still being read; try again in a moment."),
+                                 kStatusMs);
+        return false;
+    }
+    return true;
+}
+
+// ---- New files ---------------------------------------------------------------------------------
+
+void MainWindow::newFile(const QString& folder) {
+    NewFileDialog dialog(this);
+    if (dialog.exec() != QDialog::Accepted) {
+        return;
+    }
+    const QString error = createFile(
+        dialog.name(),
+        NewFileDialog::fileText(dialog.name(), dialog.kind(), dialog.side(), dialog.pgn()), folder);
+    if (!error.isEmpty()) {
+        QMessageBox::warning(this, tr("New File"), error);
+    }
+}
+
+QString MainWindow::createFile(const QString& name, const std::string& text,
+                               const QString& folder) {
+    // A name that is safe as a file name, and not taken yet.
+    QString base = name;
+    base.replace(QLatin1Char('/'), QLatin1Char('-')).replace(QLatin1Char(':'), QLatin1Char('-'));
+    const QDir into(folder.isEmpty() ? m_library->folder() : folder);
+    QString path = into.filePath(base + u".pgn");
+    for (int n = 2; QFileInfo::exists(path); ++n) {
+        path = into.filePath(QStringLiteral("%1 %2.pgn").arg(base).arg(n));
+    }
+    QString error = pgnio::write(path, text).result(); // small: written right away
+    if (!error.isEmpty()) {
+        return error;
+    }
+    m_library->rescan();
+    openFile(path);
+    return {};
+}
+
+// ---- Practice ----------------------------------------------------------------------------------
+
+QWidget* MainWindow::buildPracticeCard() {
+    auto* frame = card();
+    frame->setObjectName(QStringLiteral("practiceCard"));
+    auto* layout = new QVBoxLayout(frame);
+    layout->setContentsMargins(layout::kCard);
+    layout->setSpacing(layout::kCardSpacing);
+    m_practiceTitle = label(QString(), "cardTitle");
+    layout->addWidget(m_practiceTitle);
+    // The status with a tick or a cross, the file's explanation as a quote, then the progress.
+    m_practiceMark = new QLabel;
+    m_practiceMark->setFixedSize(18, 18);
+    m_practiceStatus = label(QString(), "practiceStatus");
+    m_practiceStatus->setObjectName(QStringLiteral("practiceStatus"));
+    m_practiceStatus->setWordWrap(true);
+    auto* statusRow = new QHBoxLayout;
+    statusRow->setSpacing(8);
+    statusRow->addWidget(m_practiceMark, 0, Qt::AlignTop);
+    statusRow->addWidget(m_practiceStatus, 1);
+    layout->addLayout(statusRow);
+    m_practiceWhy = label(QString(), "quote");
+    m_practiceWhy->setObjectName(QStringLiteral("practiceWhy"));
+    m_practiceWhy->setWordWrap(true);
+    m_practiceWhy->hide();
+    layout->addWidget(m_practiceWhy);
+    layout->addSpacing(4);
+    m_practiceBar = new QProgressBar;
+    m_practiceBar->setObjectName(QStringLiteral("practiceBar"));
+    m_practiceBar->setTextVisible(false);
+    m_practiceBar->setFixedHeight(4);
+    layout->addWidget(m_practiceBar);
+    m_practiceProgress = label(QString(), "engineStatus");
+    m_practiceProgress->setObjectName(QStringLiteral("practiceProgress"));
+    layout->addWidget(m_practiceProgress);
+    m_practiceSummary = label(QString(), "pvLine");
+    m_practiceSummary->setObjectName(QStringLiteral("practiceSummary"));
+    m_practiceSummary->setWordWrap(true);
+    m_practiceSummary->setAlignment(Qt::AlignLeft | Qt::AlignTop);
+    layout->addWidget(m_practiceSummary, 1);
+    auto* buttons = new QHBoxLayout;
+    m_practiceAgain = new QPushButton(tr("Again"));
+    m_practiceAgain->setObjectName(QStringLiteral("practiceAgain"));
+    m_practiceAgain->setProperty("role", "primary");
+    m_practiceAgain->setFocusPolicy(Qt::NoFocus);
+    connect(m_practiceAgain, &QPushButton::clicked, this,
+            [this] { startPractice(m_drillFromHere, m_drillDepth); });
+    auto* stop = new QPushButton(tr("Stop"));
+    stop->setObjectName(QStringLiteral("practiceStop"));
+    stop->setProperty("role", "secondary");
+    stop->setFocusPolicy(Qt::NoFocus);
+    connect(stop, &QPushButton::clicked, this, &MainWindow::stopPractice);
+    buttons->addWidget(m_practiceAgain);
+    buttons->addWidget(stop);
+    buttons->addStretch();
+    layout->addLayout(buttons);
+    return frame;
+}
+
+void MainWindow::setPracticeStatus(const QString& text, int mood) {
+    m_practiceStatus->setText(text);
+    const char* name = "";
+    if (mood != 0) {
+        name = mood > 0 ? "good" : "bad";
+    }
+    if (m_practiceStatus->property("mood").toString() != QLatin1String(name)) {
+        m_practiceStatus->setProperty("mood", QString::fromLatin1(name));
+        m_practiceStatus->style()->unpolish(m_practiceStatus);
+        m_practiceStatus->style()->polish(m_practiceStatus);
+    }
+    const auto& c = m_style.colors();
+    if (mood == 0) {
+        m_practiceMark->clear();
+    } else {
+        const IconKind icon = mood > 0 ? IconKind::Check : IconKind::Close;
+        m_practiceMark->setPixmap(
+            makeIcon(icon, mood > 0 ? c.good : c.bad, c.dimmed, 18).pixmap(18, 18));
+    }
+}
+
+void MainWindow::setPracticeWhy(const QString& text) {
+    m_practiceWhy->setText(text);
+    m_practiceWhy->setVisible(!text.isEmpty());
+}
+
+GameDocument* MainWindow::practiceDocument() const {
+    GameDocument* d = doc();
+    return d != nullptr && d->id == m_drillDocument ? d : nullptr;
+}
+
+void MainWindow::startPractice(bool fromHere, int depth) {
+    const GameDocument* d = doc();
+    if (d == nullptr || !d->file) {
+        return;
+    }
+    const core::Color side = RepertoireStore::sideOf(*d->file);
+    if (!m_drill || m_drillDocument != d->id) {
+        m_drillStart = fromHere ? d->current : Game::root();
+    }
+    m_drillFromHere = fromHere;
+    m_drillDepth = depth;
+    m_drillDocument = d->id;
+    ++m_drillRun;
+    m_drill = std::make_unique<repertoire::Drill>(
+        d->game, side, m_drillStart, depth,
+        static_cast<std::uint32_t>(QDateTime::currentMSecsSinceEpoch()));
+    // Your side at the bottom; the moves (they'd give the answers away) and the engine off.
+    m_board->setFlipped(side == core::Color::Black);
+    m_evalBar->setFlipped(side == core::Color::Black);
+    m_enginePanel->setPosition(std::nullopt);
+    for (auto* key : m_gameKeys) {
+        key->setEnabled(false);
+    }
+    m_movesStack->setCurrentIndex(1);
+    m_practiceTitle->setText(tr("PRACTICE") + QStringLiteral("  ·  ") + d->title());
+    m_practiceSummary->clear();
+    m_practiceAgain->hide();
+    setPracticeStatus({}, 0);
+    setPracticeWhy({});
+    showPracticeNode(m_drillStart, false);
+    updatePracticeProgress();
+    practiceStep();
+}
+
+void MainWindow::stopPractice() {
+    if (!m_drill) {
+        return;
+    }
+    m_drill.reset();
+    ++m_drillRun;
+    m_movesStack->setCurrentIndex(0);
+    for (auto* key : m_gameKeys) {
+        key->setEnabled(doc() != nullptr);
+    }
+    if (doc() != nullptr) {
+        showDocument(); // the game as it was, from its own side
+    }
+}
+
+void MainWindow::showPracticeNode(NodeId id, bool animate, std::vector<core::Arrow> arrows) {
+    const GameDocument* d = practiceDocument();
+    if (d == nullptr) {
+        return;
+    }
+    const auto lastMove = id == Game::root() ? std::nullopt : std::optional(d->game.node(id).move);
+    m_board->setPosition(d->game.positionAt(id), lastMove, animate);
+    m_board->setDrawings(std::move(arrows), {}); // the file's own arrows would give answers away
+}
+
+void MainWindow::practiceStep() {
+    if (!m_drill) {
+        return;
+    }
+    const int run = m_drillRun;
+    const auto later = [this, run](int ms, auto then) {
+        QTimer::singleShot(ms, this, [this, run, then] {
+            if (m_drill && run == m_drillRun) { // not stopped or restarted meanwhile
+                then();
+            }
+        });
+    };
+    if (m_drill->lineEnded()) {
+        m_drill->nextLine();
+        updatePracticeProgress();
+        if (m_drill->finished()) {
+            // The end: what went wrong, to look at again.
+            const GameDocument* d = practiceDocument();
+            QStringList missed;
+            for (const NodeId node : m_drill->missed()) {
+                if (d == nullptr) {
+                    break;
+                }
+                missed << moveLabel(d->game, d->game.mainChild(node));
+            }
+            setPracticeStatus(m_drill->mistakes() == 0 ? tr("Done: no mistakes") : tr("Done"), 1);
+            setPracticeWhy({});
+            m_practiceSummary->setText(
+                missed.isEmpty()
+                    ? QString()
+                    : tr("To look at again: %1").arg(missed.join(QStringLiteral(", "))));
+            m_practiceAgain->show();
+            return;
+        }
+        setPracticeStatus(tr("Line done · next one"), 0);
+        later(700, [this] {
+            setPracticeWhy({}); // the last explanation belongs to the old line
+            showPracticeNode(m_drill->current(), false);
+            practiceStep();
+        });
+        return;
+    }
+    if (m_drill->yourMove()) {
+        later(250, [this] {
+            if (m_practiceStatus->property("mood").toString() != u"bad") {
+                setPracticeStatus(tr("Your move"), 0);
+            }
+        });
+        return;
+    }
+    later(450, [this] { // the opponent replies after a moment, so the move can be seen
+        if (const auto reply = m_drill->opponentMove()) {
+            showPracticeNode(*reply, true);
+            practiceStep();
+        }
+    });
+}
+
+void MainWindow::updatePracticeProgress() {
+    if (!m_drill) {
+        return;
+    }
+    const int mistakes = m_drill->mistakes();
+    m_practiceBar->setRange(0, static_cast<int>(std::max<std::size_t>(m_drill->lines(), 1)));
+    m_practiceBar->setValue(static_cast<int>(m_drill->linesDone()));
+    m_practiceProgress->setText(
+        tr("Line %1 of %2  ·  %3 correct  ·  %4")
+            .arg(std::min(m_drill->linesDone() + 1, m_drill->lines()))
+            .arg(m_drill->lines())
+            .arg(m_drill->correct())
+            .arg(mistakes == 1 ? tr("1 mistake") : tr("%1 mistakes").arg(mistakes)));
+}
+
+void MainWindow::reloadGamesOf(const QString& path, const std::shared_ptr<PgnFile>& file) {
+    for (const auto& d : m_documents) {
+        if (!d->file || d->file->path != path) {
+            continue;
+        }
+        d->file = file; // one shared text from now on, so edits from both sides add up
+        if (d->gameIndex < 0 || std::cmp_greater_equal(d->gameIndex, file->games.size())) {
+            continue;
+        }
+        const auto& entry = file->games[static_cast<std::size_t>(d->gameIndex)];
+        auto game = pgn::parseGame(std::string_view(file->text).substr(entry.offset, entry.length));
+        if (!game) {
+            continue;
+        }
+        // Stay on the same move: follow the moves that led there in the reloaded game.
+        const std::vector<core::Move> line = lineTo(d->game, d->current);
+        d->game = std::move(*game);
+        d->current = Game::root();
+        for (const core::Move& move : line) {
+            const auto children = d->game.children(d->current);
+            const auto next = std::find_if(children.begin(), children.end(), [&](NodeId child) {
+                return d->game.node(child).move == move;
+            });
+            if (next == children.end()) {
+                break;
+            }
+            d->current = *next;
+        }
+        d->modified = false;
+        if (d.get() == doc()) {
+            showDocument();
+        }
+    }
+    updateTitles();
 }
 
 void MainWindow::onMoveMade(core::Move move) {
     GameDocument* d = doc();
     if (d == nullptr) {
+        return;
+    }
+    if (m_drill) { // practising: the move is an answer, not an edit
+        if (!m_drill->yourMove()) {
+            showPracticeNode(m_drill->current(), false); // not your turn: take it back
+            return;
+        }
+        const repertoire::Drill::Answer answer = m_drill->play(move);
+        if (answer.correct) {
+            setPracticeStatus(tr("Correct"), 1);
+            showPracticeNode(m_drill->current(), true);
+            practiceStep();
+        } else {
+            const NodeId expected = d->game.mainChild(m_drill->current());
+            setPracticeStatus(
+                tr("Not quite. The repertoire plays %1").arg(moveLabel(d->game, expected)), -1);
+            // Why: the comments on the repertoire's move. They stay until the next mistake or
+            // line, so there is time to read them.
+            setPracticeWhy(explanation(d->game, expected));
+            showPracticeNode(m_drill->current(), false,
+                             {{answer.expected.from, answer.expected.to, core::MarkColor::Green}});
+        }
+        updatePracticeProgress();
         return;
     }
     const std::size_t before = d->game.nodeCount();
@@ -1684,6 +2234,9 @@ void MainWindow::onHeaderEdited(const QString& name, const QString& value) {
     updateTitles();
     if (name == u"Result") {
         refreshNotation();
+    }
+    if (name == u"Orientation") {
+        orientBoard(*d); // a repertoire's side: the board turns with it
     }
 }
 

@@ -5,30 +5,43 @@
 #include "board/BoardView.hpp"
 #include "kiebitz/pgn/pgn.hpp"
 #include "library/Library.hpp"
+#include "library/LibraryView.hpp"
+#include "library/NewFileDialog.hpp"
 #include "notation/NotationView.hpp"
 #include "panels/GameInfoPanel.hpp"
+#include "repertoire/RepertoirePanel.hpp"
+#include "repertoire/RepertoireStore.hpp"
 #include "style/AppStyle.hpp"
 
 #include <QAction>
 #include <QApplication>
+#include <QBuffer>
 #include <QClipboard>
+#include <QComboBox>
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
 #include <QImage>
 #include <QLabel>
+#include <QLayout>
+#include <QLineEdit>
+#include <QMessageBox>
 #include <QPlainTextEdit>
 #include <QPushButton>
+#include <QSet>
 #include <QSettings>
 #include <QSignalSpy>
+#include <QStackedWidget>
 #include <QTabBar>
 #include <QTableView>
 #include <QTemporaryDir>
 #include <QTest>
+#include <QTimer>
 #include <QToolButton>
 #include <QTreeWidget>
 #include <gtest/gtest.h>
 
+#include <map>
 #include <string>
 #include <vector>
 
@@ -232,22 +245,65 @@ TEST_F(LibraryTreeTest, AFolderListsOnlyItsOwnFiles) {
     ASSERT_EQ(tree->topLevelItemCount(), 2); // the OTB folder, then top.pgn
     QTreeWidgetItem* otb = item(QStringLiteral("OTB"));
     ASSERT_NE(otb, nullptr);
-    EXPECT_EQ(otb->childCount(), 2);              // Black, White
-    EXPECT_EQ(otb->text(1), QStringLiteral("4")); // 1 + 3 games inside
-    // OTB holds only folders: its own list is empty; the games are a level further down.
+    EXPECT_EQ(otb->childCount(), 2); // Black, White
+    // A folder shows what's in it, as En Croissant does; a file its games.
+    auto* detail = window.findChild<QStackedWidget*>(QStringLiteral("libraryDetail"));
+    ASSERT_NE(detail, nullptr);
+    const auto shown = [&] {
+        QStringList texts;
+        for (const auto* label : detail->currentWidget()->findChildren<QLabel*>()) {
+            if (!label->text().isEmpty()) {
+                texts << label->text();
+            }
+        }
+        return texts;
+    };
     tree->setCurrentItem(otb);
-    EXPECT_EQ(games->model()->rowCount(), 0);
+    EXPECT_EQ(shown(),
+              (QStringList{QStringLiteral("OTB"), QStringLiteral("2 folders  ·  0 files")}));
+    tree->setCurrentItem(item(QStringLiteral("b")));
+    EXPECT_EQ(games->model()->rowCount(), 3); // b.pgn's games
     const auto* count = window.findChild<QLabel*>(QStringLiteral("libraryListCount"));
     ASSERT_NE(count, nullptr);
-    EXPECT_EQ(count->text(), QStringLiteral("0 games  ·  0 files  ·  2 folders"));
-    tree->setCurrentItem(item(QStringLiteral("Black")));
-    EXPECT_EQ(games->model()->rowCount(), 3); // b.pgn's games
-    // The top level holds top.pgn (and the OTB folder, whose games stay inside it).
+    EXPECT_EQ(count->text(), QStringLiteral("Games  ·  3 games"));
     writeFile(path("OTB/notes.pgn"), kOneGame);
     QSignalSpy scanned(&window.library(), &Library::scanned);
     ASSERT_TRUE(scanned.wait(5000));
     tree->setCurrentItem(item(QStringLiteral("OTB")));
-    EXPECT_EQ(games->model()->rowCount(), 1); // notes.pgn only, not Black/ or White/
+    EXPECT_EQ(shown(),
+              (QStringList{QStringLiteral("OTB"), QStringLiteral("2 folders  ·  1 file")}));
+}
+
+TEST_F(LibraryTreeTest, NewFoldersAndMovingFiles) {
+    auto* view = window.findChild<kiebitz::app::LibraryView*>();
+    ASSERT_NE(view, nullptr);
+    // A new folder shows even though it is empty, and is selected.
+    QSignalSpy scanned(&window.library(), &Library::scanned);
+    EXPECT_EQ(view->createFolder(QStringLiteral("OTB"), QStringLiteral("Blitz")), QString());
+    ASSERT_TRUE(scanned.wait(5000));
+    ASSERT_NE(item(QStringLiteral("Blitz")), nullptr);
+    EXPECT_EQ(item(QStringLiteral("Blitz"))->parent(), item(QStringLiteral("OTB")));
+    EXPECT_EQ(tree->currentItem(), item(QStringLiteral("Blitz")));
+    EXPECT_NE(view->createFolder(QStringLiteral("OTB"), QStringLiteral("Blitz")), QString());
+
+    // Open top.pgn, then move it into the new folder: the tab saves to its new place.
+    QSignalSpy opened(&window, &MainWindow::fileOpened);
+    window.openFile(path("top.pgn"));
+    ASSERT_TRUE(opened.wait(5000));
+    EXPECT_EQ(view->moveToFolder({path("top.pgn")}, QStringLiteral("OTB/Blitz")), QString());
+    EXPECT_TRUE(QFileInfo::exists(path("OTB/Blitz/top.pgn")));
+    EXPECT_FALSE(QFileInfo::exists(path("top.pgn")));
+    ASSERT_TRUE(scanned.wait(5000));
+    EXPECT_EQ(item(QStringLiteral("top"))->parent(), item(QStringLiteral("Blitz")));
+    play("a3"); // an edit saves itself, into the moved file
+    ASSERT_TRUE(QTest::qWaitFor(
+        [&] { return readFile(path("OTB/Blitz/top.pgn")).find("a3") != std::string::npos; }, 5000));
+    EXPECT_FALSE(QFileInfo::exists(path("top.pgn")));
+
+    // A folder moves with what's in it, but never into itself.
+    EXPECT_NE(view->moveToFolder({path("OTB")}, QStringLiteral("OTB/Blitz")), QString());
+    EXPECT_EQ(view->moveToFolder({path("OTB/Blitz")}, QString()), QString());
+    EXPECT_TRUE(QFileInfo::exists(path("Blitz/top.pgn")));
 }
 
 TEST_F(LibraryTreeTest, FoldingIsRemembered) {
@@ -296,18 +352,18 @@ TEST_F(LibraryTreeTest, AQuietFolderIsScannedOnceAndKeepsTheSelection) {
     EXPECT_EQ(games->currentIndex().row(), 2);
 }
 
-TEST_F(LibraryTreeTest, EveryGameRowStartsWithItsFileName) {
+TEST_F(LibraryTreeTest, AGameWithoutPlayersIsNamedAfterItsFile) {
     QSignalSpy scanned(&window.library(), &Library::scanned);
     // As En Croissant writes its opening files: every header a "?".
     writeFile(path("Bird Opening.pgn"),
               "[Event \"?\"]\n[White \"?\"]\n[Black \"?\"]\n\n1. f4 d5 *\n");
     ASSERT_TRUE(scanned.wait(5000));
     tree->setCurrentItem(item(QStringLiteral("Bird Opening")));
+    // The White column has the file's name (never a blank row); no "?" for Black.
     EXPECT_EQ(games->model()->index(0, 1).data().toString(), QStringLiteral("Bird Opening"));
-    EXPECT_EQ(games->model()->index(0, 2).data().toString(), QString()); // no "?" for White
-    tree->setCurrentItem(item(QStringLiteral("top"))); // a game with players has it too
-    EXPECT_EQ(games->model()->index(0, 1).data().toString(), QStringLiteral("top"));
-    EXPECT_EQ(games->model()->index(0, 2).data().toString(), QStringLiteral("Alice"));
+    EXPECT_EQ(games->model()->index(0, 2).data().toString(), QString());
+    tree->setCurrentItem(item(QStringLiteral("top"))); // a game with players shows them
+    EXPECT_EQ(games->model()->index(0, 1).data().toString(), QStringLiteral("Alice"));
     tree->setCurrentItem(item(QStringLiteral("Bird Opening")));
     const auto* players = window.findChild<QLabel*>(QStringLiteral("previewPlayers"));
     ASSERT_NE(players, nullptr);
@@ -315,14 +371,26 @@ TEST_F(LibraryTreeTest, EveryGameRowStartsWithItsFileName) {
 }
 
 TEST_F(LibraryTreeTest, ALongFileNameDoesNotWidenTheWindow) {
-    const int before = window.minimumSizeHint().width();
+    // Measure the layouts as they are now (layouts cache their minimum sizes).
+    const auto minimumWidth = [&] {
+        for (auto* layout : window.findChildren<QLayout*>()) {
+            layout->invalidate();
+        }
+        return window.minimumSizeHint().width();
+    };
     const QString name = QStringLiteral("Symmetrical English - 2.g3 Nc6, Early d4 and b-pawn "
                                         "systems - after 5.a3 + after 5.Nf3 - Training version");
-    QSignalSpy scanned(&window.library(), &Library::scanned);
-    // No players, as in an opening file: the tab is named after the file too.
+    // No players, as in an opening file: the tab is named after the file too. The same game
+    // in a file with a short name, to compare against.
+    writeFile(folder.filePath(QStringLiteral("Short.pgn")),
+              "[White \"?\"]\n[Black \"?\"]\n\n1. e4 *\n");
     writeFile(folder.filePath(name + QStringLiteral(".pgn")),
               "[White \"?\"]\n[Black \"?\"]\n\n1. e4 *\n");
-    ASSERT_TRUE(scanned.wait(5000));
+    ASSERT_TRUE(QTest::qWaitFor(
+        [&] { return item(name) != nullptr && item(QStringLiteral("Short")) != nullptr; }, 5000));
+    tree->setCurrentItem(item(QStringLiteral("Short")));
+    QApplication::processEvents();
+    const int before = minimumWidth();
     tree->setCurrentItem(item(name));
     QApplication::processEvents();
     // The heading over the game list is cut off with "…" (the tooltip has all of it) ...
@@ -330,7 +398,7 @@ TEST_F(LibraryTreeTest, ALongFileNameDoesNotWidenTheWindow) {
     ASSERT_NE(title, nullptr);
     EXPECT_TRUE(title->text().endsWith(QStringLiteral("…")));
     EXPECT_EQ(title->toolTip(), name);
-    EXPECT_EQ(window.minimumSizeHint().width(), before);
+    EXPECT_LE(minimumWidth(), before);
 
     // ... and so is the tab of a game opened from it, so the tab bar is never squeezed.
     QSignalSpy opened(&window, &MainWindow::fileOpened);
@@ -380,8 +448,9 @@ TEST_F(LibraryTreeTest, ArrowKeysActOnWhatWasClicked) {
     QTest::mouseClick(back, Qt::LeftButton);
     EXPECT_EQ(preview->text(), QStringLiteral("After 1… e5"));
     EXPECT_TRUE(board->hasFocus());
-    EXPECT_TRUE(
-        board->parentWidget()->parentWidget()->parentWidget()->property("focused").toBool());
+    const auto* detailCard =
+        window.findChild<QStackedWidget*>(QStringLiteral("libraryDetail"))->parentWidget();
+    EXPECT_TRUE(detailCard->property("focused").toBool());
     QTest::keyClick(board, Qt::Key_Left);
     EXPECT_EQ(preview->text(), QStringLiteral("After 1. c4"));
     QTest::keyClick(board, Qt::Key_Left);
@@ -414,6 +483,304 @@ TEST_F(DocumentsTest, SavingOneGameLeavesTheOthersAlone) {
     EXPECT_EQ((*games)[0].mainLine().size(), 3U); // untouched
     EXPECT_EQ((*games)[1].mainLine().size(), 5U); // 1. c4 e5 2. Nc3 Nc6
     EXPECT_EQ((*games)[2].header("White"), "Third");
+}
+
+/// Answers the next message box with `button` (it blocks the test otherwise).
+void answerNextMessageBox(QMessageBox::StandardButton button) {
+    QTimer::singleShot(0, [button] {
+        for (QWidget* widget : QApplication::topLevelWidgets()) {
+            if (const auto* box = qobject_cast<QMessageBox*>(widget); box && box->isVisible()) {
+                box->button(button)->click();
+                return;
+            }
+        }
+    });
+}
+
+TEST_F(DocumentsTest, FileTypesShowInTheLibraryAndFilterIt) {
+    writeFile(path("najdorf.pgn"), "[FileType \"Repertoire\"]\n[Orientation \"black\"]\n\n"
+                                   "1. e4 c5 *\n");
+    writeFile(path("london.pgn"), "[FileType \"Repertoire\"]\n[Orientation \"white\"]\n\n"
+                                  "1. d4 d5 2. Bf4 *\n");
+    writeFile(path("tactics.pgn"), "[FileType \"Puzzle\"]\n\n1. e4 *\n");
+    writeFile(path("games.pgn"), kOneGame);
+    scanLibrary();
+    window.showSection(MainWindow::Section::Library);
+    auto* tree = window.findChild<QTreeWidget*>(QStringLiteral("libraryFiles"));
+    ASSERT_NE(tree, nullptr);
+    ASSERT_EQ(tree->topLevelItemCount(), 4); // each file once, where it is
+    std::map<QString, QTreeWidgetItem*> items;
+    for (int i = 0; i < 4; ++i) {
+        items[tree->topLevelItem(i)->text(0)] = tree->topLevelItem(i);
+    }
+    // Each type its own icon (a repertoire's side is in its tooltip, not its icon).
+    QSet<QByteArray> icons; // the icons' pixels
+    for (const auto& [name, item] : items) {
+        QByteArray pixels;
+        QBuffer buffer(&pixels);
+        buffer.open(QIODevice::WriteOnly);
+        item->icon(0).pixmap(16, 16).save(&buffer, "PNG");
+        icons.insert(pixels);
+    }
+    EXPECT_EQ(icons.size(), 3);
+    EXPECT_TRUE(items[QStringLiteral("najdorf")]->toolTip(0).endsWith(u"Repertoire for Black"));
+
+    // The type filter: only repertoires.
+    auto* filter = window.findChild<QComboBox*>(QStringLiteral("libraryTypeFilter"));
+    ASSERT_NE(filter, nullptr);
+    filter->setCurrentIndex(
+        filter->findData(static_cast<int>(kiebitz::library::FileKind::Repertoire)));
+    EXPECT_FALSE(items[QStringLiteral("najdorf")]->isHidden());
+    EXPECT_FALSE(items[QStringLiteral("london")]->isHidden());
+    EXPECT_TRUE(items[QStringLiteral("games")]->isHidden());
+    EXPECT_TRUE(items[QStringLiteral("tactics")]->isHidden());
+    filter->setCurrentIndex(0); // all files
+    EXPECT_FALSE(items[QStringLiteral("games")]->isHidden());
+    // The search over the file names.
+    auto* search = window.findChild<QLineEdit*>(QStringLiteral("libraryFileSearch"));
+    ASSERT_NE(search, nullptr);
+    search->setText(QStringLiteral("LON"));
+    EXPECT_FALSE(items[QStringLiteral("london")]->isHidden());
+    EXPECT_TRUE(items[QStringLiteral("najdorf")]->isHidden());
+    search->clear();
+    // The tree is rebuilt when the search is cleared: look the items up again.
+    const auto find = [&](const QString& name) {
+        return tree->findItems(name, Qt::MatchExactly | Qt::MatchRecursive).value(0);
+    };
+    EXPECT_FALSE(find(QStringLiteral("najdorf"))->isHidden());
+
+    // A puzzle file: who is to move, not White and Black.
+    tree->setCurrentItem(find(QStringLiteral("tactics")));
+    auto* games = window.findChild<QTableView*>(QStringLiteral("libraryGames"));
+    ASSERT_NE(games, nullptr);
+    EXPECT_EQ(games->model()->headerData(2, Qt::Horizontal).toString(), QStringLiteral("TO MOVE"));
+    EXPECT_EQ(games->model()->index(0, 2).data().toString(), QStringLiteral("White"));
+
+    // A repertoire file: its overview instead of a games table.
+    auto* view = window.findChild<kiebitz::app::LibraryView*>();
+    ASSERT_NE(view, nullptr);
+    tree->setCurrentItem(find(QStringLiteral("najdorf")));
+    ASSERT_TRUE(
+        QTest::qWaitFor([&] { return view->repertoireStats().value(0) == u"1"; }, 5000)); // 1... c5
+    EXPECT_EQ(view->repertoireStats(),
+              (QStringList{QStringLiteral("1"), QStringLiteral("1"), QStringLiteral("move 1")}));
+    ASSERT_TRUE(QTest::qWaitFor([&] { return !view->repertoireOpenings().isEmpty(); }, 5000));
+    // The one position to practise is after 1. e4 (your answer: 1... c5).
+    EXPECT_EQ(view->repertoireOpenings(),
+              QStringList{QStringLiteral("King's Pawn Game  1 position")});
+    if (const QString dir = qEnvironmentVariable("KIEBITZ_SNAPSHOT_DIR"); !dir.isEmpty()) {
+        window.resize(1200, 760);
+        QTest::qWait(100);
+        window.grab().save(QDir(dir).filePath(QStringLiteral("library-repertoire.png")));
+        tree->setCurrentItem(find(QStringLiteral("games")));
+        QTest::qWait(300);
+        window.grab().save(QDir(dir).filePath(QStringLiteral("library-games.png")));
+    }
+}
+
+TEST_F(DocumentsTest, SettingTheTypeOfAFolder) {
+    QDir(folder.path()).mkpath(QStringLiteral("Black Solid"));
+    writeFile(path("Black Solid/QGA.pgn"), "1. d4 d5 2. c4 dxc4 *\n");
+    writeFile(path("Black Solid/Sicilian.pgn"), "1. e4 c5 2. Nf3 Nc6 *\n");
+    scanLibrary();
+    auto& store = window.repertoires();
+    const QStringList paths{path("Black Solid/QGA.pgn"), path("Black Solid/Sicilian.pgn")};
+    emit window.findChild<kiebitz::app::LibraryView*>()->fileKindRequested(
+        paths, static_cast<int>(kiebitz::library::FileKind::Repertoire), 1);
+    ASSERT_TRUE(QTest::qWaitFor([&] { return store.files(core::Color::Black).size() == 2; }, 5000));
+    for (const QString& file : paths) {
+        const auto games = pgn::indexGames(readFile(file));
+        EXPECT_EQ(games.front().header("FileType"), "Repertoire");
+        EXPECT_EQ(games.front().header("Orientation"), "black");
+    }
+    // Back to games: the type changes, the side header stays.
+    emit window.findChild<kiebitz::app::LibraryView*>()->fileKindRequested(
+        paths, static_cast<int>(kiebitz::library::FileKind::Game), -1);
+    ASSERT_TRUE(QTest::qWaitFor([&] { return store.files(core::Color::Black).isEmpty(); }, 5000));
+}
+
+TEST_F(DocumentsTest, RepertoireFileOpensWithItsTreeFromItsSide) {
+    writeFile(
+        path("najdorf.pgn"),
+        "[Event \"Najdorf\"]\n[FileType \"Repertoire\"]\n[Orientation \"black\"]\n\n"
+        "1. e4 c5 2. Nf3 d6 { The Najdorf move order } 3. d4 (3. Bb5+ { Rossolimo-like } Bd7) "
+        "cxd4 4. Nxd4 Nf6 5. Nc3 a6 *\n");
+    writeFile(path("games.pgn"), kOneGame);
+    scanLibrary();
+    open(path("najdorf.pgn"));
+    const QString text = notation->plainText();
+    EXPECT_TRUE(text.contains(QStringLiteral("The Najdorf move order")));
+    EXPECT_TRUE(text.contains(QStringLiteral("Rossolimo-like")));
+    EXPECT_TRUE(board->isFlipped());
+    // The Repertoire tab is about practice here.
+    auto* panel = window.findChild<kiebitz::app::RepertoirePanel*>();
+    ASSERT_NE(panel, nullptr);
+    EXPECT_TRUE(panel->practiceText().contains(QStringLiteral("positions to practice")));
+    // Info shows what a repertoire has: no players, but the side it is for.
+    auto* white = window.findChild<QLineEdit*>(QStringLiteral("headerWhite"));
+    auto* side = window.findChild<QComboBox*>(QStringLiteral("headerOrientation"));
+    ASSERT_NE(white, nullptr);
+    ASSERT_NE(side, nullptr);
+    EXPECT_TRUE(white->isHidden());
+    EXPECT_FALSE(side->isHidden());
+    EXPECT_EQ(side->currentText(), QStringLiteral("Black"));
+    side->setCurrentIndex(0);
+    emit side->activated(0); // For: White, and the board turns
+    EXPECT_FALSE(board->isFlipped());
+    // A game without [Orientation] goes back to the side chosen before, and has players.
+    open(path("games.pgn"));
+    EXPECT_FALSE(board->isFlipped());
+    EXPECT_FALSE(white->isHidden());
+    EXPECT_TRUE(side->isHidden());
+}
+
+TEST_F(DocumentsTest, GamesAreCheckedAgainstEveryRepertoireFile) {
+    writeFile(path("Open Games.pgn"), "[FileType \"Repertoire\"]\n[Orientation \"white\"]\n\n"
+                                      "1. e4 e5 2. Nf3 Nc6 3. Bb5 *\n");
+    writeFile(path("Queens Gambit.pgn"), "[FileType \"Repertoire\"]\n[Orientation \"white\"]\n\n"
+                                         "1. d4 d5 2. c4 *\n");
+    writeFile(path("game.pgn"), "[White \"Me\"]\n[Black \"You\"]\n\n1. e4 e5 2. Nf3 d6 3. d4 *\n");
+    scanLibrary();
+    auto& store = window.repertoires();
+    ASSERT_TRUE(QTest::qWaitFor([&] { return store.get(core::Color::White) != nullptr; }, 5000));
+    auto* panel = window.findChild<kiebitz::app::RepertoirePanel*>();
+    ASSERT_NE(panel, nullptr);
+
+    open(path("game.pgn"));
+    action(window, QStringLiteral("Go to Start"))->trigger();
+    play("e4"); // the tab follows the current move: a new variation here is fine
+    action(window, QStringLiteral("Go to End"))->trigger();
+    EXPECT_EQ(panel->statusText(core::Color::White),
+              QStringLiteral("2… d6 isn't covered yet · Open Games"));
+    emit panel->addLineRequested(core::Color::White);
+    QTest::qWait(200); // the write runs in the background
+    EXPECT_TRUE(panel->statusText(core::Color::White).startsWith(u"In book · Open Games"));
+    const auto saved = pgn::parseGame(readFile(path("Open Games.pgn")));
+    ASSERT_TRUE(saved.ok());
+    kiebitz::repertoire::Tree check(core::Color::White);
+    check.add(*saved, 0, 0);
+    core::Position position;
+    std::vector<core::Move> line;
+    for (const char* san : {"e4", "e5", "Nf3", "d6", "d4"}) {
+        line.push_back(position.parseSan(san).value());
+        position.play(line.back());
+    }
+    EXPECT_FALSE(check.follow(core::Position(), line).left); // the whole game line is in it
+
+    // A different move of ours where the repertoire has one: only added if confirmed.
+    action(window, QStringLiteral("Go to Start"))->trigger();
+    play("c4");
+    EXPECT_EQ(panel->statusText(core::Color::White),
+              QStringLiteral("Left the book with 1. c4 · Open Games and 1 more plays e4 or d4"));
+    const std::string before = readFile(path("Open Games.pgn"));
+    answerNextMessageBox(QMessageBox::Cancel);
+    emit panel->addLineRequested(core::Color::White);
+    EXPECT_EQ(readFile(path("Open Games.pgn")), before);
+}
+
+TEST_F(DocumentsTest, PracticingARepertoireFile) {
+    writeFile(path("rep.pgn"), "[FileType \"Repertoire\"]\n[Orientation \"white\"]\n\n"
+                               "1. e4 { Best by test [%clk 0:05:00] } e5 2. Nf3 *\n");
+    scanLibrary();
+    open(path("rep.pgn"));
+    auto* panel = window.findChild<kiebitz::app::RepertoirePanel*>();
+    ASSERT_NE(panel, nullptr);
+    EXPECT_EQ(panel->practiceText(), QStringLiteral("2 positions to practice"));
+    auto* status = window.findChild<QLabel*>(QStringLiteral("practiceStatus"));
+    ASSERT_NE(status, nullptr);
+
+    emit panel->practiceRequested(false, 15);
+    EXPECT_FALSE(notation->isVisible()); // the moves would give the answers away
+    EXPECT_TRUE(status->isVisible());
+    EXPECT_EQ(fen(), core::Position().fen());
+
+    play("d4"); // wrong: taken back, the right move shown with the file's explanation
+    EXPECT_TRUE(status->text().contains(QStringLiteral("e4")));
+    EXPECT_EQ(fen(), core::Position().fen());
+    EXPECT_EQ(status->text(), QStringLiteral("Not quite. The repertoire plays 1. e4"));
+    const auto* why = window.findChild<QLabel*>(QStringLiteral("practiceWhy"));
+    ASSERT_NE(why, nullptr);
+    EXPECT_EQ(why->text(), QStringLiteral("Best by test"));
+    EXPECT_TRUE(why->isVisible());
+    if (const QString dir = qEnvironmentVariable("KIEBITZ_SNAPSHOT_DIR"); !dir.isEmpty()) {
+        window.resize(1200, 760);
+        QTest::qWait(100);
+        window.grab().save(QDir(dir).filePath(QStringLiteral("practice-mistake.png")));
+    }
+    const auto* summary = window.findChild<QLabel*>(QStringLiteral("practiceSummary"));
+    play("e4"); // right: the opponent answers with the repertoire's reply
+    ASSERT_TRUE(QTest::qWaitFor([&] { return fen().find(" w ") != std::string::npos; }, 3000));
+    play("Nf3");
+    ASSERT_TRUE(QTest::qWaitFor([&] { return status->text().startsWith(u"Done"); }, 3000));
+    const auto* progress = window.findChild<QLabel*>(QStringLiteral("practiceProgress"));
+    EXPECT_TRUE(progress->text().contains(QStringLiteral("1 mistake")));
+    EXPECT_TRUE(summary->text().contains(QStringLiteral("To look at again: 1. e4")));
+    if (const QString dir = qEnvironmentVariable("KIEBITZ_SNAPSHOT_DIR"); !dir.isEmpty()) {
+        window.resize(1200, 760);
+        QTest::qWait(100);
+        window.grab().save(QDir(dir).filePath(QStringLiteral("practice-done.png")));
+    }
+    // Stop: the file again, untouched.
+    QTest::mouseClick(window.findChild<QPushButton*>(QStringLiteral("practiceStop")),
+                      Qt::LeftButton);
+    EXPECT_TRUE(notation->isVisible());
+    EXPECT_EQ(readFile(path("rep.pgn")).find("d4"), std::string::npos);
+}
+
+TEST_F(DocumentsTest, PracticeStartsFromTheLibrary) {
+    writeFile(path("rep.pgn"), "[FileType \"Repertoire\"]\n[Orientation \"white\"]\n\n"
+                               "1. e4 e5 2. Nf3 *\n");
+    scanLibrary();
+    window.showSection(MainWindow::Section::Library);
+    auto* tree = window.findChild<QTreeWidget*>(QStringLiteral("libraryFiles"));
+    tree->setCurrentItem(tree->findItems(QStringLiteral("rep"), Qt::MatchExactly).value(0));
+    auto* practice = window.findChild<QPushButton*>(QStringLiteral("libraryPractice"));
+    ASSERT_NE(practice, nullptr);
+    QTest::mouseClick(practice, Qt::LeftButton);
+    const auto* status = window.findChild<QLabel*>(QStringLiteral("practiceStatus"));
+    ASSERT_TRUE(QTest::qWaitFor([&] { return status->isVisible(); }, 5000));
+    EXPECT_EQ(fen(), core::Position().fen()); // from the start, your move
+}
+
+TEST(NewFile, TypeAndSideGoIntoTheHeaders) {
+    using kiebitz::app::NewFileDialog;
+    const std::string empty =
+        NewFileDialog::fileText(QStringLiteral("Najdorf"), kiebitz::library::FileKind::Repertoire,
+                                core::Color::Black, QString());
+    const auto games = pgn::indexGames(empty);
+    ASSERT_EQ(games.size(), 1U);
+    EXPECT_EQ(games[0].header("Event"), "Najdorf");
+    EXPECT_EQ(games[0].header("FileType"), "Repertoire");
+    EXPECT_EQ(games[0].header("Orientation"), "black");
+    // Given PGN keeps its moves and gets the type.
+    const std::string given =
+        NewFileDialog::fileText(QStringLiteral("x"), kiebitz::library::FileKind::Puzzle,
+                                core::Color::White, QStringLiteral("[White \"A\"]\n\n1. e4 e5 *"));
+    const auto parsed = pgn::parseGame(given);
+    ASSERT_TRUE(parsed.ok());
+    EXPECT_EQ(parsed->header("FileType"), "Puzzle");
+    EXPECT_EQ(parsed->header("Orientation"), "");
+    EXPECT_EQ(parsed->mainLine().size(), 3U);
+}
+
+TEST_F(DocumentsTest, MoveListInRows) {
+    writeFile(path("rows.pgn"),
+              "[Result \"*\"]\n\n1. d4 Nf6 { Flexible } 2. c4 (2. Bg5 Ne4) e6 *\n");
+    open(path("rows.pgn"));
+    QTest::mouseClick(window.findChild<QPushButton*>(QStringLiteral("notationRows")),
+                      Qt::LeftButton);
+    EXPECT_TRUE(notation->rows());
+    const QString text = notation->plainText().replace(QChar(0xA0), QLatin1Char(' '));
+    // Rows, the comment as its own paragraph, the variation as a block, then a new row for e6.
+    EXPECT_EQ(text, QStringLiteral("1 d4 Nf6\nFlexible\n2 c4\n2. Bg5 Ne4\n2 … e6"));
+    if (const QString dir = qEnvironmentVariable("KIEBITZ_SNAPSHOT_DIR"); !dir.isEmpty()) {
+        window.resize(1200, 760);
+        QTest::qWait(100);
+        window.grab().save(QDir(dir).filePath(QStringLiteral("notation-rows.png")));
+    }
+    QTest::mouseClick(window.findChild<QPushButton*>(QStringLiteral("notationText")),
+                      Qt::LeftButton);
+    EXPECT_FALSE(notation->rows());
 }
 
 TEST_F(DocumentsTest, ChangesToAFileSaveThemselves) {

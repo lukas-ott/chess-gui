@@ -2,6 +2,7 @@
 # depend on Qt; listing and watching the folder live in app/library.
 
 add_library(kiebitz_library
+    src/file_kind.cpp
     src/index_cache.cpp)
 add_library(kiebitz::library ALIAS kiebitz_library)
 

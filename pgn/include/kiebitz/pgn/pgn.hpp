@@ -4,6 +4,7 @@
 #include "kiebitz/core/result.hpp"
 
 #include <cstddef>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -41,6 +42,12 @@ struct GameEntry {
 
 /// Reads every game in a text (indexGames + parseGame). For tests and small files.
 [[nodiscard]] core::Result<std::vector<core::Game>> parseAll(std::string_view text);
+
+/// Sets a header in every game of a PGN text, changing nothing else: an existing header gets the
+/// new value where it is, a missing one goes after the game's last header. `std::nullopt`
+/// removes the header. Used to mark a file as a repertoire without rewriting its moves.
+[[nodiscard]] std::string setHeaderInAllGames(std::string_view text, std::string_view name,
+                                              std::optional<std::string_view> value);
 
 /// Writes a game as standard PGN: headers, a blank line, then the moves wrapped at 80 columns,
 /// with variations, comments (arrows and marks as [%cal]/[%csl]) and NAGs as $n.

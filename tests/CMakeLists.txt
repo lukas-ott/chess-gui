@@ -8,11 +8,14 @@ add_executable(kiebitz_tests
     test_library.cpp
     test_perft.cpp
     test_pgn.cpp
+    test_repertoire.cpp
     test_san.cpp
     test_types.cpp
     test_version.cpp)
-target_link_libraries(kiebitz_tests PRIVATE kiebitz::engine kiebitz::library
+target_link_libraries(kiebitz_tests PRIVATE kiebitz::engine kiebitz::library kiebitz::repertoire
     GTest::gtest_main)
+target_compile_definitions(kiebitz_tests PRIVATE
+    KIEBITZ_OPENINGS_TSV="${PROJECT_SOURCE_DIR}/app/resources/openings/openings.tsv")
 kiebitz_set_warnings(kiebitz_tests)
 
 gtest_discover_tests(kiebitz_tests DISCOVERY_TIMEOUT 30)

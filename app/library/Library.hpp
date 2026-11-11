@@ -6,6 +6,7 @@
 #include <QFileSystemWatcher>
 #include <QObject>
 #include <QString>
+#include <QStringList>
 #include <QTimer>
 
 #include <atomic>
@@ -59,6 +60,8 @@ public:
     void setFolder(const QString& folder);
     [[nodiscard]] const QString& folder() const noexcept { return m_folder; }
     [[nodiscard]] const std::vector<LibraryFile>& files() const noexcept { return m_files; }
+    /// Every subfolder (relative paths), also those without PGN files.
+    [[nodiscard]] const QStringList& folders() const noexcept { return m_folders; }
     [[nodiscard]] bool isScanning() const noexcept { return m_scanning; }
 
     /// Scans again now (normally automatic).
@@ -82,6 +85,7 @@ private:
 
     QString m_folder;
     std::vector<LibraryFile> m_files;
+    QStringList m_folders;
     QFileSystemWatcher m_watcher;
     QTimer m_debounce; ///< folders change in bursts (a save is several events): wait a moment
     bool m_scanning = false;

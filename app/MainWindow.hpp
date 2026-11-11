@@ -16,6 +16,7 @@ class QKeySequence;
 class QLabel;
 class QMenu;
 class QPlainTextEdit;
+class QProgressBar;
 class QPushButton;
 class QShortcut;
 class QSplitter;
@@ -23,6 +24,10 @@ class QStackedWidget;
 class QTabBar;
 class QTabWidget;
 class QVBoxLayout;
+
+namespace kiebitz::repertoire {
+class Drill;
+} // namespace kiebitz::repertoire
 
 namespace kiebitz::app {
 
@@ -36,6 +41,8 @@ class GameInfoPanel;
 class Library;
 class LibraryView;
 class NotationView;
+class RepertoirePanel;
+class RepertoireStore;
 
 /// The main window. Document tabs along the top: the Library (always first) and one tab per
 /// open game. A game tab shows the board on the left and, on the right, the moves (notation,
@@ -64,6 +71,7 @@ public:
     /// Saves the current game to a path (for "Save As" and tests).
     void saveCurrentAs(const QString& path);
     [[nodiscard]] Library& library() { return *m_library; }
+    [[nodiscard]] RepertoireStore& repertoires() { return *m_repertoires; }
     [[nodiscard]] EngineRegistry& engines() { return *m_engineRegistry; }
     void showSection(Section section);
     [[nodiscard]] Section section() const noexcept { return m_section; }
@@ -133,6 +141,39 @@ private:
     void setUpPosition();
     void openFromText(const QString& text);
 
+    /// File › New File: a name, a type and maybe PGN; created in the Library and opened.
+    /// `folder`: where (absolute); empty = the Library folder.
+    void newFile(const QString& folder = {});
+    /// Writes a new file into `folder` (empty = the Library folder; a free name) and opens it.
+    /// Empty on success, else the error.
+    QString createFile(const QString& name, const std::string& text, const QString& folder = {});
+
+    // Repertoires
+    /// Adds a line to a side's repertoire; asks before adding a second answer. False if
+    /// cancelled.
+    bool addLineAsking(core::Color side, const std::vector<core::Move>& line);
+
+    // Practice (a repertoire file: the app plays the opponent, you play your moves)
+    [[nodiscard]] QWidget* buildPracticeCard();
+    void startPractice(bool fromHere, int depth);
+    void stopPractice();
+    /// The status line; `mood` > 0 right (a tick), < 0 wrong (a cross), 0 neither.
+    void setPracticeStatus(const QString& text, int mood);
+    void setPracticeWhy(const QString& text);
+    /// After a move in practice: the opponent's reply, the end of a line, or the end.
+    void practiceStep();
+    void showPracticeNode(core::NodeId id, bool animate, std::vector<core::Arrow> arrows = {});
+    void updatePracticeProgress();
+    [[nodiscard]] GameDocument* practiceDocument() const;
+    /// A file changed under open games (the repertoire store edited it): they reload from it.
+    void reloadGamesOf(const QString& path, const std::shared_ptr<PgnFile>& file);
+    /// The moves from the start to `id`.
+    [[nodiscard]] static std::vector<core::Move> lineTo(const core::Game& game, core::NodeId id);
+    void updateMovesTitle();
+    /// The board from the side a game's [Orientation] header names (repertoires and studies
+    /// have one); other games keep the side the user chose last.
+    void orientBoard(const GameDocument& document);
+
     // Showing the game
     void showNode(core::NodeId id, bool animate);
     void showDocument();
@@ -177,6 +218,26 @@ private:
     EvalBar* m_evalBar = nullptr; ///< beside the board while the engine runs
     EnginePanel* m_enginePanel = nullptr;
     NotationView* m_notation = nullptr;
+    RepertoireStore* m_repertoires = nullptr;
+    RepertoirePanel* m_repertoirePanel = nullptr; ///< the Repertoire tab beside a game
+    QAction* m_flipAction = nullptr;
+    QLabel* m_movesTitle = nullptr;         ///< "MOVES · Sicilian Defense: Najdorf Variation"
+    QStackedWidget* m_movesStack = nullptr; ///< 0 = the moves, 1 = practice
+    std::unique_ptr<repertoire::Drill> m_drill;
+    int m_drillDocument = -1; ///< the id of the document being practised
+    int m_drillRun = 0;       ///< bumped on every start and stop: late timers see it changed
+    bool m_drillFromHere = false;
+    int m_drillDepth = 0;
+    QString m_practiceOnOpen; ///< a file to practise as soon as its tab has opened
+    core::NodeId m_drillStart = core::Game::root();
+    QLabel* m_practiceTitle = nullptr;
+    QLabel* m_practiceMark = nullptr; ///< a tick or a cross
+    QLabel* m_practiceStatus = nullptr;
+    QLabel* m_practiceWhy = nullptr; ///< the file's comment on the move you missed
+    QProgressBar* m_practiceBar = nullptr;
+    QLabel* m_practiceProgress = nullptr;
+    QLabel* m_practiceSummary = nullptr;
+    QPushButton* m_practiceAgain = nullptr;
     QPlainTextEdit* m_commentBox = nullptr;
     QLabel* m_commentTitle = nullptr;
     GameInfoPanel* m_info = nullptr;

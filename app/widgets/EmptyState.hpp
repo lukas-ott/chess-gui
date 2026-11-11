@@ -19,12 +19,16 @@ public:
     EmptyState(IconKind icon, const QString& title, const QString& hint, const AppStyle& style,
                QWidget* parent = nullptr);
 
+    void setText(const QString& title, const QString& hint);
+
 private:
     void updateIcon();
 
     IconKind m_kind;
     const AppStyle& m_style;
     QLabel* m_icon = nullptr;
+    QLabel* m_title = nullptr;
+    QLabel* m_hint = nullptr;
 };
 
 } // namespace kiebitz::app

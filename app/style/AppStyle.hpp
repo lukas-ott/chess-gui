@@ -31,6 +31,8 @@ public:
         QColor dimmed; ///< disabled text
         QColor accent;
         QColor accentText; ///< text on accent-coloured backgrounds
+        QColor good;       ///< right (a correct answer in practice)
+        QColor bad;        ///< wrong (a mistake in practice)
     };
 
     [[nodiscard]] static Colors darkColors();

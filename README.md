@@ -8,15 +8,15 @@ Qt 6 Widgets.
 It opens instantly, keeps your PGN files as the source of truth, and focuses on building
 and training opening repertoires.
 
-> Status: **M5, library cache and fast move list.** A sidebar switches between the board (games in tabs),
-> the Library and the Engines page. The Library shows every PGN file in your library folder
-> (`~/Documents/Kiebitz` by default) with a game list and preview. On the board you can edit
-> variations, comments and NAGs, edit headers, save back into the file, and copy or paste PGN
-> and FEN. The Engines page downloads the latest Stockfish in one click (or uses the one on your
-> Mac, or any UCI engine); the Engine tab analyses the board with it or the Lichess cloud: up to
-> 5 lines, an eval bar and best-move arrows, and a click on a move plays the line into the game.
-> Space starts and stops it. The Library keeps a cache of every file's game index, so it lists
-> even large collections instantly, and the move list stays fast with 50,000-position repertoires.
+> Status: **M6, repertoires; M7, practice.** A sidebar switches between the board (games in
+> tabs), the Library and the Engines page. The Library shows every PGN file in your library folder
+> (`~/Documents/Kiebitz` by default) as a tree, searchable and filterable by type (game,
+> repertoire, tournament, puzzle, other). A file shows its games and a preview; a repertoire file
+> an overview (positions, lines, openings) with a Practice button. On the board you can edit
+> variations, comments and NAGs (as flowing text or in rows), and changes save themselves. A repertoire file opens from
+> its side; its Repertoire tab counts the positions to practise and starts a drill in which the app
+> plays the opponent. Other games are checked against all your repertoire files. The Engine tab
+> analyses with Stockfish (one-click download) or the Lichess cloud.
 
 ## Requirements (macOS)
 
@@ -79,7 +79,9 @@ pgn/      Reading, indexing and writing PGN files (fast game index, round-trip s
 engine/   The UCI protocol (engine output, scores, lines as moves) and picking the Stockfish
           download for this Mac. No Qt.
 library/  The library's cache of game indexes (SQLite), so unchanged files are never read
-          again. No Qt.
+          again, and file types. No Qt.
+repertoire/ Repertoire trees (games merged by position), practice drills and opening names.
+          No Qt.
 app/      Qt Widgets application: main window, board/ (board widget, themes, piece sets),
           library/ (library folder scan and Library tab), document/ (open games, background
           file loading and saving), notation/ (move list editor), panels/ (game info),
@@ -93,7 +95,7 @@ scripts/  Dev scripts (startup timing).
 cmake/    Compiler options and pinned dependencies.
 ```
 
-Planned modules (`repertoire/`, `gamedb/`, `online/`) are added
+Planned modules (`gamedb/`, `online/`) are added
 with their milestones.
 
 ## Roadmap
