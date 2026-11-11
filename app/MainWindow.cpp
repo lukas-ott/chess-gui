@@ -15,6 +15,7 @@
 #include "library/NewFileDialog.hpp"
 #include "notation/NotationView.hpp"
 #include "panels/GameInfoPanel.hpp"
+#include "repertoire/PracticeStats.hpp"
 #include "repertoire/RepertoirePanel.hpp"
 #include "repertoire/RepertoireStore.hpp"
 #include "style/AppStyle.hpp"
@@ -171,6 +172,16 @@ MainWindow::MainWindow(AppStyle& style, QWidget* parent)
     // Repertoires: built from the Library's marked files. Before it edits a file, open games
     // write their pending changes into it; after, they reload from it.
     m_repertoires = new RepertoireStore(*m_library, this);
+    // Practice statistics: your mistakes, per position, kept on this Mac.
+    m_practiceStats = new PracticeStats({}, this);
+    connect(m_practiceStats, &PracticeStats::mistakesChanged, this, [this](core::Color side) {
+        if (const GameDocument* d = doc();
+            d != nullptr && d->file &&
+            RepertoireStore::kindOf(*d->file) == library::FileKind::Repertoire &&
+            RepertoireStore::sideOf(*d->file) == side) {
+            m_repertoirePanel->setMistakes(m_practiceStats->mistakes(side));
+        }
+    });
     m_repertoires->setBeforeEdit([this] { autosave(); });
     m_repertoires->setOpenText([this](const QString& path) -> std::shared_ptr<PgnFile> {
         for (const auto& d : m_documents) {
@@ -793,7 +804,9 @@ QWidget* MainWindow::buildPanelsCard() {
     });
     connect(m_repertoirePanel, &RepertoirePanel::jumpRequested, this, &MainWindow::jumpToLine);
     connect(m_repertoirePanel, &RepertoirePanel::practiceRequested, this,
-            &MainWindow::startPractice);
+            [this](bool fromHere, int depth) { startPractice(fromHere, depth); });
+    connect(m_repertoirePanel, &RepertoirePanel::mistakesRequested, this,
+            [this] { startPractice(false, 0, true); });
     panels->addTab(m_repertoirePanel, tr("Repertoire"));
     m_info = new GameInfoPanel;
     connect(m_info, &GameInfoPanel::headerEdited, this, &MainWindow::onHeaderEdited);
@@ -1586,8 +1599,18 @@ void MainWindow::showNode(NodeId id, bool animate) {
     const bool repertoireFile =
         d->file && RepertoireStore::kindOf(*d->file) == library::FileKind::Repertoire;
     m_repertoirePanel->setViewSide(m_board->isFlipped() ? core::Color::Black : core::Color::White);
-    m_repertoirePanel->setGame(&d->game, id, repertoireFile,
-                               d->file ? RepertoireStore::sideOf(*d->file) : core::Color::White);
+    if (repertoireFile) { // your mistakes in it (read once, then kept up to date)
+        const core::Color side = RepertoireStore::sideOf(*d->file);
+        bool& asked = m_mistakesAsked[side == core::Color::White ? 0 : 1];
+        if (m_practiceStats->mistakes(side) == nullptr && !asked) {
+            asked = true;
+            m_practiceStats->load(side);
+        }
+    }
+    m_repertoirePanel->setGame(
+        &d->game, id, repertoireFile,
+        d->file ? RepertoireStore::sideOf(*d->file) : core::Color::White,
+        repertoireFile ? m_practiceStats->mistakes(RepertoireStore::sideOf(*d->file)) : nullptr);
     updateMovesTitle();
 }
 
@@ -1785,7 +1808,7 @@ QWidget* MainWindow::buildPracticeCard() {
     m_practiceAgain->setProperty("role", "primary");
     m_practiceAgain->setFocusPolicy(Qt::NoFocus);
     connect(m_practiceAgain, &QPushButton::clicked, this,
-            [this] { startPractice(m_drillFromHere, m_drillDepth); });
+            [this] { startPractice(m_drillFromHere, m_drillDepth, m_drillMistakes); });
     auto* stop = new QPushButton(tr("Stop"));
     stop->setObjectName(QStringLiteral("practiceStop"));
     stop->setProperty("role", "secondary");
@@ -1829,22 +1852,35 @@ GameDocument* MainWindow::practiceDocument() const {
     return d != nullptr && d->id == m_drillDocument ? d : nullptr;
 }
 
-void MainWindow::startPractice(bool fromHere, int depth) {
+void MainWindow::startPractice(bool fromHere, int depth, bool mistakes) {
     const GameDocument* d = doc();
     if (d == nullptr || !d->file) {
         return;
     }
     const core::Color side = RepertoireStore::sideOf(*d->file);
-    if (!m_drill || m_drillDocument != d->id) {
-        m_drillStart = fromHere ? d->current : Game::root();
+    // Mistakes: only the lines through positions you still get wrong (from the start, any depth).
+    const std::unordered_set<std::uint64_t>* focus =
+        mistakes ? m_practiceStats->mistakes(side) : nullptr;
+    if (mistakes && (focus == nullptr || focus->empty())) {
+        statusBar()->showMessage(tr("No mistakes to practise in this file."), 3000);
+        return;
     }
-    m_drillFromHere = fromHere;
-    m_drillDepth = depth;
+    if (!m_drill || m_drillDocument != d->id || mistakes) {
+        m_drillStart = fromHere && !mistakes ? d->current : Game::root();
+    }
+    m_drillFromHere = fromHere && !mistakes;
+    m_drillDepth = mistakes ? 0 : depth;
+    m_drillMistakes = mistakes;
     m_drillDocument = d->id;
     ++m_drillRun;
     m_drill = std::make_unique<repertoire::Drill>(
-        d->game, side, m_drillStart, depth,
-        static_cast<std::uint32_t>(QDateTime::currentMSecsSinceEpoch()));
+        d->game, side, m_drillStart, m_drillDepth,
+        static_cast<std::uint32_t>(QDateTime::currentMSecsSinceEpoch()), focus);
+    if (m_drill->lines() == 0) { // the mistakes aren't in this file
+        m_drill.reset();
+        statusBar()->showMessage(tr("No mistakes to practise in this file."), 3000);
+        return;
+    }
     // Your side at the bottom; the moves (they'd give the answers away) and the engine off.
     m_board->setFlipped(side == core::Color::Black);
     m_evalBar->setFlipped(side == core::Color::Black);
@@ -1853,7 +1889,8 @@ void MainWindow::startPractice(bool fromHere, int depth) {
         key->setEnabled(false);
     }
     m_movesStack->setCurrentIndex(1);
-    m_practiceTitle->setText(tr("PRACTICE") + QStringLiteral("  ·  ") + d->title());
+    m_practiceTitle->setText((mistakes ? tr("PRACTICE MISTAKES") : tr("PRACTICE")) +
+                             QStringLiteral("  ·  ") + d->title());
     m_practiceSummary->clear();
     m_practiceAgain->hide();
     setPracticeStatus({}, 0);
@@ -1904,6 +1941,9 @@ void MainWindow::practiceStep() {
         m_drill->nextLine();
         updatePracticeProgress();
         if (m_drill->finished()) {
+            if (const GameDocument* done = practiceDocument(); done != nullptr && done->file) {
+                m_practiceStats->load(RepertoireStore::sideOf(*done->file)); // mistakes changed
+            }
             // The end: what went wrong, to look at again.
             const GameDocument* d = practiceDocument();
             QStringList missed;
@@ -2008,6 +2048,10 @@ void MainWindow::onMoveMade(core::Move move) {
             return;
         }
         const repertoire::Drill::Answer answer = m_drill->play(move);
+        if (answer.first && d->file) { // the first answer at a position counts
+            m_practiceStats->record(RepertoireStore::sideOf(*d->file), answer.position,
+                                    answer.correct);
+        }
         if (answer.correct) {
             setPracticeStatus(tr("Correct"), 1);
             showPracticeNode(m_drill->current(), true);

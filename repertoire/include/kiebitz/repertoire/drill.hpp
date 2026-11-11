@@ -6,6 +6,8 @@
 #include <optional>
 #include <random>
 #include <set>
+#include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 namespace kiebitz::repertoire {
@@ -18,12 +20,16 @@ namespace kiebitz::repertoire {
 /// lines you haven't finished yet, so each line comes up once per round. A line ends at the end
 /// of the tree or at the depth limit; the drill then starts over from the start node, and it is
 /// finished when every line has been played.
+///
+/// A comment with [%depth n] on a move sets the depth limit for the lines below it (to move n).
+/// With `focus` (positions, by hash), only the lines through one of them where it is your move
+/// are played: "practise my mistakes".
 class Drill {
 public:
     /// `side` is the side you play. `maxDepth` limits the lines to that full move ("12" = up to
     /// and including move 12); 0 means no limit. `seed` makes the opponent's choices repeatable.
     Drill(const core::Game& game, core::Color side, core::NodeId start, int maxDepth,
-          std::uint32_t seed);
+          std::uint32_t seed, const std::unordered_set<std::uint64_t>* focus = nullptr);
 
     /// Positions where you will be asked for a move.
     [[nodiscard]] std::size_t trainable() const noexcept { return m_trainable; }
@@ -44,7 +50,9 @@ public:
 
     struct Answer {
         bool correct = false;
-        core::Move expected; ///< the repertoire's move here
+        core::Move expected;        ///< the repertoire's move here
+        bool first = false;         ///< the first answer at this position on this visit
+        std::uint64_t position = 0; ///< where it was asked (hash)
     };
     /// Your move. Right: the drill goes on. Wrong: it stays, counts a mistake (once per
     /// position and round) and says what was expected.
@@ -64,6 +72,8 @@ private:
     [[nodiscard]] bool isLeaf(core::NodeId node) const { return next(node).empty(); }
     [[nodiscard]] bool hasOpenLine(core::NodeId node) const;
     [[nodiscard]] bool ours(core::NodeId node) const; ///< you are to move at this node
+    /// The depth limit (in plies; 0 = none) for the lines through a node.
+    [[nodiscard]] int limitAt(core::NodeId node) const;
 
     const core::Game& m_game;
     core::Color m_side;
@@ -71,6 +81,7 @@ private:
     int m_maxPly;
     std::mt19937 m_random;
 
+    std::unordered_map<core::NodeId, int> m_limits; ///< nodes with their own limit, and below
     std::set<core::NodeId> m_leaves;
     std::set<core::NodeId> m_done;
     std::size_t m_trainable = 0;

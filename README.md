@@ -13,9 +13,12 @@ and training opening repertoires.
 > (`~/Documents/Kiebitz` by default) as a tree, searchable and filterable by type (game,
 > repertoire, tournament, puzzle, other). A file shows its games and a preview; a repertoire file
 > an overview (positions, lines, openings) with a Practice button. On the board you can edit
-> variations, comments and NAGs (as flowing text or in rows), and changes save themselves. A repertoire file opens from
-> its side; its Repertoire tab counts the positions to practise and starts a drill in which the app
-> plays the opponent. Other games are checked against all your repertoire files. The Engine tab
+> variations, comments and NAGs (as flowing text or in rows), and changes save themselves. A
+> repertoire file opens from its side; its Repertoire tab counts the positions to practise and
+> starts a drill in which the app plays the opponent. Mistakes are remembered per position (on
+> this Mac, not in the file) and can be practised on their own; `[%depth n]` in a move's comment
+> ends the lines below it at move n. Other games are checked against the repertoire of the side
+> you view the board from. The Engine tab
 > analyses with Stockfish (one-click download) or the Lichess cloud.
 
 ## Requirements (macOS)

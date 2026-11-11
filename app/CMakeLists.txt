@@ -50,6 +50,7 @@ qt_add_library(kiebitz_ui STATIC
     panels/GameInfoPanel.hpp
     repertoire/RepertoireStore.cpp
     repertoire/RepertoireStore.hpp
+    repertoire/PracticeStats.cpp
     repertoire/RepertoirePanel.cpp
     repertoire/RepertoirePanel.hpp
     style/AppStyle.cpp

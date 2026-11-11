@@ -10,6 +10,7 @@
 #include <fstream>
 #include <sstream>
 #include <string>
+#include <unordered_set>
 #include <vector>
 
 namespace {
@@ -268,4 +269,34 @@ TEST(Summary, CountsWhatPracticeAsksAndNamesTheOpenings) {
     EXPECT_EQ(summary.openings[1].positions, 2U);
     // No names: still the counts.
     EXPECT_TRUE(repertoire::summarize(games, core::Color::White, nullptr).openings.empty());
+}
+
+TEST(Drill, ADepthCommandCutsTheLinesBelowIt) {
+    // [%depth 2] on 1... c5: the Sicilian lines stop at move 2; 1... e5 goes on.
+    const core::Game g = game(
+        "1. e4 e5 (1... c5 { [%depth 2] } 2. Nf3 d6 3. d4 cxd4) 2. Nf3 Nc6 3. Bb5 a6 4. Ba4 *");
+    const repertoire::Drill drill(g, core::Color::White, core::Game::root(), 0, 5);
+    EXPECT_EQ(drill.trainable(), 5U); // e4; Nf3 (after c5); Nf3, Bb5, Ba4 (after e5)
+}
+
+TEST(Drill, FocusPlaysOnlyTheLinesThroughTheMistakes) {
+    const core::Game g = game("1. e4 e5 (1... c5 2. Nf3 d6 3. d4) 2. Nf3 Nc6 3. Bb5 *");
+    // The position after 1. e4 c5: the Sicilian line only.
+    const std::unordered_set<std::uint64_t> focus{after({"e4", "c5"}).hash()};
+    repertoire::Drill drill(g, core::Color::White, core::Game::root(), 0, 9, &focus);
+    EXPECT_EQ(drill.trainable(), 1U); // 2. Nf3 there
+    EXPECT_EQ(drill.lines(), 1U);
+    EXPECT_EQ(playThrough(drill, g), std::vector<std::string>{"e4 c5 Nf3 d6 d4 "});
+    EXPECT_TRUE(drill.finished());
+}
+
+TEST(Drill, AnAnswerSaysWhetherItWasTheFirstTry) {
+    const core::Game g = game("1. e4 e5 2. Nf3 *");
+    repertoire::Drill drill(g, core::Color::White, core::Game::root(), 0, 1);
+    const auto wrong = drill.play(moveIn(g, core::Game::root(), "d4"));
+    EXPECT_TRUE(wrong.first);
+    EXPECT_EQ(wrong.position, core::Position().hash());
+    const auto right = drill.play(wrong.expected);
+    EXPECT_TRUE(right.correct);
+    EXPECT_FALSE(right.first); // after a mistake here
 }

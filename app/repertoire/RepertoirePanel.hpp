@@ -5,6 +5,8 @@
 #include <QWidget>
 
 #include <array>
+#include <cstdint>
+#include <unordered_set>
 
 class QLabel;
 class QPushButton;
@@ -32,11 +34,16 @@ public:
 
     /// The game shown and its current move. `repertoireFile`: it is a repertoire for `side`.
     /// The game must outlive the panel or the next call (null: no game).
+    /// `mistakes`: as setMistakes().
     void setGame(const core::Game* game, core::NodeId current, bool repertoireFile,
-                 core::Color side);
+                 core::Color side, const std::unordered_set<std::uint64_t>* mistakes = nullptr);
 
     /// The side the board is viewed from: the check is for that side's repertoire.
     void setViewSide(core::Color side);
+
+    /// The positions you still get wrong for the side of the file shown (null: not known yet).
+    /// They must outlive the panel or the next call.
+    void setMistakes(const std::unordered_set<std::uint64_t>* mistakes);
 
     /// The practice depth (up to this move).
     [[nodiscard]] int practiceDepth() const;
@@ -51,6 +58,8 @@ signals:
     void jumpRequested(const QString& path, quint64 position);
     /// Practise the whole file (from the start) or from the current position, up to `depth`.
     void practiceRequested(bool fromHere, int depth);
+    /// Practise only the lines through the positions you got wrong.
+    void mistakesRequested();
 
 private:
     void refresh();
@@ -81,6 +90,8 @@ private:
     Stepper* m_depth = nullptr;
     QPushButton* m_practiceAll = nullptr;
     QPushButton* m_practiceHere = nullptr;
+    QPushButton* m_practiceMistakes = nullptr;
+    const std::unordered_set<std::uint64_t>* m_mistakes = nullptr;
 };
 
 } // namespace kiebitz::app

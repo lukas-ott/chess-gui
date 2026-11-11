@@ -802,6 +802,49 @@ TEST_F(DocumentsTest, PracticingARepertoireFile) {
     EXPECT_EQ(readFile(path("rep.pgn")).find("d4"), std::string::npos);
 }
 
+TEST_F(DocumentsTest, MistakesAreRememberedAndPractisedAgain) {
+    // Black, so earlier tests' White mistakes (same statistics file) don't count here.
+    writeFile(path("kid.pgn"), "[FileType \"Repertoire\"]\n[Orientation \"black\"]\n\n"
+                               "1. d4 Nf6 2. c4 (2. Nf3 g6) g6 *\n");
+    scanLibrary();
+    open(path("kid.pgn"));
+    auto* panel = window.findChild<kiebitz::app::RepertoirePanel*>();
+    auto* mistakes = window.findChild<QPushButton*>(QStringLiteral("practiceMistakes"));
+    ASSERT_NE(mistakes, nullptr);
+    EXPECT_FALSE(mistakes->isVisibleTo(panel)); // none yet
+    const auto* status = window.findChild<QLabel*>(QStringLiteral("practiceStatus"));
+    const auto* title = window.findChild<QLabel*>(QStringLiteral("practiceStatus"))
+                            ->parentWidget()
+                            ->findChildren<QLabel*>()
+                            .front();
+    const auto answer = [&](std::string_view wrong, std::string_view right) {
+        ASSERT_TRUE(QTest::qWaitFor([&] { return status->text() == u"Your move"; }, 3000));
+        if (!wrong.empty()) {
+            play(wrong);
+        }
+        play(right);
+    };
+    // Every line once: 1... Nf6 is asked twice (both lines), 2... g6 once each.
+    emit panel->practiceRequested(false, 15);
+    for (int line = 0; line < 2; ++line) {
+        answer(line == 0 ? "d5" : "", "Nf6"); // one mistake, the first time only
+        answer("", "g6");
+    }
+    ASSERT_TRUE(QTest::qWaitFor([&] { return status->text().startsWith(u"Done"); }, 3000));
+    QTest::mouseClick(window.findChild<QPushButton*>(QStringLiteral("practiceStop")),
+                      Qt::LeftButton);
+    // Remembered: the file offers its mistakes (the position after 1. d4).
+    ASSERT_TRUE(QTest::qWaitFor([&] { return mistakes->isVisibleTo(panel); }, 3000));
+    EXPECT_EQ(mistakes->text(), QStringLiteral("Practice Mistakes (1)"));
+    QTest::mouseClick(mistakes, Qt::LeftButton);
+    EXPECT_TRUE(title->text().startsWith(u"PRACTICE MISTAKES"));
+    answer("", "Nf6"); // through the mistake: both lines, then done
+    answer("", "g6");
+    answer("", "Nf6");
+    answer("", "g6");
+    ASSERT_TRUE(QTest::qWaitFor([&] { return status->text().startsWith(u"Done"); }, 3000));
+}
+
 TEST_F(DocumentsTest, PracticeStartsFromTheLibrary) {
     writeFile(path("rep.pgn"), "[FileType \"Repertoire\"]\n[Orientation \"white\"]\n\n"
                                "1. e4 e5 2. Nf3 *\n");

@@ -3,7 +3,8 @@
 
 add_library(kiebitz_library
     src/file_kind.cpp
-    src/index_cache.cpp)
+    src/index_cache.cpp
+    src/training_stats.cpp)
 add_library(kiebitz::library ALIAS kiebitz_library)
 
 target_include_directories(kiebitz_library PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include")

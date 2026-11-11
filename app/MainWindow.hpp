@@ -41,6 +41,7 @@ class GameInfoPanel;
 class Library;
 class LibraryView;
 class NotationView;
+class PracticeStats;
 class RepertoirePanel;
 class RepertoireStore;
 
@@ -155,7 +156,8 @@ private:
 
     // Practice (a repertoire file: the app plays the opponent, you play your moves)
     [[nodiscard]] QWidget* buildPracticeCard();
-    void startPractice(bool fromHere, int depth);
+    /// `mistakes`: only the lines through the positions you still get wrong.
+    void startPractice(bool fromHere, int depth, bool mistakes = false);
     /// Jump to Line: opens a repertoire file at a position (its hash).
     void jumpToLine(const QString& path, quint64 position);
     void goToPosition(std::uint64_t position);
@@ -231,7 +233,10 @@ private:
     int m_drillRun = 0;       ///< bumped on every start and stop: late timers see it changed
     bool m_drillFromHere = false;
     int m_drillDepth = 0;
-    QString m_practiceOnOpen; ///< a file to practise as soon as its tab has opened
+    QString m_practiceOnOpen;     ///< a file to practise as soon as its tab has opened
+    bool m_drillMistakes = false; ///< practising only your mistakes
+    PracticeStats* m_practiceStats = nullptr;
+    std::array<bool, 2> m_mistakesAsked{}; ///< White, Black: their mistakes are being read
     /// A repertoire file to show at a position (hash) as soon as its tab has opened.
     std::optional<std::pair<QString, std::uint64_t>> m_jumpOnOpen;
     core::NodeId m_drillStart = core::Game::root();

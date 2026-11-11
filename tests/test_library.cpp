@@ -1,11 +1,13 @@
 #include "kiebitz/library/file_kind.hpp"
 #include "kiebitz/library/index_cache.hpp"
+#include "kiebitz/library/training_stats.hpp"
 
 #include <gtest/gtest.h>
 
 #include <filesystem>
 #include <fstream>
 #include <random>
+#include <unordered_set>
 
 using kiebitz::library::decodeIndex;
 using kiebitz::library::encodeIndex;
@@ -160,4 +162,30 @@ TEST(FileKind, ReadFromTheHeaders) {
     EXPECT_EQ(kindOf(games({{"White", "Carlsen"}})), FileKind::Game);
     EXPECT_EQ(kindOf({}), FileKind::Game);
     EXPECT_EQ(kiebitz::library::nameOf(FileKind::Tournament), "Tournament");
+}
+
+TEST(TrainingStats, CountsAndForgetsMistakesOnceSettled) {
+    using kiebitz::core::Color;
+    using kiebitz::library::TrainingStats;
+    const TempDir dir;
+    const std::uint64_t position = 0xF00DCAFEDEADBEEFULL; // a hash with the top bit set
+    {
+        auto stats = TrainingStats::open(dir.file("training.sqlite"));
+        ASSERT_TRUE(stats.ok());
+        (*stats)->record(Color::Black, position, false);
+        (*stats)->record(Color::Black, position, true);
+        EXPECT_EQ((*stats)->mistakes(Color::Black), std::unordered_set<std::uint64_t>{position});
+        EXPECT_TRUE((*stats)->mistakes(Color::White).empty()); // by side
+    }
+    // Kept on disk; right twice in a row since the mistake: no longer one.
+    auto stats = TrainingStats::open(dir.file("training.sqlite"));
+    ASSERT_TRUE(stats.ok());
+    const auto before = (*stats)->get(Color::Black, position);
+    EXPECT_EQ(before.tries, 2);
+    EXPECT_EQ(before.mistakes, 1);
+    EXPECT_EQ(before.streak, 1);
+    (*stats)->record(Color::Black, position, true);
+    EXPECT_TRUE((*stats)->mistakes(Color::Black).empty());
+    (*stats)->record(Color::Black, position, false); // wrong again: back on the list
+    EXPECT_EQ((*stats)->mistakes(Color::Black).size(), 1U);
 }
