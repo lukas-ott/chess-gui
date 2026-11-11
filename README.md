@@ -82,8 +82,11 @@ library/  The library's cache of game indexes (SQLite), so unchanged files are n
           again, and file types. No Qt.
 repertoire/ Repertoire trees (games merged by position), practice drills and opening names.
           No Qt.
+gamedb/   Game databases of millions of games: a compact store (one byte per move), a
+          streaming parallel PGN import and an opening explorer over it. No Qt.
 app/      Qt Widgets application: main window, board/ (board widget, themes, piece sets),
-          library/ (library folder scan and Library tab), document/ (open games, background
+          library/ (library folder scan and Library tab), databases/ (Databases page,
+          imports), document/ (open games, background
           file loading and saving), notation/ (move list editor), panels/ (game info),
           engine/ (engine processes, Lichess cloud, Stockfish download, Engines page and
           Engine tab),

@@ -36,6 +36,8 @@ class BoardView;
 class EnginePanel;
 class EngineRegistry;
 class EnginesView;
+class DatabaseManager;
+class DatabasesView;
 class EvalBar;
 class GameInfoPanel;
 class Library;
@@ -56,7 +58,7 @@ class MainWindow : public QMainWindow {
 
 public:
     /// The sidebar's sections: the board with its game tabs, the Library, the Engines page.
-    enum class Section : std::uint8_t { Board, Library, Engines };
+    enum class Section : std::uint8_t { Board, Library, Databases, Engines };
 
     explicit MainWindow(AppStyle& style, QWidget* parent = nullptr);
     ~MainWindow() override;
@@ -215,6 +217,8 @@ private:
     QTabBar* m_tabs = nullptr;
     QStackedWidget* m_pages = nullptr; ///< 0 = Library, 1 = a game
     LibraryView* m_libraryView = nullptr;
+    DatabaseManager* m_databases = nullptr;
+    DatabasesView* m_databasesView = nullptr;
     Section m_section = Section::Board;
     QButtonGroup* m_sidebar = nullptr; ///< one button per section, ids = Section
     EngineRegistry* m_engineRegistry = nullptr;

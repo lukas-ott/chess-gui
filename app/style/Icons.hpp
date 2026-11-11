@@ -23,6 +23,7 @@ enum class IconKind : std::uint8_t {
     Check,     ///< a tick: right
     NewFile,   ///< a page with a plus
     NewFolder, ///< a folder with a plus
+    Database,  ///< a stack of discs: game databases (sidebar)
     Board,     ///< a pawn: the board and its games (sidebar)
     Library,   ///< two stacked pages: the files (sidebar)
     Engine,    ///< a chip (sidebar, engine cards)

@@ -4,6 +4,8 @@
 #include "board/BoardView.hpp"
 #include "board/EvalBar.hpp"
 #include "board/PieceSet.hpp"
+#include "databases/DatabaseManager.hpp"
+#include "databases/DatabasesView.hpp"
 #include "document/PgnIo.hpp"
 #include "engine/EnginePanel.hpp"
 #include "engine/EngineRegistry.hpp"
@@ -263,6 +265,8 @@ void MainWindow::buildFileMenu() {
                     [this] { showSection(Section::Library); });
     menu->addAction(tr("&Board"), QKeySequence(Qt::CTRL | Qt::Key_1), this,
                     [this] { showSection(Section::Board); });
+    menu->addAction(tr("&Databases"), QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_D), this,
+                    [this] { showSection(Section::Databases); });
     menu->addAction(tr("&Engines"), QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_E), this,
                     [this] { showSection(Section::Engines); });
     menu->addSeparator();
@@ -553,6 +557,17 @@ void MainWindow::buildLayout() {
     connect(m_libraryView, &LibraryView::changeFolderRequested, this,
             &MainWindow::chooseLibraryFolder);
 
+    // Game databases: big collections to search, opened on the board one game at a time.
+    m_databases = new DatabaseManager({}, this);
+    m_databasesView = new DatabasesView(*m_databases, m_style);
+    connect(m_databasesView, &DatabasesView::openGameRequested, this,
+            [this](const core::Game& game) {
+                auto document = std::make_unique<GameDocument>();
+                document->game = game;
+                addDocument(std::move(document));
+                showSection(Section::Board);
+            });
+
     m_enginesView = new EnginesView(*m_engineRegistry, m_style);
     m_enginesView->setObjectName(QStringLiteral("enginesView"));
 
@@ -567,6 +582,7 @@ void MainWindow::buildLayout() {
     m_pages = new QStackedWidget; // in Section order
     m_pages->addWidget(boardPage);
     m_pages->addWidget(m_libraryView);
+    m_pages->addWidget(m_databasesView);
     m_pages->addWidget(m_enginesView);
 
     // The sidebar: one icon per section, as in En Croissant.
@@ -580,6 +596,7 @@ void MainWindow::buildLayout() {
     for (const auto& [section, name, tip] :
          {std::tuple{Section::Board, "sideBoard", tr("Board (⌘1)")},
           std::tuple{Section::Library, "sideLibrary", tr("Library (⌘L)")},
+          std::tuple{Section::Databases, "sideDatabases", tr("Databases (⇧⌘D)")},
           std::tuple{Section::Engines, "sideEngines", tr("Engines (⇧⌘E)")}}) {
         auto* button = new QToolButton;
         button->setObjectName(QString::fromLatin1(name));
@@ -1036,6 +1053,8 @@ void MainWindow::updateSidebarIcons() {
         IconKind kind = IconKind::Board;
         if (section == Section::Library) {
             kind = IconKind::Library;
+        } else if (section == Section::Databases) {
+            kind = IconKind::Database;
         } else if (section == Section::Engines) {
             kind = IconKind::Engine;
         }
@@ -1270,8 +1289,13 @@ void MainWindow::updateTitles() {
     }
     const GameDocument* d = doc();
     if (d == nullptr) {
-        setWindowTitle(m_section == Section::Engines ? tr("Engines — Kiebitz")
-                                                     : tr("Library — Kiebitz"));
+        QString page = tr("Library");
+        if (m_section == Section::Engines) {
+            page = tr("Engines");
+        } else if (m_section == Section::Databases) {
+            page = tr("Databases");
+        }
+        setWindowTitle(page + tr(" — Kiebitz"));
         setWindowModified(false);
         return;
     }

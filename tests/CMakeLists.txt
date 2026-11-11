@@ -5,6 +5,7 @@ add_executable(kiebitz_tests
     test_engine.cpp
     test_fen.cpp
     test_game.cpp
+    test_gamedb.cpp
     test_library.cpp
     test_perft.cpp
     test_pgn.cpp
@@ -12,7 +13,8 @@ add_executable(kiebitz_tests
     test_san.cpp
     test_types.cpp
     test_version.cpp)
-target_link_libraries(kiebitz_tests PRIVATE kiebitz::engine kiebitz::library kiebitz::repertoire
+target_link_libraries(kiebitz_tests PRIVATE kiebitz::engine kiebitz::gamedb kiebitz::library
+    kiebitz::repertoire
     GTest::gtest_main)
 target_compile_definitions(kiebitz_tests PRIVATE
     KIEBITZ_OPENINGS_TSV="${PROJECT_SOURCE_DIR}/app/resources/openings/openings.tsv")
@@ -26,6 +28,7 @@ if(KIEBITZ_BUILD_APP)
         ui/main.cpp
         ui/test_board_geometry.cpp
         ui/test_board_view.cpp
+        ui/test_databases.cpp
         ui/test_documents.cpp
         ui/test_engine.cpp
         ui/test_main_window.cpp

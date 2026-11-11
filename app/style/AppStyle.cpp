@@ -446,6 +446,13 @@ QLabel[role="quote"] {
 QProgressBar#practiceBar { background: @raised; border: none; border-radius: 2px; }
 QProgressBar#practiceBar::chunk { background: @accent; border-radius: 2px; }
 
+/* Databases: the list of databases */
+QLabel[role="databaseName"] { color: @text; font-size: 13px; font-weight: 600; }
+QListWidget#databaseList { background: transparent; outline: none; }
+QListWidget#databaseList::item { border: none; border-radius: 6px; }
+QListWidget#databaseList::item:hover { background: @raised; }
+QListWidget#databaseList::item:selected { background: @accentTint; }
+
 /* Library: a repertoire's numbers in tiles, and the openings in it */
 QFrame[statTile="true"] { background: @raised; border: none; border-radius: 8px; }
 QLabel[role="statCaption"] { color: @muted; font-size: 11px; }

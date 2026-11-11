@@ -1,0 +1,180 @@
+// The Databases page: importing PGN (plain and in archives) in the background, cancelling,
+// browsing, searching and opening games.
+
+#include "databases/AddDatabaseDialog.hpp"
+#include "databases/DatabaseManager.hpp"
+#include "databases/DatabasesView.hpp"
+#include "style/AppStyle.hpp"
+
+#include <QApplication>
+#include <QDir>
+#include <QFile>
+#include <QLabel>
+#include <QLineEdit>
+#include <QListWidget>
+#include <QProcess>
+#include <QSignalSpy>
+#include <QTableView>
+#include <QTemporaryDir>
+#include <QTest>
+#include <gtest/gtest.h>
+
+namespace {
+
+using kiebitz::app::DatabaseManager;
+using kiebitz::app::DatabasesView;
+
+const char* const kGames = R"([Event "Club"]
+[White "Carlsen, Magnus"]
+[Black "Caruana, Fabiano"]
+[Result "1-0"]
+
+1. e4 e5 2. Nf3 Nc6 3. Bb5 a6 1-0
+
+[Event "Open"]
+[White "Smith"]
+[Black "Carlsen, Magnus"]
+[Result "0-1"]
+
+1. e4 c5 2. Nf3 d6 0-1
+
+[Event "Open"]
+[White "Jones"]
+[Black "Brown"]
+[Result "1/2-1/2"]
+
+1. d4 d5 2. c4 e6 1/2-1/2
+
+[Event "Blitz"]
+[White "A"]
+[Black "B"]
+[Result "*"]
+
+1. e4 e5 2. Nf3 Nf6 *
+)";
+
+void write(const QString& path, const QByteArray& text) {
+    QFile file(path);
+    ASSERT_TRUE(file.open(QIODevice::WriteOnly));
+    file.write(text);
+}
+
+/// Imports and waits; returns the error ("" on success).
+QString importAndWait(DatabaseManager& manager, const QString& path, const QString& name) {
+    QSignalSpy finished(&manager, &DatabaseManager::jobFinished);
+    QSignalSpy changed(&manager, &DatabaseManager::changed);
+    manager.importFile(path, name);
+    if (!finished.wait(20000)) {
+        return QStringLiteral("timed out");
+    }
+    const QString error = finished.front().at(1).toString();
+    if (error.isEmpty()) {
+        changed.wait(5000); // the list, read again
+    }
+    return error;
+}
+
+class DatabasesTest : public ::testing::Test {
+protected:
+    QTemporaryDir folder;
+    QString path(const char* name) const { return folder.filePath(QString::fromLatin1(name)); }
+};
+
+} // namespace
+
+TEST_F(DatabasesTest, ImportsPgnAndArchives) {
+    DatabaseManager manager(path("dbs"));
+    write(path("games.pgn"), kGames);
+    EXPECT_EQ(importAndWait(manager, path("games.pgn"), QStringLiteral("Club games")), QString());
+    ASSERT_EQ(manager.databases().size(), 1U);
+    EXPECT_EQ(manager.databases()[0].db->gameCount(), 4U);
+    EXPECT_EQ(manager.databases()[0].db->info().name, "Club games");
+
+    // A zip with a readme next to the PGN: only the PGN is read.
+    QDir().mkpath(path("zip"));
+    write(path("zip/games.pgn"), kGames);
+    write(path("zip/README.txt"), "Not a game.\n");
+    QProcess zip;
+    zip.setWorkingDirectory(path("zip"));
+    zip.start(QStringLiteral("/usr/bin/zip"),
+              {QStringLiteral("-q"), path("games.zip"), QStringLiteral("games.pgn"),
+               QStringLiteral("README.txt")});
+    ASSERT_TRUE(zip.waitForFinished());
+    EXPECT_EQ(importAndWait(manager, path("games.zip"), QStringLiteral("Zipped")), QString());
+    ASSERT_EQ(manager.databases().size(), 2U);
+    EXPECT_EQ(manager.databases()[1].db->info().name, "Zipped");
+    EXPECT_EQ(manager.databases()[1].db->gameCount(), 4U);
+
+    // Nothing in it: an error, and no database.
+    write(path("empty.pgn"), "\n\n");
+    EXPECT_FALSE(importAndWait(manager, path("empty.pgn"), QStringLiteral("Empty")).isEmpty());
+    EXPECT_EQ(manager.databases().size(), 2U);
+    EXPECT_TRUE(QDir(path("dbs")).entryList({QStringLiteral("*.part")}, QDir::Dirs).isEmpty());
+}
+
+TEST_F(DatabasesTest, CancellingLeavesNothingBehind) {
+    DatabaseManager manager(path("dbs"));
+    QByteArray big;
+    for (int i = 0; i < 20000; ++i) {
+        big += kGames;
+    }
+    write(path("big.pgn"), big);
+    QSignalSpy finished(&manager, &DatabaseManager::jobFinished);
+    const int job = manager.importFile(path("big.pgn"), QStringLiteral("Big"));
+    EXPECT_EQ(manager.jobs().size(), 1U);
+    manager.cancel(job);
+    ASSERT_TRUE(finished.wait(20000));
+    EXPECT_EQ(finished.front().at(1).toString(), QStringLiteral("cancelled"));
+    EXPECT_TRUE(manager.jobs().empty());
+    EXPECT_TRUE(QDir(path("dbs")).entryList(QDir::Dirs | QDir::NoDotAndDotDot).isEmpty());
+}
+
+TEST_F(DatabasesTest, ThePageListsSearchesAndOpensGames) {
+    const kiebitz::app::AppStyle style(*qApp);
+    DatabaseManager manager(path("dbs"));
+    DatabasesView view(manager, style);
+    view.resize(1100, 700);
+    view.show();
+    write(path("games.pgn"), kGames);
+    ASSERT_EQ(importAndWait(manager, path("games.pgn"), QStringLiteral("Club games")), QString());
+    QApplication::processEvents();
+
+    auto* list = view.findChild<QListWidget*>(QStringLiteral("databaseList"));
+    auto* games = view.findChild<QTableView*>(QStringLiteral("databaseGames"));
+    ASSERT_NE(list, nullptr);
+    ASSERT_NE(games, nullptr);
+    EXPECT_EQ(list->count(), 1);
+    EXPECT_EQ(games->model()->rowCount(), 4); // all of them, in file order
+    EXPECT_EQ(games->model()->index(1, 0).data().toString(), QStringLiteral("Smith"));
+    EXPECT_EQ(view.findChild<QLabel*>(QStringLiteral("databaseTitle"))->text(),
+              QStringLiteral("Club games"));
+
+    if (const QString dir = qEnvironmentVariable("KIEBITZ_SNAPSHOT_DIR"); !dir.isEmpty()) {
+        QTest::qWait(100);
+        view.grab().save(QDir(dir).filePath(QStringLiteral("databases.png")));
+        kiebitz::app::AddDatabaseDialog dialog;
+        dialog.show();
+        QTest::qWait(100);
+        dialog.grab().save(QDir(dir).filePath(QStringLiteral("add-database.png")));
+    }
+    // Search: Carlsen's two games.
+    view.findChild<QLineEdit*>(QStringLiteral("databaseSearch"))
+        ->setText(QStringLiteral("carlsen"));
+    ASSERT_TRUE(QTest::qWaitFor([&] { return games->model()->rowCount() == 2; }, 5000));
+
+    // Double-click: the game, for the board.
+    QSignalSpy opened(&view, &DatabasesView::openGameRequested);
+    const QRect cell = games->visualRect(games->model()->index(0, 0));
+    QTest::mouseClick(games->viewport(), Qt::LeftButton, {}, cell.center()); // as a real one
+    QTest::mouseDClick(games->viewport(), Qt::LeftButton, {}, cell.center());
+    ASSERT_EQ(opened.size(), 1);
+    const auto game = opened.front().at(0).value<kiebitz::core::Game>();
+    EXPECT_FALSE(std::string(game.header("White")).empty());
+}
+
+TEST(AddDatabase, AChosenFileNamesTheDatabase) {
+    kiebitz::app::AddDatabaseDialog dialog;
+    dialog.chooseFile(QStringLiteral("/tmp/Caissabase 2024.7z"));
+    EXPECT_EQ(dialog.name(), QStringLiteral("Caissabase 2024"));
+    EXPECT_EQ(dialog.path(), QStringLiteral("/tmp/Caissabase 2024.7z"));
+}

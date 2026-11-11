@@ -23,7 +23,7 @@ bash scripts/package_macos.sh                    # self-contained .app + .dmg
 
 ## Rules
 
-- `core/`, `pgn/`, `engine/`, `library/`, `repertoire/` (and later `gamedb/`) must **never** include Qt.
+- `core/`, `pgn/`, `engine/`, `library/`, `repertoire/`, `gamedb/` must **never** include Qt.
   Only `app/` (UI) and thin adapters may use Qt. The `ci-core` job builds core without Qt
   to enforce this.
 - No blocking work on the UI thread: parsing, I/O, search, network and engine I/O run in the
@@ -55,5 +55,6 @@ bash scripts/package_macos.sh                    # self-contained .app + .dmg
 
 M0 skeleton (done) → M1 core (game tree, SAN/FEN; done) → M2 board UI (done) → M3 PGN viewer/editor (done) →
 M4 engine (= v1; done) → M5 library + cache (done) → M6 repertoire (done) → M7 training (done:
-practice, mistakes per position, `[%depth n]`) → M8 explorer + gap check
-(= v2) → M9 game import → M10 large database (= v3).
+practice, mistakes per position, `[%depth n]`) → M8 databases + explorer + gap check (= v2;
+game databases done: `gamedb/` store, import and Databases page; explorer and gap check to do)
+→ M9 game import → M10 large database (= v3).

@@ -17,6 +17,12 @@ qt_add_library(kiebitz_ui STATIC
     board/EvalBar.hpp
     board/PieceSet.cpp
     board/PieceSet.hpp
+    databases/AddDatabaseDialog.cpp
+    databases/AddDatabaseDialog.hpp
+    databases/DatabaseManager.cpp
+    databases/DatabaseManager.hpp
+    databases/DatabasesView.cpp
+    databases/DatabasesView.hpp
     document/GameDocument.cpp
     document/GameDocument.hpp
     document/PgnIo.cpp
@@ -51,6 +57,7 @@ qt_add_library(kiebitz_ui STATIC
     repertoire/RepertoireStore.cpp
     repertoire/RepertoireStore.hpp
     repertoire/PracticeStats.cpp
+    repertoire/PracticeStats.hpp
     repertoire/RepertoirePanel.cpp
     repertoire/RepertoirePanel.hpp
     style/AppStyle.cpp
@@ -66,7 +73,7 @@ qt_add_library(kiebitz_ui STATIC
     widgets/Stepper.hpp)
 target_include_directories(kiebitz_ui PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")
 target_link_libraries(kiebitz_ui PUBLIC Qt6::Widgets Qt6::Svg Qt6::Concurrent Qt6::Network
-    kiebitz::pgn kiebitz::engine kiebitz::library kiebitz::repertoire)
+    kiebitz::pgn kiebitz::engine kiebitz::gamedb kiebitz::library kiebitz::repertoire)
 kiebitz_set_warnings(kiebitz_ui)
 
 # Piece SVGs are compiled into the binary (":/pieces/<set>/wK.svg"), so the app has no loose

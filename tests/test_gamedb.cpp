@@ -1,0 +1,192 @@
+#include "kiebitz/gamedb/database.hpp"
+#include "kiebitz/gamedb/import.hpp"
+#include "kiebitz/gamedb/scan.hpp"
+
+#include <gtest/gtest.h>
+
+#include <algorithm>
+#include <filesystem>
+#include <random>
+#include <string>
+#include <vector>
+
+namespace {
+
+using namespace kiebitz;
+using gamedb::GameResult;
+
+class TempFolder {
+public:
+    TempFolder() {
+        std::random_device random;
+        m_path = std::filesystem::temp_directory_path() /
+                 ("kiebitz-gamedb-test-" + std::to_string(random()));
+        std::filesystem::create_directories(m_path);
+    }
+    TempFolder(const TempFolder&) = delete;
+    TempFolder& operator=(const TempFolder&) = delete;
+    TempFolder(TempFolder&&) = delete;
+    TempFolder& operator=(TempFolder&&) = delete;
+    ~TempFolder() { std::filesystem::remove_all(m_path); }
+    [[nodiscard]] std::string path() const { return m_path.string(); }
+
+private:
+    std::filesystem::path m_path;
+};
+
+std::vector<core::Move> line(std::initializer_list<std::string_view> sans) {
+    std::vector<core::Move> moves;
+    core::Position position;
+    for (const auto san : sans) {
+        moves.push_back(position.parseSan(san).value());
+        position.play(moves.back());
+    }
+    return moves;
+}
+
+const char* const kGames = R"([Event "Club"]
+[White "Carlsen, Magnus"]
+[Black "Caruana, Fabiano"]
+[Result "1-0"]
+[WhiteElo "2830"]
+[BlackElo "2800"]
+[Date "2024.01.02"]
+
+1.e4 e5 {A comment} 2. Nf3 (2. Bc4 Nf6 (2... Bc5)) Nc6 $1 3. Bb5 a6 1-0
+
+[Event "Open"]
+[White "Smith"]
+[Black "Carlsen, Magnus"]
+[Result "0-1"]
+[WhiteElo "2100"]
+[BlackElo "2850"]
+
+1. e4 c5 2. Nf3 d6 0-1
+
+[Event "Open"]
+[White "Jones"]
+[Black "Brown"]
+[Result "1/2-1/2"]
+
+1. d4 d5 2. c4 e6 3. Nc3 Nf6 4. Bg5 Be7 5. e3 O-O 6. Nf3 h6 1/2-1/2
+
+[Event "Blitz"]
+[White "A"]
+[Black "B"]
+[Result "*"]
+
+1. e4 e5 2. Nf3 Nf6 *
+)";
+
+} // namespace
+
+TEST(GameScan, HeadersAndTheMainLine) {
+    const auto game = gamedb::scanGame(
+        "[White \"Carlsen, Magnus\"]\n[Black \"?\"]\n[WhiteElo \"2830\"]\n[Result \"1-0\"]\n"
+        "[Date \"????.??.??\"]\n\n1.e4 e5 {comment (with parens)} 2. Nf3 (2. Bc4 {x} Nf6 (2... "
+        "Bc5)) Nc6 $1 3. Bb5!? a6 4. O-O 1-0\n");
+    EXPECT_EQ(game.white, "Carlsen, Magnus");
+    EXPECT_EQ(game.black, ""); // "?" is unknown
+    EXPECT_EQ(game.date, "");
+    EXPECT_EQ(game.whiteElo, 2830);
+    EXPECT_EQ(game.result, GameResult::WhiteWins);
+    EXPECT_EQ(game.moves.size(), 7U); // e4 e5 Nf3 Nc6 Bb5 a6 O-O
+    EXPECT_FALSE(game.damaged);
+}
+
+TEST(GameScan, ZeroCastlingBrokenMovesAndVariants) {
+    EXPECT_EQ(gamedb::scanGame("1. e4 e5 2. Nf3 Nc6 3. Bc4 Bc5 4. 0-0 *").moves.size(), 7U);
+    const auto broken = gamedb::scanGame("1. e4 e5 2. Ke4 Nc6 *");
+    EXPECT_TRUE(broken.damaged);
+    EXPECT_EQ(broken.moves.size(), 2U); // kept up to the broken move
+    EXPECT_TRUE(gamedb::scanGame("[Variant \"Chess960\"]\n\n1. e4 *").skipped);
+    const auto setUp = gamedb::scanGame("[FEN \"4k3/8/8/8/8/8/4P3/4K3 w - - 0 1\"]\n\n1. e4 *");
+    EXPECT_FALSE(setUp.fen.empty());
+    EXPECT_EQ(setUp.moves.size(), 1U);
+}
+
+TEST(GameSplitter, GamesAcrossPiecesOfAnySize) {
+    for (const std::size_t piece : {std::size_t{1}, std::size_t{7}, std::size_t{4096}}) {
+        gamedb::GameSplitter splitter;
+        std::vector<std::string> games;
+        const auto sink = [&](std::string_view game) {
+            games.emplace_back(game);
+        };
+        const std::string text = std::string("\xEF\xBB\xBF") + kGames; // with a byte-order mark
+        for (std::size_t at = 0; at < text.size(); at += piece) {
+            splitter.feed(std::string_view(text).substr(at, piece), sink);
+        }
+        splitter.finish(sink);
+        ASSERT_EQ(games.size(), 4U) << "pieces of " << piece;
+        EXPECT_EQ(gamedb::scanGame(games[1]).white, "Smith");
+        EXPECT_EQ(gamedb::scanGame(games[0]).white, "Carlsen, Magnus");
+    }
+}
+
+TEST(GameDatabase, ImportedGamesCanBeExploredSearchedAndRead) {
+    const TempFolder folder;
+    {
+        auto writer = gamedb::DatabaseWriter::create(folder.path(), {"Test", "test.pgn", 0, 0});
+        ASSERT_TRUE(writer.ok()) << writer.error().message;
+        const std::string text = kGames;
+        std::size_t at = 0;
+        gamedb::ImportOptions options;
+        options.threads = 3;
+        const auto result = gamedb::importPgn(
+            **writer,
+            [&](char* buffer, std::size_t size) {
+                const auto n = std::min<std::size_t>({size, 13, text.size() - at});
+                std::copy_n(text.data() + at, n, buffer);
+                at += n;
+                return n;
+            },
+            options);
+        EXPECT_EQ(result.counts.games, 4U);
+        EXPECT_EQ(result.counts.bytes, text.size());
+        EXPECT_EQ((*writer)->finish(), "");
+    }
+    auto opened = gamedb::Database::open(folder.path());
+    ASSERT_TRUE(opened.ok()) << opened.error().message;
+    const gamedb::Database& db = **opened;
+    EXPECT_EQ(db.gameCount(), 4U);
+    EXPECT_EQ(db.info().name, "Test");
+    EXPECT_EQ(db.info().players, 7U); // Carlsen once, Caruana, Smith, Jones, Brown, A, B
+
+    // In the order of the file.
+    const auto all = db.games(1, 10);
+    ASSERT_EQ(all.size(), 4U);
+    EXPECT_EQ(all[1].white, "Smith");
+    EXPECT_EQ(all[2].result, GameResult::Draw);
+    EXPECT_EQ(all[2].plies, 12);
+
+    // The explorer: 1. e4 in three games, 1. d4 in one.
+    const auto root = db.explore({});
+    EXPECT_EQ(root.games, 4U);
+    EXPECT_EQ(root.white, 1U);
+    EXPECT_EQ(root.draws, 1U);
+    EXPECT_EQ(root.black, 1U);
+    ASSERT_EQ(root.moves.size(), 2U);
+    EXPECT_EQ(root.moves[0].san, "e4");
+    EXPECT_EQ(root.moves[0].games, 3U);
+    EXPECT_EQ(root.moves[1].san, "d4");
+    const auto e4e5 = db.explore(line({"e4", "e5", "Nf3"}));
+    EXPECT_EQ(e4e5.games, 2U);
+    ASSERT_EQ(e4e5.moves.size(), 2U); // Nc6 and Nf6
+    EXPECT_TRUE(db.explore(line({"a4"})).moves.empty());
+
+    // The games of a line, best rated first.
+    const auto best = db.gamesAt(line({"e4"}), 2);
+    ASSERT_EQ(best.size(), 2U);
+    EXPECT_EQ(best[0].white, "Carlsen, Magnus");
+    EXPECT_EQ(best[1].white, "Smith");
+
+    // Search: players (any case), events.
+    EXPECT_EQ(db.search("carlsen", 10).size(), 2U);
+    EXPECT_EQ(db.search("Blitz", 10).size(), 1U);
+
+    // A whole game back, with its headers.
+    const auto game = db.game(3);
+    ASSERT_TRUE(game.has_value());
+    EXPECT_EQ(game->header("White"), "Jones");
+    EXPECT_EQ(game->mainLine().size(), 13U); // the root and 12 moves
+}

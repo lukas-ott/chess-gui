@@ -208,6 +208,19 @@ void draw(QPainter& painter, IconKind kind, const QColor& color, int size) {
         painter.drawLine(QPointF(6.2, 9.0), QPointF(9.8, 9.0));
         break;
     }
+    case IconKind::Database: { // a cylinder: top, sides, one band, bottom
+        painter.setPen(QPen(color, 1.3, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
+        painter.drawEllipse(QRectF(3.0, 2.0, 10.0, 3.6));
+        QPainterPath body;
+        body.moveTo(3.0, 3.8);
+        body.lineTo(3.0, 12.2);
+        body.arcTo(QRectF(3.0, 10.4, 10.0, 3.6), 180.0, 180.0);
+        body.lineTo(13.0, 3.8);
+        body.moveTo(3.0, 8.0);
+        body.arcTo(QRectF(3.0, 6.2, 10.0, 3.6), 180.0, 180.0);
+        painter.drawPath(body);
+        break;
+    }
     case IconKind::Check:
         painter.setPen(QPen(color, 1.8, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
         painter.drawPolyline(

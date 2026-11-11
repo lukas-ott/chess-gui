@@ -1,0 +1,720 @@
+#include "kiebitz/gamedb/database.hpp"
+
+#include "codec.hpp"
+
+#include <queue>
+
+#include <algorithm>
+#include <array>
+#include <cstdio>
+#include <fcntl.h>
+#include <filesystem>
+#include <sqlite3.h>
+#include <sys/mman.h>
+#include <sys/stat.h>
+#include <unistd.h>
+#include <unordered_map>
+#include <unordered_set>
+#include <utility>
+
+namespace kiebitz::gamedb {
+namespace {
+
+constexpr const char* kFormat = "kiebitz-gamedb-1";
+
+// ---- Files -------------------------------------------------------------------------------------
+
+std::string pathIn(const std::string& folder, const char* name) {
+    return (std::filesystem::path(folder) / name).string();
+}
+
+/// A file mapped into memory, read-only. The system pages it in as it is read, so a database of
+/// gigabytes opens at once and uses memory only for what is looked at.
+class MappedFile {
+public:
+    MappedFile() = default;
+    MappedFile(const MappedFile&) = delete;
+    MappedFile& operator=(const MappedFile&) = delete;
+    MappedFile(MappedFile&& other) noexcept
+        : m_data(std::exchange(other.m_data, nullptr)), m_size(std::exchange(other.m_size, 0)) {}
+    MappedFile& operator=(MappedFile&& other) noexcept {
+        std::swap(m_data, other.m_data);
+        std::swap(m_size, other.m_size);
+        return *this;
+    }
+    ~MappedFile() {
+        if (m_data != nullptr) {
+            munmap(m_data, m_size);
+        }
+    }
+
+    /// False if the file can't be opened (an empty file maps to nothing, which is fine).
+    bool open(const std::string& path) {
+        const int fd = ::open(path.c_str(), O_RDONLY);
+        if (fd < 0) {
+            return false;
+        }
+        struct stat status{};
+        const bool sized = fstat(fd, &status) == 0;
+        m_size = sized ? static_cast<std::size_t>(status.st_size) : 0;
+        if (sized && m_size > 0) {
+            void* data = mmap(nullptr, m_size, PROT_READ, MAP_PRIVATE, fd, 0);
+            m_data = data == MAP_FAILED ? nullptr : data;
+        }
+        ::close(fd);
+        return sized && (m_size == 0 || m_data != nullptr);
+    }
+    template <typename T> [[nodiscard]] const T* as() const {
+        return static_cast<const T*>(m_data);
+    }
+    template <typename T> [[nodiscard]] std::size_t count() const { return m_size / sizeof(T); }
+
+private:
+    void* m_data = nullptr;
+    std::size_t m_size = 0;
+};
+
+template <typename T> bool writeFile(const std::string& path, const std::vector<T>& values) {
+    std::FILE* file = std::fopen(path.c_str(), "wb");
+    if (file == nullptr) {
+        return false;
+    }
+    const bool written = values.empty() || std::fwrite(values.data(), sizeof(T), values.size(),
+                                                       file) == values.size();
+    return std::fclose(file) == 0 && written;
+}
+
+// ---- SQLite ------------------------------------------------------------------------------------
+
+struct Statement {
+    sqlite3_stmt* handle = nullptr;
+    Statement() = default;
+    Statement(sqlite3* db, const char* sql) {
+        if (sqlite3_prepare_v2(db, sql, -1, &handle, nullptr) != SQLITE_OK) {
+            handle = nullptr;
+        }
+    }
+    Statement(const Statement&) = delete;
+    Statement& operator=(const Statement&) = delete;
+    Statement(Statement&& other) noexcept : handle(std::exchange(other.handle, nullptr)) {}
+    Statement& operator=(Statement&& other) noexcept {
+        std::swap(handle, other.handle);
+        return *this;
+    }
+    ~Statement() { sqlite3_finalize(handle); }
+};
+
+bool exec(sqlite3* db, const char* sql) {
+    return sqlite3_exec(db, sql, nullptr, nullptr, nullptr) == SQLITE_OK;
+}
+
+void bindText(sqlite3_stmt* statement, int index, std::string_view text) {
+    if (text.empty()) {
+        sqlite3_bind_null(statement, index);
+    } else {
+        sqlite3_bind_text(statement, index, text.data(), static_cast<int>(text.size()),
+                          SQLITE_TRANSIENT);
+    }
+}
+
+std::string columnText(sqlite3_stmt* statement, int column) {
+    // As a blob: the same bytes, given as char (text comes as unsigned char).
+    const auto* text = static_cast<const char*>(sqlite3_column_blob(statement, column));
+    return text == nullptr
+               ? std::string()
+               : std::string(text,
+                             static_cast<std::size_t>(sqlite3_column_bytes(statement, column)));
+}
+
+/// The columns every game query selects, in GameInfo's order.
+constexpr const char* kGameColumns =
+    "g.id, w.name, b.name, e.name, s.name, g.date, g.round, g.eco, g.white_elo, g.black_elo, "
+    "g.result, g.plies";
+/// Where they come from: the games, with the names of their players, event and site.
+constexpr const char* kGameTables =
+    " FROM games g LEFT JOIN names w ON w.id = g.white LEFT JOIN names b ON b.id = g.black "
+    "LEFT JOIN names e ON e.id = g.event LEFT JOIN names s ON s.id = g.site";
+
+GameInfo readGame(sqlite3_stmt* statement) {
+    GameInfo info;
+    info.id = sqlite3_column_int64(statement, 0);
+    info.white = columnText(statement, 1);
+    info.black = columnText(statement, 2);
+    info.event = columnText(statement, 3);
+    info.site = columnText(statement, 4);
+    info.date = columnText(statement, 5);
+    info.round = columnText(statement, 6);
+    info.eco = columnText(statement, 7);
+    info.whiteElo = sqlite3_column_int(statement, 8);
+    info.blackElo = sqlite3_column_int(statement, 9);
+    info.result = static_cast<GameResult>(sqlite3_column_int(statement, 10));
+    info.plies = sqlite3_column_int(statement, 11);
+    return info;
+}
+
+std::vector<GameInfo> readGames(sqlite3_stmt* statement) {
+    std::vector<GameInfo> games;
+    while (statement != nullptr && sqlite3_step(statement) == SQLITE_ROW) {
+        games.push_back(readGame(statement));
+    }
+    return games;
+}
+
+std::string_view resultText(GameResult result) {
+    switch (result) {
+    case GameResult::WhiteWins:
+        return "1-0";
+    case GameResult::BlackWins:
+        return "0-1";
+    case GameResult::Draw:
+        return "1/2-1/2";
+    case GameResult::Unknown:
+        break;
+    }
+    return "*";
+}
+
+/// The first 8 bytes of a game's moves as one number, for sorting: comparing these numbers
+/// orders games the same way as comparing their bytes (a missing byte counts as 0, and a
+/// shorter game that is a prefix of a longer one still sorts first, by the full comparison).
+std::uint64_t sortKey(std::string_view moves) {
+    std::uint64_t key = 0;
+    for (std::size_t i = 0; i < 8; ++i) {
+        key = (key << 8U) | (i < moves.size() ? static_cast<std::uint8_t>(moves[i]) : 0U);
+    }
+    return key;
+}
+
+} // namespace
+
+// ---- Writer ------------------------------------------------------------------------------------
+
+struct DatabaseWriter::Impl {
+    std::string folder;
+    DatabaseInfo info;
+    sqlite3* db = nullptr;
+    Statement insertGame;
+    Statement insertName;
+    std::unordered_map<std::string, std::int64_t> names;
+    std::unordered_set<std::int64_t> players;
+    std::FILE* moves = nullptr;
+    std::vector<std::uint64_t> offsets{0};
+    std::vector<std::uint16_t> elo;
+    std::vector<std::uint8_t> results;
+    std::vector<std::uint8_t> standard; ///< 1: from the usual start position
+
+    Impl() = default;
+    Impl(const Impl&) = delete;
+    Impl& operator=(const Impl&) = delete;
+    Impl(Impl&&) = delete;
+    Impl& operator=(Impl&&) = delete;
+    ~Impl() {
+        insertGame = Statement();
+        insertName = Statement();
+        if (moves != nullptr) {
+            std::fclose(moves);
+        }
+        sqlite3_close(db);
+    }
+
+    std::int64_t nameId(const std::string& name) {
+        if (name.empty()) {
+            return 0;
+        }
+        const auto found = names.find(name);
+        if (found != names.end()) {
+            return found->second;
+        }
+        const auto id = static_cast<std::int64_t>(names.size()) + 1;
+        names.emplace(name, id);
+        sqlite3_bind_int64(insertName.handle, 1, id);
+        bindText(insertName.handle, 2, name);
+        sqlite3_step(insertName.handle);
+        sqlite3_reset(insertName.handle);
+        return id;
+    }
+};
+
+DatabaseWriter::DatabaseWriter(std::unique_ptr<Impl> impl) : m_impl(std::move(impl)) {}
+DatabaseWriter::~DatabaseWriter() = default;
+
+core::Result<std::unique_ptr<DatabaseWriter>> DatabaseWriter::create(const std::string& folder,
+                                                                     DatabaseInfo info) {
+    auto impl = std::make_unique<Impl>();
+    impl->folder = folder;
+    impl->info = std::move(info);
+    const std::string path = pathIn(folder, "games.sqlite");
+    if (sqlite3_open_v2(path.c_str(), &impl->db, SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE,
+                        nullptr) != SQLITE_OK) {
+        return core::Error{"Couldn't create the database: " +
+                           std::string(impl->db != nullptr ? sqlite3_errmsg(impl->db) : "")};
+    }
+    // While importing nothing else reads the file: no journal, writes in big steps.
+    if (!exec(impl->db,
+              "PRAGMA journal_mode=OFF; PRAGMA synchronous=OFF; PRAGMA cache_size=-262144;"
+              "CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);"
+              "CREATE TABLE names (id INTEGER PRIMARY KEY, name TEXT NOT NULL);"
+              "CREATE TABLE games (id INTEGER PRIMARY KEY, white INTEGER, black INTEGER, "
+              "white_elo INTEGER, black_elo INTEGER, result INTEGER, date TEXT, event INTEGER, "
+              "site INTEGER, round TEXT, eco TEXT, plies INTEGER, fen TEXT);"
+              "BEGIN")) {
+        return core::Error{"Couldn't create the database: " +
+                           std::string(sqlite3_errmsg(impl->db))};
+    }
+    impl->insertGame = Statement(impl->db, "INSERT INTO games (white, black, white_elo, "
+                                           "black_elo, result, date, event, site, round, eco, "
+                                           "plies, fen) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)");
+    impl->insertName = Statement(impl->db, "INSERT INTO names VALUES (?, ?)");
+    impl->moves = std::fopen(pathIn(folder, "moves.bin").c_str(), "wb");
+    if (impl->insertGame.handle == nullptr || impl->insertName.handle == nullptr ||
+        impl->moves == nullptr) {
+        return core::Error{"Couldn't create the database's files."};
+    }
+    return std::unique_ptr<DatabaseWriter>(new DatabaseWriter(std::move(impl)));
+}
+
+void DatabaseWriter::add(const ScannedGame& game) {
+    if (game.skipped) {
+        return;
+    }
+    Impl& d = *m_impl;
+    sqlite3_stmt* insert = d.insertGame.handle;
+    const std::int64_t white = d.nameId(game.white);
+    const std::int64_t black = d.nameId(game.black);
+    for (const std::int64_t player : {white, black}) {
+        if (player != 0) {
+            d.players.insert(player);
+        }
+    }
+    const auto bindId = [insert](int index, std::int64_t id) {
+        if (id == 0) {
+            sqlite3_bind_null(insert, index);
+        } else {
+            sqlite3_bind_int64(insert, index, id);
+        }
+    };
+    bindId(1, white);
+    bindId(2, black);
+    bindId(3, game.whiteElo);
+    bindId(4, game.blackElo);
+    sqlite3_bind_int(insert, 5, static_cast<int>(game.result));
+    bindText(insert, 6, game.date);
+    bindId(7, d.nameId(game.event));
+    bindId(8, d.nameId(game.site));
+    bindText(insert, 9, game.round);
+    bindText(insert, 10, game.eco);
+    sqlite3_bind_int(insert, 11, static_cast<int>(game.moves.size()));
+    bindText(insert, 12, game.fen);
+    sqlite3_step(insert);
+    sqlite3_reset(insert);
+
+    std::fwrite(game.moves.data(), 1, game.moves.size(), d.moves);
+    d.offsets.push_back(d.offsets.back() + game.moves.size());
+    const int rated = (game.whiteElo > 0 ? 1 : 0) + (game.blackElo > 0 ? 1 : 0);
+    d.elo.push_back(
+        static_cast<std::uint16_t>(rated == 0 ? 0 : (game.whiteElo + game.blackElo) / rated));
+    d.results.push_back(static_cast<std::uint8_t>(game.result));
+    d.standard.push_back(game.fen.empty() ? 1 : 0);
+    // Commit now and then, so the transaction never grows too big.
+    if (d.results.size() % 200000 == 0) {
+        exec(d.db, "COMMIT; BEGIN");
+    }
+}
+
+std::uint64_t DatabaseWriter::count() const {
+    return m_impl->results.size();
+}
+
+std::string DatabaseWriter::finish(const std::function<void(double)>& progress) {
+    Impl& d = *m_impl;
+    const auto report = [&](double value) {
+        if (progress) {
+            progress(value);
+        }
+    };
+    if (std::fclose(d.moves) != 0) {
+        d.moves = nullptr;
+        return "Couldn't write the games' moves (is the disk full?).";
+    }
+    d.moves = nullptr;
+    if (!writeFile(pathIn(d.folder, "offsets.bin"), d.offsets) ||
+        !writeFile(pathIn(d.folder, "elo.bin"), d.elo)) {
+        return "Couldn't write the database (is the disk full?).";
+    }
+    report(0.05);
+
+    // The opening order: games from the start position, sorted by their moves.
+    {
+        MappedFile moves;
+        if (!moves.open(pathIn(d.folder, "moves.bin"))) {
+            return "Couldn't read back the games' moves.";
+        }
+        const char* bytes = moves.as<char>();
+        const auto movesOf = [&](std::uint32_t game) {
+            return std::string_view(bytes + d.offsets[game], d.offsets[game + 1] - d.offsets[game]);
+        };
+        std::vector<std::uint32_t> order;
+        order.reserve(d.standard.size());
+        for (std::uint32_t game = 0; game < d.standard.size(); ++game) {
+            if (d.standard[game] != 0) {
+                order.push_back(game);
+            }
+        }
+        std::vector<std::uint64_t> keys(d.standard.size());
+        for (const std::uint32_t game : order) {
+            keys[game] = sortKey(movesOf(game));
+        }
+        std::sort(order.begin(), order.end(), [&](std::uint32_t a, std::uint32_t b) {
+            if (keys[a] != keys[b]) {
+                return keys[a] < keys[b];
+            }
+            const int compared = movesOf(a).compare(movesOf(b));
+            return compared != 0 ? compared < 0 : a < b;
+        });
+        report(0.5);
+        // Running totals of White wins, draws and Black wins along that order.
+        std::vector<std::uint32_t> sums(3 * (order.size() + 1), 0);
+        for (std::size_t i = 0; i < order.size(); ++i) {
+            for (std::size_t k = 0; k < 3; ++k) {
+                sums[(3 * (i + 1)) + k] = sums[(3 * i) + k];
+            }
+            const auto result = static_cast<GameResult>(d.results[order[i]]);
+            if (result == GameResult::WhiteWins) {
+                ++sums[(3 * (i + 1)) + 0];
+            } else if (result == GameResult::Draw) {
+                ++sums[(3 * (i + 1)) + 1];
+            } else if (result == GameResult::BlackWins) {
+                ++sums[(3 * (i + 1)) + 2];
+            }
+        }
+        if (!writeFile(pathIn(d.folder, "order.bin"), order) ||
+            !writeFile(pathIn(d.folder, "sums.bin"), sums)) {
+            return "Couldn't write the database (is the disk full?).";
+        }
+    }
+    report(0.6);
+
+    // The search indexes, and what the database is.
+    d.insertGame = Statement();
+    d.insertName = Statement();
+    auto meta = std::make_unique<Statement>(d.db, "INSERT OR REPLACE INTO meta VALUES (?, ?)");
+    const auto setMeta = [&](const char* key, const std::string& value) {
+        sqlite3_bind_text(meta->handle, 1, key, -1, SQLITE_STATIC);
+        sqlite3_bind_text(meta->handle, 2, value.c_str(), -1, SQLITE_TRANSIENT);
+        sqlite3_step(meta->handle);
+        sqlite3_reset(meta->handle);
+    };
+    setMeta("format", kFormat);
+    setMeta("name", d.info.name);
+    setMeta("source", d.info.source);
+    setMeta("games", std::to_string(d.results.size()));
+    setMeta("players", std::to_string(d.players.size()));
+    meta.reset(); // finished before the commit
+    if (!exec(d.db, "COMMIT")) {
+        return "Couldn't write the database: " + std::string(sqlite3_errmsg(d.db));
+    }
+    const std::array indexes{
+        "CREATE INDEX games_white ON games (white)", "CREATE INDEX games_black ON games (black)",
+        "CREATE INDEX games_event ON games (event)", "CREATE INDEX games_site ON games (site)",
+        "CREATE INDEX games_eco ON games (eco)",     "CREATE INDEX games_date ON games (date)"};
+    double done = 0.6;
+    for (const char* index : indexes) {
+        if (!exec(d.db, index)) {
+            return "Couldn't index the database: " + std::string(sqlite3_errmsg(d.db));
+        }
+        done += 0.4 / std::size(indexes);
+        report(done);
+    }
+    return {};
+}
+
+// ---- Reader ------------------------------------------------------------------------------------
+
+struct Database::Impl {
+    DatabaseInfo info;
+    sqlite3* db = nullptr;
+    MappedFile moves;
+    MappedFile offsets;
+    MappedFile order;
+    MappedFile sums;
+    MappedFile elo;
+
+    Impl() = default;
+    Impl(const Impl&) = delete;
+    Impl& operator=(const Impl&) = delete;
+    Impl(Impl&&) = delete;
+    Impl& operator=(Impl&&) = delete;
+    ~Impl() { sqlite3_close(db); }
+
+    [[nodiscard]] std::size_t games() const {
+        const std::size_t count = offsets.count<std::uint64_t>();
+        return count > 0 ? count - 1 : 0;
+    }
+    /// A game's moves; `game` counts from 0 (its id - 1).
+    [[nodiscard]] std::string_view movesOf(std::uint32_t game) const {
+        const auto* at = offsets.as<std::uint64_t>();
+        return {moves.as<char>() + at[game], static_cast<std::size_t>(at[game + 1] - at[game])};
+    }
+    /// The range of order.bin whose games start with `prefix`.
+    [[nodiscard]] std::pair<std::size_t, std::size_t> range(std::string_view prefix) const {
+        const auto* first = order.as<std::uint32_t>();
+        const auto* last = first + order.count<std::uint32_t>();
+        const auto head = [&](std::uint32_t game) {
+            return movesOf(game).substr(0, prefix.size());
+        };
+        const auto* lo = std::partition_point(
+            first, last, [&](std::uint32_t game) { return head(game) < prefix; });
+        const auto* hi = std::partition_point(
+            lo, last, [&](std::uint32_t game) { return head(game) <= prefix; });
+        return {static_cast<std::size_t>(lo - first), static_cast<std::size_t>(hi - first)};
+    }
+    /// White wins, draws and Black wins in [lo, hi) of order.bin.
+    [[nodiscard]] std::array<std::uint64_t, 3> results(std::size_t lo, std::size_t hi) const {
+        const auto* at = sums.as<std::uint32_t>();
+        return {at[(3 * hi) + 0] - at[(3 * lo) + 0], at[(3 * hi) + 1] - at[(3 * lo) + 1],
+                at[(3 * hi) + 2] - at[(3 * lo) + 2]};
+    }
+    /// The bytes of a line of moves from the start position, or nothing if one isn't legal.
+    [[nodiscard]] static std::optional<std::string> prefixOf(std::span<const core::Move> line,
+                                                             chess::Board& board) {
+        std::string prefix;
+        for (const core::Move& move : line) {
+            const auto lib = detail::fromCore(board, move);
+            const auto byte = lib ? detail::encode(board, *lib) : std::nullopt;
+            if (!byte) {
+                return std::nullopt;
+            }
+            prefix += static_cast<char>(*byte);
+            board.makeMove(*lib);
+        }
+        return prefix;
+    }
+    [[nodiscard]] std::vector<GameInfo> byIds(const std::vector<GameId>& ids) const {
+        if (ids.empty()) {
+            return {};
+        }
+        std::string sql = std::string("SELECT ") + kGameColumns + kGameTables + " WHERE g.id IN (";
+        for (std::size_t i = 0; i < ids.size(); ++i) {
+            if (i > 0) {
+                sql += ',';
+            }
+            sql += std::to_string(ids[i]);
+        }
+        sql += ')';
+        const Statement query(db, sql.c_str());
+        std::vector<GameInfo> found = readGames(query.handle);
+        // In the order asked for.
+        std::unordered_map<GameId, std::size_t> position;
+        for (std::size_t i = 0; i < ids.size(); ++i) {
+            position.emplace(ids[i], i);
+        }
+        std::sort(found.begin(), found.end(), [&](const GameInfo& a, const GameInfo& b) {
+            return position[a.id] < position[b.id];
+        });
+        return found;
+    }
+};
+
+Database::Database(std::unique_ptr<Impl> impl) : m_impl(std::move(impl)) {}
+Database::~Database() = default;
+
+core::Result<std::unique_ptr<Database>> Database::open(const std::string& folder) {
+    auto impl = std::make_unique<Impl>();
+    const std::string path = pathIn(folder, "games.sqlite");
+    if (sqlite3_open_v2(path.c_str(), &impl->db, SQLITE_OPEN_READONLY | SQLITE_OPEN_FULLMUTEX,
+                        nullptr) != SQLITE_OK) {
+        return core::Error{"Couldn't open the database at " + folder};
+    }
+    {
+        const Statement meta(impl->db, "SELECT key, value FROM meta");
+        std::unordered_map<std::string, std::string> values;
+        while (meta.handle != nullptr && sqlite3_step(meta.handle) == SQLITE_ROW) {
+            values[columnText(meta.handle, 0)] = columnText(meta.handle, 1);
+        }
+        if (values["format"] != kFormat) {
+            return core::Error{"This database was made by another version of Kiebitz, or its "
+                               "import didn't finish."};
+        }
+        impl->info.name = values["name"];
+        impl->info.source = values["source"];
+        impl->info.games = std::stoull("0" + values["games"]);
+        impl->info.players = std::stoull("0" + values["players"]);
+    }
+    for (auto [file, name] :
+         {std::pair{&impl->moves, "moves.bin"}, std::pair{&impl->offsets, "offsets.bin"},
+          std::pair{&impl->order, "order.bin"}, std::pair{&impl->sums, "sums.bin"},
+          std::pair{&impl->elo, "elo.bin"}}) {
+        if (!file->open(pathIn(folder, name))) {
+            return core::Error{std::string("The database is missing ") + name + "."};
+        }
+    }
+    return std::unique_ptr<Database>(new Database(std::move(impl)));
+}
+
+const DatabaseInfo& Database::info() const {
+    return m_impl->info;
+}
+
+std::uint64_t Database::gameCount() const {
+    return m_impl->games();
+}
+
+std::vector<GameInfo> Database::games(GameId first, std::size_t count) const {
+    const Statement query(m_impl->db, (std::string("SELECT ") + kGameColumns + kGameTables +
+                                       " WHERE g.id >= ? ORDER BY g.id LIMIT ?")
+                                          .c_str());
+    sqlite3_bind_int64(query.handle, 1, first);
+    sqlite3_bind_int64(query.handle, 2, static_cast<sqlite3_int64>(count));
+    return readGames(query.handle);
+}
+
+std::vector<GameInfo> Database::search(std::string_view text, std::size_t limit) const {
+    if (text.empty()) {
+        return games(1, limit);
+    }
+    // LIKE with % and _ taken literally.
+    std::string pattern = "%";
+    for (const char c : text) {
+        if (c == '%' || c == '_' || c == '\\') {
+            pattern += '\\';
+        }
+        pattern += c;
+    }
+    pattern += '%';
+    const Statement query(
+        m_impl->db, (std::string("WITH hit AS (SELECT id FROM names WHERE name LIKE ?1 ESCAPE "
+                                 "'\\') SELECT ") +
+                     kGameColumns + kGameTables +
+                     " WHERE g.white IN hit OR g.black IN hit OR g.event IN hit OR g.site IN hit "
+                     "OR g.eco = ?2 ORDER BY g.date DESC LIMIT ?3")
+                        .c_str());
+    bindText(query.handle, 1, pattern);
+    bindText(query.handle, 2, text);
+    sqlite3_bind_int64(query.handle, 3, static_cast<sqlite3_int64>(limit));
+    return readGames(query.handle);
+}
+
+std::optional<core::Game> Database::game(GameId id) const {
+    if (id < 1 || std::cmp_greater(id, m_impl->games())) {
+        return std::nullopt;
+    }
+    const Statement query(m_impl->db, (std::string("SELECT ") + kGameColumns + ", g.fen" +
+                                       kGameTables + " WHERE g.id = ?")
+                                          .c_str());
+    sqlite3_bind_int64(query.handle, 1, id);
+    if (query.handle == nullptr || sqlite3_step(query.handle) != SQLITE_ROW) {
+        return std::nullopt;
+    }
+    const GameInfo info = readGame(query.handle);
+    const std::string fen = columnText(query.handle, 12);
+    chess::Board board;
+    core::Position start;
+    if (!fen.empty()) {
+        auto parsed = core::Position::fromFen(fen);
+        if (!parsed.ok() || !board.setFen(fen)) {
+            return std::nullopt;
+        }
+        start = *parsed;
+    }
+    core::Game game(start);
+    const auto header = [&](const char* name, const std::string& value) {
+        if (!value.empty()) {
+            game.setHeader(name, value);
+        }
+    };
+    header("Event", info.event);
+    header("Site", info.site);
+    header("Date", info.date);
+    header("Round", info.round);
+    header("White", info.white);
+    header("Black", info.black);
+    header("Result", std::string(resultText(info.result)));
+    header("WhiteElo", info.whiteElo > 0 ? std::to_string(info.whiteElo) : "");
+    header("BlackElo", info.blackElo > 0 ? std::to_string(info.blackElo) : "");
+    header("ECO", info.eco);
+    if (!fen.empty()) {
+        header("SetUp", "1");
+        header("FEN", fen);
+    }
+    core::NodeId node = core::Game::root();
+    for (const char byte : m_impl->movesOf(static_cast<std::uint32_t>(id - 1))) {
+        const auto move = detail::decode(board, static_cast<std::uint8_t>(byte));
+        if (!move) {
+            break;
+        }
+        node = game.addMove(node, detail::toCore(*move));
+        board.makeMove(*move);
+    }
+    return game;
+}
+
+Explored Database::explore(std::span<const core::Move> line) const {
+    Explored explored;
+    chess::Board board;
+    const auto prefix = Impl::prefixOf(line, board);
+    if (!prefix) {
+        return explored;
+    }
+    const auto [lo, hi] = m_impl->range(*prefix);
+    const auto total = m_impl->results(lo, hi);
+    explored.games = hi - lo;
+    explored.white = total[0];
+    explored.draws = total[1];
+    explored.black = total[2];
+    // The next moves: games that go on are sorted by their next byte, so each move is a run.
+    const auto* order = m_impl->order.as<std::uint32_t>();
+    const std::size_t at = prefix->size();
+    std::size_t i = lo;
+    while (i < hi && m_impl->movesOf(order[i]).size() <= at) {
+        ++i; // games that end here
+    }
+    while (i < hi) {
+        const char byte = m_impl->movesOf(order[i])[at];
+        const auto* end = std::partition_point(order + i, order + hi, [&](std::uint32_t game) {
+            return m_impl->movesOf(game)[at] == byte;
+        });
+        const auto next = static_cast<std::size_t>(end - order);
+        const auto move = detail::decode(board, static_cast<std::uint8_t>(byte));
+        if (move) {
+            const auto results = m_impl->results(i, next);
+            explored.moves.push_back({detail::toCore(*move), chess::uci::moveToSan(board, *move),
+                                      next - i, results[0], results[1], results[2]});
+        }
+        i = next;
+    }
+    std::stable_sort(explored.moves.begin(), explored.moves.end(),
+                     [](const MoveStats& a, const MoveStats& b) { return a.games > b.games; });
+    return explored;
+}
+
+std::vector<GameInfo> Database::gamesAt(std::span<const core::Move> line, std::size_t limit) const {
+    chess::Board board;
+    const auto prefix = Impl::prefixOf(line, board);
+    if (!prefix || limit == 0) {
+        return {};
+    }
+    const auto [lo, hi] = m_impl->range(*prefix);
+    // The best rated: keep the `limit` highest while going through the range once.
+    const auto* order = m_impl->order.as<std::uint32_t>();
+    const auto* elo = m_impl->elo.as<std::uint16_t>();
+    using Entry = std::pair<std::uint16_t, std::uint32_t>; // rating, game
+    std::priority_queue<Entry, std::vector<Entry>, std::greater<>> best;
+    for (std::size_t i = lo; i < hi; ++i) {
+        const Entry entry{elo[order[i]], order[i]};
+        if (best.size() < limit) {
+            best.push(entry);
+        } else if (entry.first > best.top().first) {
+            best.pop();
+            best.push(entry);
+        }
+    }
+    std::vector<GameId> ids;
+    while (!best.empty()) {
+        ids.push_back(static_cast<GameId>(best.top().second) + 1);
+        best.pop();
+    }
+    std::reverse(ids.begin(), ids.end());
+    return m_impl->byIds(ids);
+}
+
+} // namespace kiebitz::gamedb
