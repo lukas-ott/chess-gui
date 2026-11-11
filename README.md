@@ -106,9 +106,8 @@ with their milestones.
 
 ## Why "Kiebitz"?
 
-Fun fact: in German, a *Kiebitz* is the onlooker who hangs over a game and comments on every
-move. It's also the word for the lapwing, the crested bird on the app icon. (The app used to be
-called ChessGui.)
+In German, a *Kiebitz* is the onlooker who hangs over a game and comments on every move. It's
+also the word for the lapwing, the crested bird on the app icon.
 
 ## License
 
