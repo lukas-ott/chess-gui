@@ -1,10 +1,7 @@
 # Kiebitz
 
-A *Kiebitz* is German for the onlooker who watches a game and comments on every move, and for
-the lapwing, the crested bird on the icon. (Formerly ChessGui.)
-
-A fast, native macOS chess app for opening preparation and training, written in C++20 with
-Qt 6 Widgets.
+A fast, minimal, native macOS chess app for opening preparation and training, written in C++20
+with Qt 6 Widgets.
 It opens instantly, keeps your PGN files as the source of truth, and focuses on building
 and training opening repertoires.
 
@@ -106,6 +103,12 @@ with their milestones.
 - **v1 (MVP):** board, PGN viewer/editor, UCI engine analysis
 - **v2:** repertoire builder, depth-limited subtree training, Lichess explorer gap check
 - **v3:** Lichess/Chess.com import, compare with my games, large local game database
+
+## Why "Kiebitz"?
+
+Fun fact: in German, a *Kiebitz* is the onlooker who hangs over a game and comments on every
+move. It's also the word for the lapwing, the crested bird on the app icon. (The app used to be
+called ChessGui.)
 
 ## License
 
