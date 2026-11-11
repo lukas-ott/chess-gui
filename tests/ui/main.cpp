@@ -21,6 +21,10 @@ int main(int argc, char** argv) {
     const QString library = QDir::temp().filePath(QStringLiteral("kiebitz-ui-tests-library"));
     QDir(library).removeRecursively();
     QSettings().setValue(QStringLiteral("library/folder"), library);
+    // And a throwaway library cache (Library::defaultCacheFile looks here).
+    const QString cache = QDir::temp().filePath(QStringLiteral("kiebitz-ui-tests-cache"));
+    QDir(cache).removeRecursively();
+    qputenv("KIEBITZ_SETTINGS_DIR", cache.toUtf8());
     ::testing::InitGoogleTest(&argc, argv);
     return RUN_ALL_TESTS();
 }

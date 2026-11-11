@@ -43,9 +43,10 @@ void boardRepaint(benchmark::State& state) {
     }
 }
 
-/// A repertoire-sized game: a main line with a two-move variation and a comment at every
-/// move, then the same again inside the first variations, about 5,000 positions in all.
-core::Game bigGame() {
+/// A repertoire-sized game: a main line with an alternative and a comment at every move, and
+/// the same again inside the alternatives, `depth` levels deep. Depth 1 is about 5,000
+/// positions, depth 2 about 50,000 (the spec's large repertoire).
+core::Game bigGame(int depth = 1) {
     core::Game game;
     std::uint32_t seed = 7;
     const std::function<void(core::NodeId, core::Position, int, int)> grow =
@@ -70,7 +71,7 @@ core::Game bigGame() {
                 at = next;
             }
         };
-    grow(core::Game::root(), core::Position(), 200, 1);
+    grow(core::Game::root(), core::Position(), 200, depth);
     return game;
 }
 
@@ -78,9 +79,15 @@ void notationRender(benchmark::State& state) {
     const kiebitz::app::AppStyle style(*qApp);
     kiebitz::app::NotationView view(style);
     view.resize(400, 600);
-    const core::Game game = bigGame();
+    const core::Game game = bigGame(static_cast<int>(state.range(0)));
+    QImage image(800, 1200, QImage::Format_ARGB32_Premultiplied);
+    image.setDevicePixelRatio(2.0);
     for ([[maybe_unused]] const auto _ : state) {
+        // Everything until the list is on screen: the text, its full layout (the scroll bar
+        // needs the height) and the first paint.
         view.setGame(&game, core::Game::root());
+        QPainter painter(&image);
+        static_cast<QWidget&>(view).render(&painter);
     }
     state.counters["positions"] = static_cast<double>(game.nodeCount());
 }
@@ -104,7 +111,7 @@ void notationStep(benchmark::State& state) {
 
 // NOLINTBEGIN(cppcoreguidelines-avoid-non-const-global-variables)
 BENCHMARK(boardRepaint)->Arg(480)->Arg(960)->Unit(benchmark::kMillisecond);
-BENCHMARK(notationRender)->Unit(benchmark::kMillisecond);
+BENCHMARK(notationRender)->Arg(1)->Arg(2)->Unit(benchmark::kMillisecond);
 BENCHMARK(notationStep)->Unit(benchmark::kMicrosecond);
 // NOLINTEND(cppcoreguidelines-avoid-non-const-global-variables)
 

@@ -30,6 +30,7 @@
 #include <gtest/gtest.h>
 
 #include <string>
+#include <vector>
 
 namespace {
 
@@ -399,6 +400,7 @@ TEST_F(LibraryTreeTest, ArrowKeysActOnWhatWasClicked) {
 TEST_F(DocumentsTest, SavingOneGameLeavesTheOthersAlone) {
     writeFile(path("three.pgn"), kThreeGames);
     scanLibrary();
+    EXPECT_FALSE(window.library().files()[0].pgn->hasText); // the Library keeps only the index
     QSignalSpy opened(&window, &MainWindow::fileOpened);
     window.openGame(window.library().files()[0].pgn, 1);
     ASSERT_TRUE(opened.wait(5000));
@@ -412,6 +414,68 @@ TEST_F(DocumentsTest, SavingOneGameLeavesTheOthersAlone) {
     EXPECT_EQ((*games)[0].mainLine().size(), 3U); // untouched
     EXPECT_EQ((*games)[1].mainLine().size(), 5U); // 1. c4 e5 2. Nc3 Nc6
     EXPECT_EQ((*games)[2].header("White"), "Third");
+}
+
+TEST_F(DocumentsTest, TwoTabsOfOneLibraryFileKeepEachOthersChanges) {
+    writeFile(path("three.pgn"), kThreeGames);
+    scanLibrary();
+    // Both games edited before either is saved: the second save must not undo the first.
+    const auto file = window.library().files()[0].pgn;
+    std::vector<int> tabOf;
+    for (const int game : {0, 2}) {
+        QSignalSpy opened(&window, &MainWindow::fileOpened);
+        window.openGame(file, game);
+        ASSERT_TRUE(opened.wait(5000));
+        tabOf.push_back(tabs->currentIndex());
+        action(window, QStringLiteral("Go to End"))->trigger();
+        play(game == 0 ? "Nf3" : "c4");
+    }
+    saveAndWait(); // game 3
+    tabs->setCurrentIndex(tabOf[0]);
+    saveAndWait(); // game 1
+    const auto games = pgn::parseAll(readFile(path("three.pgn")));
+    ASSERT_TRUE(games.ok()) << games.error().message;
+    ASSERT_EQ(games->size(), 3U);
+    EXPECT_EQ((*games)[0].mainLine().size(), 4U); // 1. d4 d5 2. Nf3
+    EXPECT_EQ((*games)[1].mainLine().size(), 4U); // untouched
+    EXPECT_EQ((*games)[2].mainLine().size(), 4U); // 1. Nf3 d5 2. c4
+}
+
+/// Scans `folder` with a fresh Library using `cache`, and returns how many games it lists.
+int scanWithCache(const QString& folder, const QString& cache) {
+    Library library;
+    library.setCacheFile(cache);
+    QSignalSpy scanned(&library, &Library::scanned);
+    library.setFolder(folder);
+    EXPECT_TRUE(scanned.wait(5000));
+    return scanned.isEmpty() ? -1 : scanned.first().at(1).toInt();
+}
+
+TEST(LibraryCache, ListsUnchangedFilesWithoutReadingThem) {
+    const QTemporaryDir folder;
+    const QTemporaryDir cacheDir;
+    const QString cache = cacheDir.filePath(QStringLiteral("library.sqlite"));
+    const QString file = folder.filePath(QStringLiteral("three.pgn"));
+    writeFile(file, kThreeGames);
+    ASSERT_EQ(scanWithCache(folder.path(), cache), 3);
+
+    // Unreadable now, but unchanged (same size and date): its games still come from the cache.
+    ASSERT_TRUE(QFile::setPermissions(file, QFileDevice::Permissions{}));
+    EXPECT_EQ(scanWithCache(folder.path(), cache), 3);
+    // Without the cache the file can't be read, so it has no games.
+    EXPECT_EQ(scanWithCache(folder.path(), QString()), 0);
+    QFile::setPermissions(file, QFileDevice::ReadOwner | QFileDevice::WriteOwner);
+}
+
+TEST(LibraryCache, ReadsChangedFilesAgain) {
+    const QTemporaryDir folder;
+    const QTemporaryDir cacheDir;
+    const QString cache = cacheDir.filePath(QStringLiteral("library.sqlite"));
+    const QString file = folder.filePath(QStringLiteral("games.pgn"));
+    writeFile(file, kThreeGames);
+    ASSERT_EQ(scanWithCache(folder.path(), cache), 3);
+    writeFile(file, kOneGame);
+    EXPECT_EQ(scanWithCache(folder.path(), cache), 1);
 }
 
 TEST_F(DocumentsTest, LibraryListsFilesBeforeReadingThem) {

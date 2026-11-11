@@ -54,6 +54,7 @@
 #include <QVBoxLayout>
 
 #include <algorithm>
+#include <optional>
 #include <tuple>
 #include <utility>
 
@@ -139,6 +140,7 @@ MainWindow::MainWindow(AppStyle& style, QWidget* parent)
     statusBar()->setSizeGripEnabled(false);
 
     // The library loads in the background; the window is up before it's done.
+    m_library->setCacheFile(Library::defaultCacheFile());
     m_library->setFolder(QSettings().value(kLibraryFolderKey, Library::defaultFolder()).toString());
 
     addDocument(std::make_unique<GameDocument>()); // an empty board to play on right away
@@ -903,10 +905,15 @@ bool MainWindow::maybeSave(GameDocument& document) {
         }
     }
     const std::string gameText = pgn::writeGame(document.game);
-    const std::string text = inFile && path == document.file->path
-                                 ? pgnio::replaceGame(*document.file, document.gameIndex, gameText)
-                                 : gameText;
-    const QString error = pgnio::write(path, text).result();
+    std::optional<std::string> text = gameText;
+    if (inFile && path == document.file->path) {
+        text = pgnio::replaceGame(*document.file, document.gameIndex, gameText);
+    }
+    if (!text) {
+        QMessageBox::warning(this, tr("Couldn't save"), tr("The file couldn't be read again."));
+        return false;
+    }
+    const QString error = pgnio::write(path, *text).result();
     if (!error.isEmpty()) {
         QMessageBox::warning(this, tr("Couldn't save"), error);
         return false;
@@ -924,8 +931,13 @@ void MainWindow::save() {
         saveAs();
         return;
     }
-    std::string text = pgnio::replaceGame(*d->file, d->gameIndex, pgn::writeGame(d->game));
-    writeDocument(*d, d->file->path, std::move(text), nullptr);
+    std::optional<std::string> text =
+        pgnio::replaceGame(*d->file, d->gameIndex, pgn::writeGame(d->game));
+    if (!text) { // never happens: tabs only hold files with their text (see PgnFile::hasText)
+        QMessageBox::warning(this, tr("Couldn't save"), tr("The file couldn't be read again."));
+        return;
+    }
+    writeDocument(*d, d->file->path, std::move(*text), nullptr);
 }
 
 void MainWindow::saveAs() {
@@ -1082,6 +1094,48 @@ void MainWindow::openGame(const std::shared_ptr<PgnFile>& file, int index) {
             showSection(Section::Board);
             return;
         }
+    }
+    if (!file->hasText) {
+        // From the Library, which keeps only the index: a game's tab saves into the file's text,
+        // so it needs all of it. The game is found again by where it starts in the file.
+        const std::size_t offset =
+            index >= 0 && static_cast<std::size_t>(index) < file->games.size()
+                ? file->games[static_cast<std::size_t>(index)].offset
+                : 0;
+        const auto indexIn = [index, offset](const PgnFile& full) {
+            const auto& games = full.games;
+            const auto match = std::find_if(games.begin(), games.end(),
+                                            [offset](const auto& g) { return g.offset == offset; });
+            return match != games.end() ? static_cast<int>(match - games.begin())
+                                        : std::min(index, static_cast<int>(games.size()) - 1);
+        };
+        // Another tab already has this file: share its text, so the tabs' saves add up. Checked
+        // again once the file is read, in case another tab opened it meanwhile.
+        const auto openInTab = [this, indexIn, path = file->path] {
+            for (const auto& d : m_documents) {
+                if (d->file && d->file->hasText && d->file->path == path) {
+                    openGame(d->file, indexIn(*d->file));
+                    return true;
+                }
+            }
+            return false;
+        };
+        if (openInTab()) {
+            return;
+        }
+        whenReady(this, pgnio::load(file->path),
+                  [this, indexIn, openInTab](const pgnio::Loaded& loaded) {
+                      if (openInTab()) {
+                          return;
+                      }
+                      if (!loaded.file) {
+                          QMessageBox::warning(this, tr("Couldn't read the game"), loaded.error);
+                          emit fileError(loaded.error);
+                          return;
+                      }
+                      openGame(loaded.file, indexIn(*loaded.file));
+                  });
+        return;
     }
     whenReady(this, pgnio::parse(file, index), [this, file, index](const pgnio::Parsed& parsed) {
         if (!parsed.game) {

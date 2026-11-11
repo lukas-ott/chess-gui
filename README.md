@@ -8,14 +8,15 @@ Qt 6 Widgets.
 It opens instantly, keeps your PGN files as the source of truth, and focuses on building
 and training opening repertoires.
 
-> Status: **M4, engine analysis (v1).** A sidebar switches between the board (games in tabs),
+> Status: **M5, library cache and fast move list.** A sidebar switches between the board (games in tabs),
 > the Library and the Engines page. The Library shows every PGN file in your library folder
 > (`~/Documents/Kiebitz` by default) with a game list and preview. On the board you can edit
 > variations, comments and NAGs, edit headers, save back into the file, and copy or paste PGN
 > and FEN. The Engines page downloads the latest Stockfish in one click (or uses the one on your
 > Mac, or any UCI engine); the Engine tab analyses the board with it or the Lichess cloud: up to
 > 5 lines, an eval bar and best-move arrows, and a click on a move plays the line into the game.
-> Space starts and stops it.
+> Space starts and stops it. The Library keeps a cache of every file's game index, so it lists
+> even large collections instantly, and the move list stays fast with 50,000-position repertoires.
 
 ## Requirements (macOS)
 
@@ -24,7 +25,7 @@ xcode-select --install                     # or full Xcode (adds Instruments for
 brew install cmake ninja ccache qt llvm    # llvm: clang-format/-tidy, clangd, debug-preset compiler
 ```
 
-All other dependencies (chess-library, GoogleTest, Google Benchmark) are fetched by CMake
+All other dependencies (chess-library, SQLite, GoogleTest, Google Benchmark) are fetched by CMake
 at pinned versions on first configure.
 
 ## Build and run
@@ -77,6 +78,8 @@ core/     Pure C++ chess logic: positions, FEN, SAN, game tree, annotations. No 
 pgn/      Reading, indexing and writing PGN files (fast game index, round-trip safe). No Qt.
 engine/   The UCI protocol (engine output, scores, lines as moves) and picking the Stockfish
           download for this Mac. No Qt.
+library/  The library's cache of game indexes (SQLite), so unchanged files are never read
+          again. No Qt.
 app/      Qt Widgets application: main window, board/ (board widget, themes, piece sets),
           library/ (library folder scan and Library tab), document/ (open games, background
           file loading and saving), notation/ (move list editor), panels/ (game info),

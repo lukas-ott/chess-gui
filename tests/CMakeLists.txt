@@ -5,12 +5,14 @@ add_executable(kiebitz_tests
     test_engine.cpp
     test_fen.cpp
     test_game.cpp
+    test_library.cpp
     test_perft.cpp
     test_pgn.cpp
     test_san.cpp
     test_types.cpp
     test_version.cpp)
-target_link_libraries(kiebitz_tests PRIVATE kiebitz::pgn kiebitz::engine GTest::gtest_main)
+target_link_libraries(kiebitz_tests PRIVATE kiebitz::engine kiebitz::library
+    GTest::gtest_main)
 kiebitz_set_warnings(kiebitz_tests)
 
 gtest_discover_tests(kiebitz_tests DISCOVERY_TIMEOUT 30)

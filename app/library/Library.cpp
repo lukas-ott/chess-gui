@@ -1,5 +1,7 @@
 #include "Library.hpp"
 
+#include "kiebitz/library/index_cache.hpp"
+
 #include <QCoreApplication>
 #include <QDir>
 #include <QDirIterator>
@@ -12,10 +14,49 @@
 #include <QtConcurrent/QtConcurrentRun>
 
 #include <algorithm>
+#include <mutex>
 #include <unordered_map>
 
 namespace kiebitz::app {
+
+/// The index cache, opened the first time a scan needs it. That happens on a worker thread, so
+/// opening the database never holds up the window.
+struct LibraryCache {
+    QString path;
+    std::once_flag opened;
+    std::unique_ptr<library::IndexCache> cache;
+
+    /// The cache, or null if there is none (no path, or it couldn't be opened).
+    library::IndexCache* get() {
+        std::call_once(opened, [this] {
+            if (path.isEmpty()) {
+                return;
+            }
+            QDir().mkpath(QFileInfo(path).absolutePath());
+            if (auto result = library::IndexCache::open(path.toStdString())) {
+                cache = std::move(*result);
+            } else {
+                qWarning("%s", result.error().message.c_str());
+            }
+        });
+        return cache.get();
+    }
+};
+
 namespace {
+
+library::FileStamp stampOf(const LibraryFile& file) {
+    return {file.size, file.modified.toMSecsSinceEpoch()};
+}
+
+/// A file's index without its text, as the Library keeps it.
+std::shared_ptr<PgnFile> indexOnly(const QString& path, std::vector<pgn::GameEntry> games) {
+    auto file = std::make_shared<PgnFile>();
+    file->path = path;
+    file->games = std::move(games);
+    file->hasText = false;
+    return file;
+}
 
 struct Listing {
     std::vector<LibraryFile> files;
@@ -24,8 +65,10 @@ struct Listing {
 
 /// Runs on a worker thread: lists the folder (names, sizes, dates; no file is read, so it is
 /// quick even when iCloud has moved the files off the Mac). Unchanged files keep their index
-/// from `known`; the others get none yet.
-Listing list(const QString& folder, const std::vector<LibraryFile>& known) {
+/// from `known`, or get it from the cache; the others get none yet.
+Listing list(const QString& folder, const std::vector<LibraryFile>& known,
+             LibraryCache& cacheHolder) {
+    library::IndexCache* cache = cacheHolder.get();
     QElapsedTimer timer;
     timer.start();
     std::unordered_map<QString, const LibraryFile*> previous;
@@ -43,8 +86,20 @@ Listing list(const QString& folder, const std::vector<LibraryFile>& known) {
         if (old != previous.end() && old->second->size == file.size &&
             old->second->modified == file.modified) {
             file.pgn = old->second->pgn; // unchanged: keep its index
+        } else if (cache != nullptr) {
+            if (auto games = cache->find(file.path.toStdString(), stampOf(file))) {
+                file.pgn = indexOnly(file.path, std::move(*games)); // unchanged since last time
+            }
         }
         result.files.push_back(std::move(file));
+    }
+    if (cache != nullptr) { // forget files that are gone, so the cache doesn't grow forever
+        std::vector<std::string> paths;
+        paths.reserve(result.files.size());
+        for (const auto& file : result.files) {
+            paths.push_back(file.path.toStdString());
+        }
+        cache->forgetOthers(folder.toStdString(), paths);
     }
     std::sort(result.files.begin(), result.files.end(), [](const auto& a, const auto& b) {
         return QString::localeAwareCompare(a.name, b.name) < 0;
@@ -53,25 +108,34 @@ Listing list(const QString& folder, const std::vector<LibraryFile>& known) {
     return result;
 }
 
+/// A file to read, and which version of it the listing saw.
+struct ReadJob {
+    QString path;
+    library::FileStamp stamp;
+};
+
 /// One file read and indexed (on a worker thread, several at a time).
 struct ReadFile {
     QString path;
     std::shared_ptr<PgnFile> pgn;
 };
 
-ReadFile readFile(const QString& path, const std::atomic<bool>& cancel) {
+ReadFile readFile(const ReadJob& job, const std::atomic<bool>& cancel, LibraryCache& cacheHolder) {
     if (cancel) {
-        return {path, nullptr};
+        return {job.path, nullptr};
     }
-    auto pgnFile = std::make_shared<PgnFile>();
-    pgnFile->path = path;
-    QFile in(path);
-    if (in.open(QIODevice::ReadOnly)) {
-        const QByteArray bytes = in.readAll();
-        pgnFile->text.assign(bytes.constData(), static_cast<std::size_t>(bytes.size()));
-        pgnFile->games = pgn::indexGames(pgnFile->text);
+    QFile in(job.path);
+    if (!in.open(QIODevice::ReadOnly)) {
+        return {job.path, indexOnly(job.path, {})};
     }
-    return {path, std::move(pgnFile)};
+    const QByteArray bytes = in.readAll();
+    auto games = pgn::indexGames(std::string_view(bytes.constData(), bytes.size()));
+    // Stored under the version the listing saw: if the file changed in between, its stamp is
+    // newer by the next scan, which then simply reads it again.
+    if (library::IndexCache* cache = cacheHolder.get()) {
+        cache->store(job.path.toStdString(), job.stamp, games);
+    }
+    return {job.path, indexOnly(job.path, std::move(games))};
 }
 
 } // namespace
@@ -90,6 +154,19 @@ Library::Library(QObject* parent) : QObject(parent) {
     connect(&m_watcher, &QFileSystemWatcher::directoryChanged, &m_debounce,
             qOverload<>(&QTimer::start));
     connect(&m_watcher, &QFileSystemWatcher::fileChanged, &m_debounce, qOverload<>(&QTimer::start));
+}
+
+QString Library::defaultCacheFile() {
+    QString folder = qEnvironmentVariable("KIEBITZ_SETTINGS_DIR"); // tests: never the real one
+    if (folder.isEmpty()) {
+        folder = QStandardPaths::writableLocation(QStandardPaths::CacheLocation);
+    }
+    return QDir(folder).filePath(QStringLiteral("library.sqlite"));
+}
+
+void Library::setCacheFile(const QString& path) {
+    m_cache = std::make_shared<LibraryCache>();
+    m_cache->path = path;
 }
 
 QString Library::defaultFolder() {
@@ -150,15 +227,17 @@ void Library::startScan() {
         }
         readFiles(generation, listing.milliseconds);
     });
-    watcher->setFuture(
-        QtConcurrent::run([folder = m_folder, known = m_files] { return list(folder, known); }));
+    watcher->setFuture(QtConcurrent::run([folder = m_folder, known = m_files, cache = m_cache] {
+        LibraryCache none;
+        return list(folder, known, cache ? *cache : none);
+    }));
 } // NOLINT(clang-analyzer-cplusplus.NewDeleteLeaks)
 
 void Library::readFiles(int generation, qint64 listedAfterMs) {
-    QStringList toRead;
+    QList<ReadJob> toRead;
     for (const auto& file : m_files) {
         if (!file.pgn) {
-            toRead << file.path;
+            toRead << ReadJob{file.path, stampOf(file)};
         }
     }
     QElapsedTimer timer;
@@ -213,8 +292,11 @@ void Library::readFiles(int generation, qint64 listedAfterMs) {
         watcher->deleteLater();
         finish();
     });
-    watcher->setFuture(QtConcurrent::mapped(
-        toRead, [cancel = m_cancel](const QString& path) { return readFile(path, *cancel); }));
+    watcher->setFuture(
+        QtConcurrent::mapped(toRead, [cancel = m_cancel, cache = m_cache](const ReadJob& job) {
+            LibraryCache none;
+            return readFile(job, *cancel, cache ? *cache : none);
+        }));
 } // NOLINT(clang-analyzer-cplusplus.NewDeleteLeaks)
 
 void Library::watch() {

@@ -29,6 +29,7 @@ include(Dependencies)
 add_subdirectory(core)
 add_subdirectory(pgn)
 add_subdirectory(engine)
+add_subdirectory(library)
 
 if(KIEBITZ_BUILD_APP)
     add_subdirectory(app)

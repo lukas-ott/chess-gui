@@ -4,14 +4,16 @@
 #include "style/AppStyle.hpp"
 
 #include <QContextMenuEvent>
+#include <QFontMetricsF>
 #include <QMenu>
 #include <QMouseEvent>
+#include <QPainter>
+#include <QPainterPath>
 #include <QScrollBar>
-#include <QTextBlock>
-#include <QTextCursor>
 
 #include <algorithm>
 #include <array>
+#include <cmath>
 #include <functional>
 
 namespace kiebitz::app {
@@ -19,9 +21,12 @@ namespace {
 
 using core::NodeId;
 
-QString html(const std::string& text) {
-    return QString::fromStdString(text).toHtmlEscaped();
-}
+constexpr int kMargin = 6;           ///< around the text
+constexpr int kVariationIndent = 20; ///< first-level variations are indented
+constexpr int kVariationGap = 5;     ///< and have a little air above and below
+constexpr int kMainPixels = 17;
+constexpr int kVariationPixels = 15;
+constexpr double kLineSpacing = 1.75; ///< generous, so moves are easy to click
 
 QString nagText(std::uint8_t nag) {
     const auto symbol = core::nagSymbol(nag);
@@ -51,44 +56,119 @@ constexpr std::array<NagChoice, 8> kPositionNags{{{10, "Equal"},
 } // namespace
 
 NotationView::NotationView(const AppStyle& style, QWidget* parent)
-    : QTextBrowser(parent), m_style(style) {
+    : QAbstractScrollArea(parent), m_style(style) {
     setObjectName(QStringLiteral("moveList"));
-    setOpenLinks(false);
     setFocusPolicy(Qt::NoFocus); // keep the arrow keys for moving through the game
     setFrameShape(QFrame::NoFrame);
-    connect(this, &QTextBrowser::anchorClicked, this, [this](const QUrl& url) {
-        bool ok = false;
-        const auto id = static_cast<NodeId>(url.fragment().toUInt(&ok));
-        if (ok) {
-            emit nodeActivated(id);
-        }
-    });
+    setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    viewport()->setMouseTracking(true); // the hand cursor over moves
+    updateFonts();
 }
 
 void NotationView::setGame(const core::Game* game, NodeId current) {
     m_game = game;
     m_current = current;
-    render();
+    rebuild();
 }
 
-// ---- Rendering ---------------------------------------------------------------------------------
+// ---- Words -------------------------------------------------------------------------------------
 
-void NotationView::render() {
+void NotationView::updateFonts() {
+    for (const bool small : {false, true}) {
+        for (std::size_t k = 0; k < kKinds; ++k) {
+            const auto kind = static_cast<Kind>(k);
+            QFont f = font();
+            f.setPixelSize(small ? kVariationPixels : kMainPixels);
+            QFont::Weight weight = QFont::Normal;
+            if (kind == Kind::MainMove) {
+                weight = QFont::DemiBold;
+            } else if (kind == Kind::Result) {
+                weight = QFont::Bold;
+            }
+            f.setWeight(weight);
+            f.setItalic(kind == Kind::Comment);
+            m_fonts[static_cast<std::size_t>(fontIndex(kind, small))] = f;
+            m_widths[static_cast<std::size_t>(fontIndex(kind, small))].clear();
+        }
+        const QFontMetricsF metrics(
+            m_fonts[static_cast<std::size_t>(fontIndex(Kind::Number, small))]);
+        const auto size = static_cast<std::size_t>(small ? 1 : 0);
+        m_spaceWidth[size] = metrics.horizontalAdvance(QLatin1Char(' '));
+        m_lineHeight[size] = static_cast<int>(std::lround(metrics.height() * kLineSpacing));
+        m_ascent[size] =
+            static_cast<qreal>(metrics.ascent() + ((metrics.height() * (kLineSpacing - 1)) / 2));
+    }
+}
+
+qreal NotationView::widthOf(const Word& word) {
+    auto& cache = m_widths[static_cast<std::size_t>(fontIndex(word.kind, word.small))];
+    if (const auto it = cache.constFind(word.text); it != cache.constEnd()) {
+        return *it;
+    }
+    const QFontMetricsF metrics(
+        m_fonts[static_cast<std::size_t>(fontIndex(word.kind, word.small))]);
+    const qreal width = metrics.horizontalAdvance(word.text);
+    cache.insert(word.text, width);
+    return width;
+}
+
+void NotationView::rebuild() {
     const int scroll = verticalScrollBar()->value();
-    m_ranges.clear();
-    m_highlighted = core::kNoNode;
+    m_words.clear();
+    m_paragraphs.clear();
+    m_moveWord.clear();
+    m_hovered = -1;
     if (m_game == nullptr) {
-        clear();
+        layoutWords();
+        viewport()->update();
         return;
     }
-    const auto& c = m_style.colors();
     const core::Game& game = *m_game;
-    QString text;
+    m_words.reserve(game.nodeCount() * 3);
+    m_moveWord.reserve(game.nodeCount());
 
+    // The writer remembers how the next word joins the last one.
+    bool variation = false;
+    bool spaceOwed = false;
+    bool nbspOwed = false;
+    m_paragraphs.push_back({0, 0, false});
+    const auto add = [&](QString text, Kind kind, NodeId node = core::kNoNode) {
+        Word word;
+        word.text = std::move(text);
+        word.kind = kind;
+        word.node = node;
+        word.small = variation;
+        word.join = Join::Touch;
+        if (nbspOwed) {
+            word.join = Join::Nbsp;
+        } else if (spaceOwed) {
+            word.join = Join::Space;
+        }
+        word.width = widthOf(word);
+        m_words.push_back(std::move(word));
+        spaceOwed = true;
+        nbspOwed = false;
+    };
+    // A new paragraph, unless the current one is still empty (then it just changes style).
+    const auto paragraph = [&](bool isVariation) {
+        Paragraph& last = m_paragraphs.back();
+        last.end = static_cast<int>(m_words.size());
+        if (last.end > last.first) {
+            m_paragraphs.push_back({last.end, last.end, isVariation});
+        } else {
+            last.variation = isVariation;
+        }
+        variation = isVariation;
+        spaceOwed = false;
+        nbspOwed = false;
+    };
     const auto comment = [&](const std::string& value) {
-        if (!value.empty()) {
-            text += QStringLiteral("<span style='color:%1;font-style:italic'>%2</span> ")
-                        .arg(c.muted.name(), html(value));
+        if (value.empty()) {
+            return;
+        }
+        for (const QString& part :
+             QString::fromStdString(value).split(QLatin1Char(' '), Qt::SkipEmptyParts)) {
+            add(part, Kind::Comment);
         }
     };
     const auto move = [&](NodeId id, bool forceNumber, bool mainLine) {
@@ -96,21 +176,18 @@ void NotationView::render() {
         comment(node.commentBefore);
         const bool white = game.mover(id) == core::Color::White;
         if (white || forceNumber || !node.commentBefore.empty()) {
-            text += QStringLiteral("<span style='color:%1'>%2%3</span>&nbsp;")
-                        .arg(c.muted.name())
-                        .arg(game.moveNumber(id))
-                        .arg(white ? QStringLiteral(".") : QStringLiteral("…"));
+            add(QString::number(game.moveNumber(id)) +
+                    (white ? QStringLiteral(".") : QStringLiteral("…")),
+                Kind::Number);
+            nbspOwed = true;
         }
-        QString san = html(node.san);
+        QString san = QString::fromStdString(node.san);
         for (const auto nag : node.nags) {
             san += nagText(nag);
         }
         // The game itself stands out (heavier, full colour); alternatives are quieter.
-        text += QStringLiteral(
-                    "<a href='#%1' style='color:%2;font-weight:%3;text-decoration:none'>%4</a> ")
-                    .arg(id)
-                    .arg((mainLine ? c.text : c.muted).name(),
-                         mainLine ? QStringLiteral("600") : QStringLiteral("400"), san);
+        m_moveWord[id] = static_cast<int>(m_words.size());
+        add(std::move(san), mainLine ? Kind::MainMove : Kind::SideMove, id);
         comment(node.comment);
         return !node.comment.empty(); // after a comment the next move shows its number
     };
@@ -124,113 +201,288 @@ void NotationView::render() {
             for (NodeId alt = game.nextSibling(node); alt != core::kNoNode;
                  alt = game.nextSibling(alt)) {
                 if (depth == 0) {
-                    text += QStringLiteral(
-                        "</p><p style='margin:5px 0 5px 20px;padding:0;font-size:15px'>");
+                    paragraph(true);
                 } else {
-                    text += QStringLiteral("<span style='color:%1'>(</span>").arg(c.muted.name());
+                    add(QStringLiteral("("), Kind::Bracket);
+                    spaceOwed = false;
                 }
                 line(alt, depth + 1, move(alt, true, false));
                 if (depth == 0) {
-                    text += QStringLiteral("</p><p style='margin:0'>");
+                    paragraph(false);
                 } else {
-                    if (text.endsWith(QLatin1Char(' '))) {
-                        text.chop(1);
-                    }
-                    text += QStringLiteral("<span style='color:%1'>)</span> ").arg(c.muted.name());
+                    spaceOwed = false;
+                    add(QStringLiteral(")"), Kind::Bracket);
                 }
                 number = true;
             }
         }
     };
 
-    text += QStringLiteral("<p style='margin:0'>");
     comment(game.node(core::Game::root()).comment);
     line(core::Game::root(), 0, true);
     if (game.mainChild(core::Game::root()) == core::kNoNode) {
-        text += QStringLiteral("<span style='color:%1'>%2</span>")
-                    .arg(c.muted.name(), tr("Play a move on the board to start."));
+        for (const QString& part :
+             tr("Play a move on the board to start.").split(QLatin1Char(' '))) {
+            add(part, Kind::Hint);
+        }
     } else if (const auto result = game.header("Result"); result != "*" && !result.empty()) {
-        text += QStringLiteral("<b style='color:%1'>%2</b>")
-                    .arg(c.muted.name(), QString::fromStdString(std::string(result)));
+        add(QString::fromStdString(std::string(result)), Kind::Result);
     }
-    text += QStringLiteral("</p>");
-    text.replace(QStringLiteral("<p style='margin:0'></p>"), QString());
+    m_paragraphs.back().end = static_cast<int>(m_words.size());
+    if (m_paragraphs.size() > 1 && m_paragraphs.back().first == m_paragraphs.back().end) {
+        m_paragraphs.pop_back(); // no empty paragraph at the end
+    }
 
-    setHtml(QStringLiteral("<div style='font-size:17px;line-height:175%'>%1</div>").arg(text));
-    indexAnchors();
+    layoutWords();
     verticalScrollBar()->setValue(scroll);
     setCurrent(m_current);
 }
 
-void NotationView::indexAnchors() {
-    // Remember where each move's link is, so the highlight can move without re-rendering.
-    for (QTextBlock block = document()->begin(); block.isValid(); block = block.next()) {
-        for (auto it = block.begin(); !it.atEnd(); ++it) {
-            const QTextFragment fragment = it.fragment();
-            const QTextCharFormat format = fragment.charFormat();
-            if (!format.isAnchor()) {
-                continue;
+// ---- Layout ------------------------------------------------------------------------------------
+
+void NotationView::layoutWords() {
+    const int width = viewport()->width();
+    m_laidOutWidth = width;
+    m_lines.clear();
+    int y = kMargin;
+    for (const Paragraph& p : m_paragraphs) {
+        if (p.first == p.end) {
+            continue;
+        }
+        const auto size = static_cast<std::size_t>(p.variation ? 1 : 0);
+        const int height = m_lineHeight[size];
+        const qreal space = m_spaceWidth[size];
+        const auto left = static_cast<qreal>(kMargin + (p.variation ? kVariationIndent : 0));
+        const qreal room = std::max(40.0, static_cast<qreal>(width - kMargin) - left);
+        if (p.variation) {
+            y += kVariationGap;
+        }
+        Line current{y, height, p.first, p.first, p.variation};
+        qreal x = 0;
+        for (int i = p.first; i < p.end; ++i) {
+            Word& word = m_words[static_cast<std::size_t>(i)];
+            if (i > current.first) {
+                const qreal gap = word.join == Join::Touch ? 0 : space;
+                if (word.join == Join::Space) {
+                    // Break before a word if it (with the words glued to it) doesn't fit.
+                    qreal group = word.width;
+                    for (int j = i + 1; j < p.end; ++j) {
+                        const Word& next = m_words[static_cast<std::size_t>(j)];
+                        if (next.join == Join::Space) {
+                            break;
+                        }
+                        group += (next.join == Join::Nbsp ? space : 0) + next.width;
+                    }
+                    if (x + gap + group > room) {
+                        current.end = i;
+                        m_lines.push_back(current);
+                        y += height;
+                        current = Line{y, height, i, i, p.variation};
+                        x = 0;
+                    } else {
+                        x += gap;
+                    }
+                } else {
+                    x += gap;
+                }
             }
-            bool ok = false;
-            const auto id =
-                static_cast<NodeId>(format.anchorHref().mid(1).toUInt(&ok)); // "#12" → 12
-            if (ok) {
-                m_ranges[id] = {fragment.position(), fragment.length()};
-            }
+            word.x = left + x;
+            word.line = static_cast<int>(m_lines.size());
+            x += word.width;
+        }
+        current.end = p.end;
+        m_lines.push_back(current);
+        y += height;
+        if (p.variation) {
+            y += kVariationGap;
         }
     }
+    m_contentHeight = y + kMargin;
+    updateScrollBar();
 }
+
+void NotationView::updateScrollBar() {
+    QScrollBar* bar = verticalScrollBar();
+    bar->setRange(0, std::max(0, m_contentHeight - viewport()->height()));
+    bar->setPageStep(viewport()->height());
+    bar->setSingleStep(m_lineHeight[0]);
+}
+
+QRectF NotationView::wordRect(int index) const {
+    const Word& word = m_words[static_cast<std::size_t>(index)];
+    const Line& line = m_lines[static_cast<std::size_t>(word.line)];
+    return {word.x, static_cast<qreal>(line.top - verticalScrollBar()->value()), word.width,
+            static_cast<qreal>(line.height)};
+}
+
+QRect NotationView::moveRect(NodeId id) const {
+    const auto it = m_moveWord.find(id);
+    return it == m_moveWord.end() ? QRect() : wordRect(it->second).toAlignedRect();
+}
+
+int NotationView::wordAt(QPoint point) const {
+    const int y = point.y() + verticalScrollBar()->value();
+    const auto line = std::upper_bound(m_lines.begin(), m_lines.end(), y,
+                                       [](int value, const Line& l) { return value < l.top; });
+    if (line == m_lines.begin()) {
+        return -1;
+    }
+    const Line& l = *std::prev(line);
+    if (y >= l.top + l.height) {
+        return -1; // in the gap between paragraphs
+    }
+    const auto x = static_cast<qreal>(point.x());
+    for (int i = l.first; i < l.end; ++i) {
+        const Word& word = m_words[static_cast<std::size_t>(i)];
+        if (x >= word.x - 2 && x < word.x + word.width + 2) {
+            return i;
+        }
+    }
+    return -1;
+}
+
+NodeId NotationView::nodeAt(QPoint point) const {
+    const int index = wordAt(point);
+    return index < 0 ? core::kNoNode : m_words[static_cast<std::size_t>(index)].node;
+}
+
+QString NotationView::plainText() const {
+    QStringList paragraphs;
+    for (const Paragraph& p : m_paragraphs) {
+        QString text;
+        for (int i = p.first; i < p.end; ++i) {
+            const Word& word = m_words[static_cast<std::size_t>(i)];
+            if (i > p.first) {
+                if (word.join == Join::Space) {
+                    text += QLatin1Char(' ');
+                } else if (word.join == Join::Nbsp) {
+                    text += QChar::Nbsp;
+                }
+            }
+            text += word.text;
+        }
+        paragraphs << text;
+    }
+    return paragraphs.join(QLatin1Char('\n'));
+}
+
+// ---- Highlight and painting --------------------------------------------------------------------
 
 void NotationView::setCurrent(NodeId current) {
     m_current = current;
-    // Put back the previous move's own format…
-    if (m_highlighted != core::kNoNode) {
-        if (const auto it = m_ranges.find(m_highlighted); it != m_ranges.end()) {
-            QTextCursor cursor(document());
-            cursor.setPosition(it->second.start);
-            cursor.setPosition(it->second.start + it->second.length, QTextCursor::KeepAnchor);
-            cursor.setCharFormat(m_savedFormat);
-        }
-        m_highlighted = core::kNoNode;
-    }
-    // …and highlight the new one: accent text on a soft accent tint.
-    const auto it = m_ranges.find(current);
-    if (it == m_ranges.end()) {
+    scrollToMove(current);
+    viewport()->update();
+}
+
+void NotationView::scrollToMove(NodeId id) {
+    const QRect rect = moveRect(id);
+    if (rect.isEmpty() || viewport()->rect().adjusted(0, 8, 0, -8).contains(rect)) {
         return;
     }
-    QTextCursor cursor(document());
-    cursor.setPosition(it->second.start);
-    cursor.setPosition(it->second.start + it->second.length, QTextCursor::KeepAnchor);
-    QTextCursor probe(document()); // the format inside the range, not before it
-    probe.setPosition(it->second.start + 1);
-    m_savedFormat = probe.charFormat();
-    QTextCharFormat highlight;
+    verticalScrollBar()->setValue(verticalScrollBar()->value() + rect.center().y() -
+                                  (viewport()->height() / 2));
+}
+
+void NotationView::paintEvent(QPaintEvent* event) {
+    QPainter painter(viewport());
+    painter.setRenderHint(QPainter::Antialiasing);
     const auto& c = m_style.colors();
+    const int scroll = verticalScrollBar()->value();
+    const QRect area = event->rect();
+    // Only the lines on screen.
+    auto line = std::upper_bound(m_lines.begin(), m_lines.end(), area.top() + scroll,
+                                 [](int value, const Line& l) { return value < l.top + l.height; });
+    const auto current = m_moveWord.find(m_current);
+    const int currentWord = current == m_moveWord.end() ? -1 : current->second;
     QColor tint = c.accent;
     tint.setAlphaF(0.22F);
-    highlight.setBackground(tint);
-    highlight.setForeground(c.accent);
-    highlight.setFontWeight(QFont::DemiBold);
-    cursor.mergeCharFormat(highlight);
-    m_highlighted = current;
-
-    // Scroll so the move is visible (without moving a caret the user would see).
-    QTextCursor visible(document());
-    visible.setPosition(it->second.start);
-    const QRect rect = cursorRect(visible);
-    if (!viewport()->rect().adjusted(0, 8, 0, -8).contains(rect)) {
-        verticalScrollBar()->setValue(verticalScrollBar()->value() + rect.center().y() -
-                                      (viewport()->height() / 2));
+    for (; line != m_lines.end() && line->top - scroll < area.bottom(); ++line) {
+        const auto size = static_cast<std::size_t>(line->small ? 1 : 0);
+        const qreal baseline = static_cast<qreal>(line->top - scroll) + m_ascent[size];
+        for (int i = line->first; i < line->end; ++i) {
+            const Word& word = m_words[static_cast<std::size_t>(i)];
+            QColor color = c.muted;
+            if (word.kind == Kind::MainMove) {
+                color = c.text;
+            }
+            if (i == currentWord) { // accent text on a soft accent tint
+                const QFontMetricsF metrics(
+                    m_fonts[static_cast<std::size_t>(fontIndex(word.kind, word.small))]);
+                const QRectF box(word.x - 3, baseline - metrics.ascent() - 2, word.width + 6,
+                                 metrics.height() + 4);
+                QPainterPath path;
+                path.addRoundedRect(box, 5, 5);
+                painter.fillPath(path, tint);
+                color = c.accent;
+            } else if (i == m_hovered) {
+                color = c.text;
+            }
+            painter.setFont(m_fonts[static_cast<std::size_t>(fontIndex(word.kind, word.small))]);
+            painter.setPen(color);
+            painter.drawText(QPointF(word.x, baseline), word.text);
+        }
     }
 }
 
-// ---- Context menu ------------------------------------------------------------------------------
+void NotationView::resizeEvent(QResizeEvent* event) {
+    QAbstractScrollArea::resizeEvent(event);
+    if (viewport()->width() != m_laidOutWidth) {
+        layoutWords();
+        scrollToMove(m_current);
+    } else {
+        updateScrollBar();
+    }
+}
 
-NodeId NotationView::nodeAt(QPoint point) const {
-    const QString href = anchorAt(point);
-    bool ok = false;
-    const auto id = static_cast<NodeId>(href.mid(1).toUInt(&ok));
-    return ok ? id : core::kNoNode;
+void NotationView::changeEvent(QEvent* event) {
+    QAbstractScrollArea::changeEvent(event);
+    if (event->type() == QEvent::FontChange) {
+        updateFonts();
+        for (Word& word : m_words) {
+            word.width = widthOf(word);
+        }
+        layoutWords();
+        viewport()->update();
+    }
+}
+
+// ---- Mouse -------------------------------------------------------------------------------------
+
+void NotationView::mousePressEvent(QMouseEvent* event) {
+    m_pressed =
+        event->button() == Qt::LeftButton ? nodeAt(event->position().toPoint()) : core::kNoNode;
+    QAbstractScrollArea::mousePressEvent(event);
+}
+
+void NotationView::mouseReleaseEvent(QMouseEvent* event) {
+    // A click selects the move it started and ended on.
+    if (event->button() == Qt::LeftButton && m_pressed != core::kNoNode &&
+        nodeAt(event->position().toPoint()) == m_pressed) {
+        emit nodeActivated(m_pressed);
+    }
+    m_pressed = core::kNoNode;
+    QAbstractScrollArea::mouseReleaseEvent(event);
+}
+
+void NotationView::mouseMoveEvent(QMouseEvent* event) {
+    int hovered = wordAt(event->position().toPoint());
+    if (hovered >= 0 && m_words[static_cast<std::size_t>(hovered)].node == core::kNoNode) {
+        hovered = -1;
+    }
+    if (hovered != m_hovered) {
+        m_hovered = hovered;
+        viewport()->setCursor(hovered >= 0 ? Qt::PointingHandCursor : Qt::ArrowCursor);
+        viewport()->update();
+    }
+    QAbstractScrollArea::mouseMoveEvent(event);
+}
+
+void NotationView::leaveEvent(QEvent* event) {
+    if (m_hovered >= 0) {
+        m_hovered = -1;
+        viewport()->update();
+    }
+    QAbstractScrollArea::leaveEvent(event);
 }
 
 void NotationView::mouseDoubleClickEvent(QMouseEvent* event) {
@@ -240,8 +492,10 @@ void NotationView::mouseDoubleClickEvent(QMouseEvent* event) {
         emit commentEditRequested(id);
         return;
     }
-    QTextBrowser::mouseDoubleClickEvent(event);
+    QAbstractScrollArea::mouseDoubleClickEvent(event);
 }
+
+// ---- Context menu ------------------------------------------------------------------------------
 
 void NotationView::contextMenuEvent(QContextMenuEvent* event) {
     if (m_game == nullptr) {

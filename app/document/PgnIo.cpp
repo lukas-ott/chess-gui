@@ -54,7 +54,19 @@ QFuture<Parsed> parse(std::shared_ptr<const PgnFile> file, int index) {
             return Parsed{std::nullopt, QObject::tr("The file has no game %1.").arg(index + 1)};
         }
         const auto& entry = file->games[static_cast<std::size_t>(index)];
-        auto game = pgn::parseGame(std::string_view(file->text).substr(entry.offset, entry.length));
+        std::string fromDisk;
+        if (!file->hasText) {
+            QFile in(file->path);
+            if (!in.open(QIODevice::ReadOnly) || !in.seek(static_cast<qint64>(entry.offset))) {
+                return Parsed{std::nullopt, in.errorString()};
+            }
+            const QByteArray bytes = in.read(static_cast<qint64>(entry.length));
+            fromDisk.assign(bytes.constData(), static_cast<std::size_t>(bytes.size()));
+        }
+        const std::string_view text =
+            file->hasText ? std::string_view(file->text).substr(entry.offset, entry.length)
+                          : std::string_view(fromDisk);
+        auto game = pgn::parseGame(text);
         if (!game) {
             return Parsed{std::nullopt, QString::fromStdString(game.error().message)};
         }
@@ -77,8 +89,11 @@ QFuture<QString> write(const QString& path, std::string text) {
     });
 }
 
-std::string replaceGame(const PgnFile& file, int index, std::string_view gameText) {
-    const auto& entry = file.games.at(static_cast<std::size_t>(index));
+std::optional<std::string> replaceGame(const PgnFile& file, int index, std::string_view gameText) {
+    if (!file.hasText || index < 0 || static_cast<std::size_t>(index) >= file.games.size()) {
+        return std::nullopt;
+    }
+    const auto& entry = file.games[static_cast<std::size_t>(index)];
     // The entry ends at the game's result; writeGame ends with a newline the old text has after.
     while (gameText.ends_with('\n')) {
         gameText.remove_suffix(1);

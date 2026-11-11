@@ -1,5 +1,6 @@
 // PGN speed: the game index (what opening a big file waits for) and full parsing (what opening
-// one game waits for). Spec targets: a ~50k-position repertoire in < 300 ms (with cache, M5).
+// one game waits for). Spec target: a ~50k-position repertoire open in < 300 ms (see
+// bench_board.cpp for the move list and bench_library.cpp for the cache).
 // Run from the release preset:  ./build/release/bench/kiebitz_bench --benchmark_filter=pgn
 
 #include "kiebitz/core/game.hpp"

@@ -59,7 +59,7 @@ qt_add_library(kiebitz_ui STATIC
     widgets/Stepper.hpp)
 target_include_directories(kiebitz_ui PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")
 target_link_libraries(kiebitz_ui PUBLIC Qt6::Widgets Qt6::Svg Qt6::Concurrent Qt6::Network
-    kiebitz::pgn kiebitz::engine)
+    kiebitz::pgn kiebitz::engine kiebitz::library)
 kiebitz_set_warnings(kiebitz_ui)
 
 # Piece SVGs are compiled into the binary (":/pieces/<set>/wK.svg"), so the app has no loose

@@ -2,11 +2,15 @@
 
 #include "kiebitz/core/game.hpp"
 
-#include <QTextBrowser>
-#include <QTextCharFormat>
+#include <QAbstractScrollArea>
+#include <QFont>
+#include <QHash>
+#include <QString>
 
+#include <array>
 #include <cstdint>
 #include <unordered_map>
+#include <vector>
 
 namespace kiebitz::app {
 
@@ -18,7 +22,11 @@ class AppStyle;
 /// Clicking a move selects it; right-clicking opens the editing menu (promote, make main line,
 /// delete, annotate, comment). The view only shows the game and reports what the user asked
 /// for through signals; the window changes the game and calls setGame()/setCurrent() back.
-class NotationView : public QTextBrowser {
+///
+/// Built for big repertoires (50,000 positions): the text is a flat list of words, each word's
+/// width is measured once per font (moves like "Nf3" repeat endlessly), lines are laid out by
+/// simple word wrap, and only the lines on screen are painted.
+class NotationView : public QAbstractScrollArea {
     Q_OBJECT
 
 public:
@@ -28,6 +36,11 @@ public:
     void setGame(const core::Game* game, core::NodeId current);
     /// Moves the highlight. Cheap: doesn't rebuild the text.
     void setCurrent(core::NodeId current);
+
+    /// The text as shown, one paragraph per line (for tests and copying).
+    [[nodiscard]] QString plainText() const;
+    /// Where a move is drawn, in viewport coordinates (empty if it isn't in the list).
+    [[nodiscard]] QRect moveRect(core::NodeId id) const;
 
 signals:
     void nodeActivated(kiebitz::core::NodeId id);
@@ -40,25 +53,82 @@ signals:
     void commentEditRequested(kiebitz::core::NodeId id);
 
 protected:
-    void contextMenuEvent(QContextMenuEvent* event) override;
+    void paintEvent(QPaintEvent* event) override;
+    void resizeEvent(QResizeEvent* event) override;
+    void changeEvent(QEvent* event) override;
+    void mousePressEvent(QMouseEvent* event) override;
+    void mouseReleaseEvent(QMouseEvent* event) override;
+    void mouseMoveEvent(QMouseEvent* event) override;
     void mouseDoubleClickEvent(QMouseEvent* event) override;
+    void contextMenuEvent(QContextMenuEvent* event) override;
+    void leaveEvent(QEvent* event) override;
 
 private:
-    void render();
-    void indexAnchors();
-    [[nodiscard]] core::NodeId nodeAt(QPoint point) const;
+    /// How a word looks. Each kind has its own font and colour.
+    enum class Kind : std::uint8_t { Number, MainMove, SideMove, Comment, Bracket, Result, Hint };
+    static constexpr std::size_t kKinds = 7;
+    /// How a word joins the one before it.
+    enum class Join : std::uint8_t {
+        Space, ///< a space; the line may break here
+        Nbsp,  ///< a space, but never a break ("12." and its move)
+        Touch, ///< no space and no break ("(" and the move after it)
+    };
+    struct Word {
+        QString text;
+        core::NodeId node = core::kNoNode; ///< the move it belongs to, for moves
+        Kind kind = Kind::Comment;
+        Join join = Join::Space;
+        bool small = false; ///< in a variation paragraph (smaller font)
+        qreal x = 0;        ///< laid out: left edge, relative to the view's content
+        qreal width = 0;
+        int line = 0; ///< laid out: index into m_lines
+    };
+    struct Paragraph {
+        int first = 0; ///< words [first, end)
+        int end = 0;
+        bool variation = false;
+    };
+    struct Line {
+        int top = 0; ///< in content coordinates
+        int height = 0;
+        int first = 0; ///< words [first, end)
+        int end = 0;
+        bool small = false;
+    };
+
+    void rebuild();
+    void layoutWords();
+    void updateScrollBar();
+    void updateFonts();
+    void scrollToMove(core::NodeId id);
+    [[nodiscard]] static int fontIndex(Kind kind, bool small) {
+        return (static_cast<int>(kind) * 2) + (small ? 1 : 0);
+    }
+    [[nodiscard]] qreal widthOf(const Word& word);
+    [[nodiscard]] int wordAt(QPoint viewportPoint) const;
+    [[nodiscard]] core::NodeId nodeAt(QPoint viewportPoint) const;
+    [[nodiscard]] QRectF wordRect(int index) const; ///< in viewport coordinates
 
     const AppStyle& m_style;
     const core::Game* m_game = nullptr;
     core::NodeId m_current = core::Game::root();
 
-    struct Range {
-        int start = 0;
-        int length = 0;
-    };
-    std::unordered_map<core::NodeId, Range> m_ranges; ///< where each move's text is
-    core::NodeId m_highlighted = core::kNoNode;
-    QTextCharFormat m_savedFormat; ///< the highlighted move's format before highlighting
+    std::vector<Word> m_words;
+    std::vector<Paragraph> m_paragraphs;
+    std::vector<Line> m_lines;
+    std::unordered_map<core::NodeId, int> m_moveWord; ///< which word shows each move
+    int m_contentHeight = 0;
+    int m_laidOutWidth = -1;
+
+    /// One font per kind and size, and the measured widths of the words in it.
+    std::array<QFont, 2 * kKinds> m_fonts;
+    std::array<QHash<QString, qreal>, 2 * kKinds> m_widths;
+    std::array<qreal, 2> m_spaceWidth{}; ///< [normal, small]
+    std::array<int, 2> m_lineHeight{};
+    std::array<qreal, 2> m_ascent{};
+
+    core::NodeId m_pressed = core::kNoNode; ///< a click goes to the move it started on
+    int m_hovered = -1;                     ///< the move word under the mouse
 };
 
 } // namespace kiebitz::app

@@ -1,5 +1,6 @@
-add_executable(kiebitz_bench bench_core.cpp bench_engine.cpp bench_perft.cpp bench_pgn.cpp)
-target_link_libraries(kiebitz_bench PRIVATE kiebitz::pgn kiebitz::engine
+add_executable(kiebitz_bench bench_core.cpp bench_engine.cpp bench_library.cpp bench_perft.cpp
+    bench_pgn.cpp)
+target_link_libraries(kiebitz_bench PRIVATE kiebitz::engine kiebitz::library
     benchmark::benchmark_main)
 kiebitz_set_warnings(kiebitz_bench)
 

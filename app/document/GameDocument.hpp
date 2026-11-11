@@ -15,8 +15,12 @@ namespace kiebitz::app {
 /// that file (they all save into the same text).
 struct PgnFile {
     QString path;                      ///< empty for text that came from the clipboard
-    std::string text;                  ///< the whole file
+    std::string text;                  ///< the whole file, if hasText
     std::vector<pgn::GameEntry> games; ///< from pgn::indexGames(text)
+    /// False for the Library's files: it keeps only their index (from its cache), and a game is
+    /// read from disk when it's needed. A game is only ever opened in a tab from a file with
+    /// its text, because saving rewrites the whole file from it.
+    bool hasText = true;
 };
 
 /// One open game, shown in one document tab.

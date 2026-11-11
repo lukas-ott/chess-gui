@@ -1,5 +1,6 @@
 #include "MainWindow.hpp"
 #include "board/BoardView.hpp"
+#include "notation/NotationView.hpp"
 #include "style/AppStyle.hpp"
 
 #include <QAction>
@@ -11,7 +12,6 @@
 #include <QSettings>
 #include <QTabBar>
 #include <QTest>
-#include <QTextBrowser>
 #include <QToolButton>
 #include <gtest/gtest.h>
 
@@ -21,6 +21,7 @@ namespace {
 
 using kiebitz::app::BoardView;
 using kiebitz::app::MainWindow;
+using kiebitz::app::NotationView;
 using namespace kiebitz::core;
 
 /// Finds a menu action by its text (without the & mnemonic).
@@ -128,9 +129,9 @@ TEST_F(MainWindowTest, MoveListShowsMovesVariationsAndNumbers) {
     action(window, QStringLiteral("Back"))->trigger();
     play("c5"); // a variation at Black's first move
     play("Nf3");
-    auto* list = window.findChild<QTextBrowser*>(QStringLiteral("moveList"));
+    auto* list = window.findChild<NotationView*>(QStringLiteral("moveList"));
     ASSERT_NE(list, nullptr);
-    const QString text = list->toPlainText().simplified().replace(QChar(0xA0), QLatin1Char(' '));
+    const QString text = list->plainText().simplified().replace(QChar(0xA0), QLatin1Char(' '));
     // First-level variations get their own indented line, so no brackets here.
     EXPECT_EQ(text, QStringLiteral("1. e4 e5 1… c5 2. Nf3"));
 }
@@ -138,9 +139,11 @@ TEST_F(MainWindowTest, MoveListShowsMovesVariationsAndNumbers) {
 TEST_F(MainWindowTest, ClickingAMoveInTheListGoesThere) {
     play("d4");
     play("d5");
-    auto* list = window.findChild<QTextBrowser*>(QStringLiteral("moveList"));
+    auto* list = window.findChild<NotationView*>(QStringLiteral("moveList"));
     ASSERT_NE(list, nullptr);
-    emit list->anchorClicked(QUrl(QStringLiteral("#1"))); // node 1 = 1. d4
+    const QRect d4 = list->moveRect(1); // node 1 = 1. d4
+    ASSERT_FALSE(d4.isEmpty());
+    QTest::mouseClick(list->viewport(), Qt::LeftButton, {}, d4.center());
     EXPECT_EQ(fen(), "rnbqkbnr/pppppppp/8/8/3P4/8/PPP1PPPP/RNBQKBNR b KQkq - 0 1");
 }
 

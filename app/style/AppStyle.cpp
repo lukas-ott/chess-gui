@@ -186,7 +186,7 @@ QTabWidget#panels > QTabBar::tab:hover:!selected { color: @text; }
 QScrollArea#infoScroll, QScrollArea#infoScroll > QWidget > QWidget { background: transparent; }
 
 /* Move list */
-QTextBrowser#moveList { background: transparent; border: none; color: @text; }
+QAbstractScrollArea#moveList { background: transparent; border: none; color: @text; }
 
 /* Navigation buttons under the moves */
 QPushButton[role="nav"] {

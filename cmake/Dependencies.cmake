@@ -19,6 +19,24 @@ add_library(chess_library INTERFACE)
 add_library(thirdparty::chess ALIAS chess_library)
 target_include_directories(chess_library SYSTEM INTERFACE "${chess_library_SOURCE_DIR}/include")
 
+# SQLite (public domain): the library's cache of game indexes. The amalgamation is one C file,
+# built here with the settings the cache needs (thread-safe, no extension loading).
+FetchContent_Declare(sqlite
+    URL https://www.sqlite.org/2025/sqlite-amalgamation-3500400.zip
+    URL_HASH SHA256=1d3049dd0f830a025a53105fc79fd2ab9431aea99e137809d064d8ee8356b032)
+FetchContent_MakeAvailable(sqlite)
+
+enable_language(C)
+add_library(sqlite3 STATIC "${sqlite_SOURCE_DIR}/sqlite3.c")
+add_library(thirdparty::sqlite ALIAS sqlite3)
+target_include_directories(sqlite3 SYSTEM INTERFACE "${sqlite_SOURCE_DIR}")
+target_compile_definitions(sqlite3 PRIVATE
+    SQLITE_THREADSAFE=1 SQLITE_OMIT_LOAD_EXTENSION SQLITE_DQS=0 SQLITE_DEFAULT_MEMSTATUS=0
+    SQLITE_OMIT_DEPRECATED SQLITE_OMIT_SHARED_CACHE)
+set_target_properties(sqlite3 PROPERTIES POSITION_INDEPENDENT_CODE ON)
+find_package(Threads REQUIRED)
+target_link_libraries(sqlite3 PRIVATE Threads::Threads ${CMAKE_DL_LIBS})
+
 if(KIEBITZ_BUILD_TESTS)
     set(INSTALL_GTEST OFF CACHE BOOL "" FORCE)
     set(BUILD_GMOCK OFF CACHE BOOL "" FORCE)

@@ -28,13 +28,16 @@ struct Parsed {
 [[nodiscard]] QFuture<Loaded> load(const QString& path);
 /// Indexes PGN text that is already in memory (e.g. from the clipboard) and parses its first game.
 [[nodiscard]] QFuture<Loaded> loadText(std::string text);
-/// Parses one game of a file.
+/// Parses one game of a file. A file without its text (from the Library) has just that game
+/// read from disk.
 [[nodiscard]] QFuture<Parsed> parse(std::shared_ptr<const PgnFile> file, int index);
 /// Writes text to a file atomically (a temporary file renamed into place). Returns an error
 /// message, or an empty string on success.
 [[nodiscard]] QFuture<QString> write(const QString& path, std::string text);
 
-/// The file's text with one game's text replaced, for saving a game back into its file.
-[[nodiscard]] std::string replaceGame(const PgnFile& file, int index, std::string_view gameText);
+/// The file's text with one game's text replaced, for saving a game back into its file. Nothing
+/// if the file's text isn't in memory or it has no such game: never save a partial file.
+[[nodiscard]] std::optional<std::string> replaceGame(const PgnFile& file, int index,
+                                                     std::string_view gameText);
 
 } // namespace kiebitz::app::pgnio
