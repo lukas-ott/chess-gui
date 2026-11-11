@@ -3,8 +3,10 @@
 #include <QColor>
 #include <QObject>
 #include <QString>
+#include <QTemporaryDir>
 
 #include <cstdint>
+#include <memory>
 
 class QApplication;
 
@@ -57,13 +59,17 @@ signals:
 
 private:
     void apply();
-    [[nodiscard]] static QString styleSheet(const Colors& colors);
+    /// `checkImage`: a PNG of a tick in the accent colour (for checked menu items).
+    [[nodiscard]] static QString styleSheet(const Colors& colors, const QString& checkImage = {});
+    /// Draws the tick for the style sheet; returns its path.
+    [[nodiscard]] QString writeCheckImage(const QColor& color);
 
     QApplication& m_app;
     Appearance m_appearance = Appearance::System;
     bool m_dark = true;
     Colors m_colors = darkColors();
     bool m_applying = false;
+    std::unique_ptr<QTemporaryDir> m_images; ///< images the style sheet uses
 };
 
 } // namespace kiebitz::app

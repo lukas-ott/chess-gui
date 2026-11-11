@@ -19,10 +19,11 @@ class Stepper;
 /// The Repertoire tab beside the board. It has two faces:
 ///  - for a repertoire file: practice. How many positions there are to practise up to a chosen
 ///    move, and buttons to practise the whole file or the branch from the current position;
-///  - for any other game: the repertoire check. For each side, whether the game is still in your
-///    repertoire files at this move and in which file ("In book · Philidor Defense"), or where it
-///    left them ("Left the book with 7. f3 · Philidor Defense plays 7. Be3"), with a button to
-///    add the game's line.
+///  - for any other game: the repertoire check, for the side the board is viewed from. Whether
+///    the game is still in your repertoire at this move ("In book · Philidor Defense"), or where
+///    it left it ("Left the book with 7. f3 · Philidor Defense plays 7. Be3"). It names one
+///    file: the one that follows the game the longest, so it stays put from move to move. Buttons
+///    jump to that file's line and add the game's line.
 class RepertoirePanel : public QWidget {
     Q_OBJECT
 
@@ -34,6 +35,9 @@ public:
     void setGame(const core::Game* game, core::NodeId current, bool repertoireFile,
                  core::Color side);
 
+    /// The side the board is viewed from: the check is for that side's repertoire.
+    void setViewSide(core::Color side);
+
     /// The practice depth (up to this move).
     [[nodiscard]] int practiceDepth() const;
 
@@ -43,6 +47,8 @@ public:
 
 signals:
     void addLineRequested(kiebitz::core::Color side);
+    /// Open a repertoire file at a position (its hash).
+    void jumpRequested(const QString& path, quint64 position);
     /// Practise the whole file (from the start) or from the current position, up to `depth`.
     void practiceRequested(bool fromHere, int depth);
 
@@ -57,6 +63,7 @@ private:
     core::NodeId m_current = core::Game::root();
     bool m_repertoireFile = false;
     core::Color m_side = core::Color::White;
+    core::Color m_viewSide = core::Color::White;
 
     QStackedWidget* m_pages = nullptr; ///< 0 = nothing to check, 1 = the check, 2 = practice
     struct Row {
@@ -64,6 +71,9 @@ private:
         QLabel* title = nullptr;
         QLabel* status = nullptr;
         QPushButton* add = nullptr;
+        QPushButton* jump = nullptr;
+        QString file;       ///< the file named (the longest match); kept while it fits
+        quint64 jumpTo = 0; ///< where Jump to Line goes in it
     };
     std::array<Row, 2> m_rows; ///< White, Black
 

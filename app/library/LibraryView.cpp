@@ -17,6 +17,7 @@
 #include <QComboBox>
 #include <QDir>
 #include <QDropEvent>
+#include <QFile>
 #include <QFileInfo>
 #include <QFutureWatcher>
 #include <QHBoxLayout>
@@ -28,19 +29,25 @@
 #include <QLocale>
 #include <QMenu>
 #include <QMessageBox>
+#include <QPainter>
+#include <QPainterPath>
+#include <QProcess>
 #include <QPushButton>
 #include <QSettings>
+#include <QSignalBlocker>
 #include <QSortFilterProxyModel>
 #include <QSplitter>
 #include <QStackedWidget>
 #include <QStyle>
 #include <QTableView>
+#include <QTimer>
 #include <QTreeWidget>
 #include <QVBoxLayout>
 #include <QtConcurrent/QtConcurrentRun>
 
 #include <algorithm>
 #include <array>
+#include <cctype>
 #include <functional>
 #include <map>
 #include <span>
@@ -83,6 +90,7 @@ constexpr int kKeyRole = Qt::UserRole + 1;      ///< folder: relative path; file
 constexpr int kIndexRole = Qt::UserRole + 2;    ///< file: index into Library::files()
 constexpr int kFileKindRole = Qt::UserRole + 3; ///< file: its library::FileKind
 constexpr int kSideRole = Qt::UserRole + 4;     ///< file: the side a repertoire is for (0 = White)
+constexpr int kNameRole = Qt::UserRole + 5;     ///< the name on disk (to notice a rename)
 constexpr int kFolder = 1;
 constexpr int kFile = 2;
 
@@ -135,6 +143,29 @@ QString toQString(std::string_view text) {
 }
 
 /// "Sicilian Defense: Najdorf Variation" from a game's headers, else its ECO code.
+/// Whether any game of a file has `text` in its players, event, site, opening or annotator.
+bool contains(const std::shared_ptr<PgnFile>& file, const QString& text) {
+    if (!file) {
+        return false;
+    }
+    const QByteArray needle = text.toUtf8();
+    const std::string_view wanted(needle.constData(), static_cast<std::size_t>(needle.size()));
+    const auto has = [&](std::string_view value) {
+        // Case-insensitive for ASCII; other letters must match as typed.
+        return std::search(value.begin(), value.end(), wanted.begin(), wanted.end(),
+                           [](char a, char b) {
+                               return std::tolower(static_cast<unsigned char>(a)) ==
+                                      std::tolower(static_cast<unsigned char>(b));
+                           }) != value.end();
+    };
+    static constexpr std::array<const char*, 8> kHeaders{
+        "White", "Black", "Event", "Site", "Opening", "Variation", "ECO", "Annotator"};
+    return std::any_of(file->games.begin(), file->games.end(), [&](const pgn::GameEntry& game) {
+        return std::any_of(kHeaders.begin(), kHeaders.end(),
+                           [&](const char* name) { return has(game.header(name)); });
+    });
+}
+
 QString openingOf(const pgn::GameEntry& game) {
     QString opening = toQString(game.header("Opening"));
     if (const QString variation = toQString(game.header("Variation")); !variation.isEmpty()) {
@@ -177,6 +208,37 @@ public:
     std::function<void(QTreeWidgetItem* dragged, QTreeWidgetItem* folder)> onDrop;
 
 protected:
+    /// The space before a row: only a fold arrow (the app's chevron), never part of the row's
+    /// highlight, so a selected row is one rounded shape.
+    void drawBranches(QPainter* painter, const QRect& rect,
+                      const QModelIndex& index) const override {
+        // The card's colour (the tree's own background is see-through).
+        painter->fillRect(rect, QApplication::palette().color(QPalette::Base));
+        const QTreeWidgetItem* item = itemFromIndex(index);
+        if (item == nullptr || item->childCount() == 0) {
+            return;
+        }
+        const QRectF box(rect.right() - indentation() + 1, rect.top(), indentation(),
+                         rect.height());
+        const QPointF c = box.center();
+        painter->save();
+        painter->setRenderHint(QPainter::Antialiasing);
+        painter->setPen(QPen(palette().color(QPalette::PlaceholderText), 1.4, Qt::SolidLine,
+                             Qt::RoundCap, Qt::RoundJoin));
+        QPainterPath chevron;
+        if (item->isExpanded()) { // pointing down
+            chevron.moveTo(c.x() - 3.5, c.y() - 1.5);
+            chevron.lineTo(c.x(), c.y() + 2.0);
+            chevron.lineTo(c.x() + 3.5, c.y() - 1.5);
+        } else { // pointing right
+            chevron.moveTo(c.x() - 1.5, c.y() - 3.5);
+            chevron.lineTo(c.x() + 2.0, c.y());
+            chevron.lineTo(c.x() - 1.5, c.y() + 3.5);
+        }
+        painter->drawPath(chevron);
+        painter->restore();
+    }
+
     void dropEvent(QDropEvent* event) override {
         QTreeWidgetItem* dragged = currentItem();
         QTreeWidgetItem* target = itemAt(event->position().toPoint());
@@ -387,6 +449,26 @@ LibraryView::LibraryView(Library& library, RepertoireStore& store, const AppStyl
     m_files->setAcceptDrops(true);
     m_files->setDropIndicatorShown(true);
     m_files->setDragDropMode(QAbstractItemView::InternalMove);
+    m_files->setEditTriggers(QAbstractItemView::EditKeyPressed); // F2, or Rename in the menu
+    connect(m_files, &QTreeWidget::itemChanged, this, [this](QTreeWidgetItem* item, int column) {
+        if (m_rebuilding || column != 0) {
+            return;
+        }
+        const QString name = item->text(0).trimmed();
+        const QString before = item->data(0, kNameRole).toString();
+        if (name == before) {
+            return;
+        }
+        const QString path =
+            item->data(0, kKindRole).toInt() == kFile
+                ? item->data(0, kKeyRole).toString()
+                : QDir(m_library.folder()).filePath(item->data(0, kKeyRole).toString());
+        if (const QString error = rename(path, name); !error.isEmpty()) {
+            const QSignalBlocker block(m_files);
+            item->setText(0, before);
+            QMessageBox::warning(this, tr("Couldn't rename"), error);
+        }
+    });
     m_files->setColumnCount(1);
     m_files->setHeaderHidden(true);
     m_files->setFrameShape(QFrame::NoFrame);
@@ -431,10 +513,21 @@ LibraryView::LibraryView(Library& library, RepertoireStore& store, const AppStyl
             return;
         }
         QMenu menu(this);
+        const bool isFile = item->data(0, kKindRole).toInt() == kFile;
+        const QString itemPath =
+            isFile ? item->data(0, kKeyRole).toString()
+                   : QDir(m_library.folder()).filePath(item->data(0, kKeyRole).toString());
         if (const auto file = fileOf(item)) {
             menu.addAction(tr("Open"), this, [this, file] { emit openGameRequested(file, 0); });
             menu.addSeparator();
         }
+        menu.addAction(tr("Rename"), this, [this, item] { m_files->editItem(item, 0); });
+        menu.addAction(tr("Show in Finder"), this, [itemPath] {
+            QProcess::startDetached(QStringLiteral("/usr/bin/open"),
+                                    {QStringLiteral("-R"), itemPath});
+        });
+        menu.addAction(tr("Move to Trash"), this, [this, itemPath] { askTrash(itemPath); });
+        menu.addSeparator();
         QMenu* type = menu.addMenu(tr("File Type"));
         const int current =
             item->data(0, kKindRole).toInt() == kFile ? item->data(0, kFileKindRole).toInt() : -1;
@@ -458,15 +551,14 @@ LibraryView::LibraryView(Library& library, RepertoireStore& store, const AppStyl
 
     m_fileSearch = new QLineEdit;
     m_fileSearch->setObjectName(QStringLiteral("libraryFileSearch"));
-    m_fileSearch->setPlaceholderText(tr("Search files"));
+    m_fileSearch->setPlaceholderText(tr("Search files and games"));
     m_fileSearch->setClearButtonEnabled(true);
-    connect(m_fileSearch, &QLineEdit::textChanged, this, [this](const QString& text) {
-        if (text.isEmpty()) {
-            refreshFiles(); // back to the folders as they were folded
-        } else {
-            applyFilters();
-        }
-    });
+    // A short pause after typing before searching through every file's games.
+    auto* searchDelay = new QTimer(this);
+    searchDelay->setSingleShot(true);
+    searchDelay->setInterval(150);
+    connect(m_fileSearch, &QLineEdit::textChanged, searchDelay, qOverload<>(&QTimer::start));
+    connect(searchDelay, &QTimer::timeout, this, &LibraryView::filtersChanged);
     m_typeFilter = new QComboBox;
     m_typeFilter->setObjectName(QStringLiteral("libraryTypeFilter"));
     m_typeFilter->setFocusPolicy(Qt::NoFocus);
@@ -476,7 +568,7 @@ LibraryView::LibraryView(Library& library, RepertoireStore& store, const AppStyl
     m_typeFilter->addItem(tr("Tournaments"), static_cast<int>(FileKind::Tournament));
     m_typeFilter->addItem(tr("Puzzles"), static_cast<int>(FileKind::Puzzle));
     m_typeFilter->addItem(tr("Other"), static_cast<int>(FileKind::Other));
-    connect(m_typeFilter, &QComboBox::currentIndexChanged, this, &LibraryView::applyFilters);
+    connect(m_typeFilter, &QComboBox::currentIndexChanged, this, &LibraryView::filtersChanged);
 
     auto* filesCard = card();
     m_cards[0] = filesCard;
@@ -738,7 +830,13 @@ LibraryView::LibraryView(Library& library, RepertoireStore& store, const AppStyl
     splitter->setChildrenCollapsible(false);
     splitter->setStretchFactor(0, 0);
     splitter->setStretchFactor(1, 1);
-    splitter->setSizes({320, 860});
+    // Wide enough for normal file names; the width you set is kept.
+    splitter->setObjectName(QStringLiteral("librarySplitter"));
+    splitter->setSizes({400, 780});
+    splitter->restoreState(QSettings().value(QStringLiteral("library/splitter")).toByteArray());
+    connect(splitter, &QSplitter::splitterMoved, this, [splitter] {
+        QSettings().setValue(QStringLiteral("library/splitter"), splitter->saveState());
+    });
 
     // ---- Empty library -------------------------------------------------------------------------
     auto* empty = new QWidget;
@@ -820,23 +918,36 @@ LibraryView::~LibraryView() {
     disconnect(m_focusOutline);
 }
 
+void LibraryView::filtersChanged() {
+    if (m_fileSearch->text().trimmed().isEmpty() && m_typeFilter->currentData().toInt() < 0) {
+        refreshFiles(); // nothing filtered: the folders as they were folded
+    } else {
+        applyFilters();
+        showSelection(); // a file found by a player or opening shows those games
+    }
+}
+
 void LibraryView::applyFilters() {
     // Files of other types, or whose names don't match the search, are hidden, and so are
     // folders left empty. While searching, the folders with matches open.
+    // The search looks at the names and inside the files: players, events, openings.
     const int wanted = m_typeFilter->currentData().toInt();
     const QString search = m_fileSearch->text().trimmed();
+    const bool filtering = wanted >= 0 || !search.isEmpty();
     const std::function<bool(QTreeWidgetItem*)> show = [&](QTreeWidgetItem* item) {
         bool visible = false;
         if (item->data(0, kKindRole).toInt() == kFile) {
             visible = (wanted < 0 || item->data(0, kFileKindRole).toInt() == wanted) &&
-                      (search.isEmpty() || item->text(0).contains(search, Qt::CaseInsensitive));
+                      (search.isEmpty() || item->text(0).contains(search, Qt::CaseInsensitive) ||
+                       contains(fileOf(item), search));
         } else {
             for (int i = 0; i < item->childCount(); ++i) {
                 visible = show(item->child(i)) || visible;
             }
-            if (visible && !search.isEmpty()) {
-                item->setExpanded(true);
+            if (visible && filtering) {
+                item->setExpanded(true); // show what was found
             }
+            visible = visible || !filtering; // an empty folder shows when nothing is filtered
         }
         item->setHidden(!visible);
         return visible;
@@ -937,6 +1048,8 @@ void LibraryView::refreshFiles() {
         item->setIcon(0, folderIcon);
         item->setData(0, kKindRole, kFolder);
         item->setData(0, kKeyRole, path);
+        item->setData(0, kNameRole, info.fileName());
+        item->setFlags(item->flags() | Qt::ItemIsEditable);
         folders.emplace(path, item);
         return item;
     };
@@ -958,6 +1071,8 @@ void LibraryView::refreshFiles() {
         QTreeWidgetItem* parent = folderItem(info.path());
         auto* item = parent != nullptr ? new QTreeWidgetItem(parent) : new QTreeWidgetItem(m_files);
         item->setText(0, info.completeBaseName());
+        item->setData(0, kNameRole, info.completeBaseName());
+        item->setFlags(item->flags() | Qt::ItemIsEditable);
         item->setData(0, kKindRole, kFile);
         item->setData(0, kKeyRole, files[i].path);
         item->setData(0, kIndexRole, static_cast<int>(i));
@@ -980,11 +1095,14 @@ void LibraryView::refreshFiles() {
 
     // A folder just made: select it, with the folders around it open.
     if (!m_selectAfterScan.isEmpty()) {
-        if (const auto it = folders.find(m_selectAfterScan); it != folders.end()) {
-            selectedKey = m_selectAfterScan;
-            m_selectAfterScan.clear();
-            for (QTreeWidgetItem* up = it->second->parent(); up != nullptr; up = up->parent()) {
-                up->setExpanded(true);
+        for (QTreeWidgetItemIterator it(m_files); *it != nullptr; ++it) {
+            if ((*it)->data(0, kKeyRole).toString() == m_selectAfterScan) {
+                selectedKey = m_selectAfterScan;
+                m_selectAfterScan.clear();
+                for (QTreeWidgetItem* up = (*it)->parent(); up != nullptr; up = up->parent()) {
+                    up->setExpanded(true);
+                }
+                break;
             }
         }
     }
@@ -1077,6 +1195,11 @@ void LibraryView::showSelection() {
         showRepertoire(file);
     } else {
         showGames(file, kind);
+        // Found by what's inside (a player, an opening): show those games.
+        const QString search = m_fileSearch->text().trimmed();
+        m_search->setText(!search.isEmpty() && !item->text(0).contains(search, Qt::CaseInsensitive)
+                              ? search
+                              : QString());
     }
 }
 
@@ -1266,6 +1389,54 @@ QString LibraryView::moveToFolder(const QStringList& paths, const QString& folde
         if (info.isDir()) {
             m_selectAfterScan = root.relativeFilePath(to); // keep the folder in view
         }
+    }
+    m_library.rescan();
+    return {};
+}
+
+QString LibraryView::rename(const QString& path, const QString& name) {
+    if (name.isEmpty() || name.contains(QLatin1Char('/')) || name.startsWith(QLatin1Char('.'))) {
+        return tr("A name can't be empty, contain “/” or start with a dot.");
+    }
+    const QFileInfo info(path);
+    // A file keeps its ending (.pgn); the name shown is without it.
+    const QString newName = info.isDir() ? name : name + QLatin1Char('.') + info.suffix();
+    const QString to = QDir(info.path()).filePath(newName);
+    if (QFileInfo::exists(to) && to.compare(path, Qt::CaseInsensitive) != 0) {
+        return tr("There already is a “%1” there.").arg(newName);
+    }
+    if (!QDir().rename(path, to)) {
+        return tr("“%1” couldn't be renamed.").arg(info.fileName());
+    }
+    emit pathMoved(path, to);
+    m_selectAfterScan = info.isDir() ? QDir(m_library.folder()).relativeFilePath(to) : to;
+    m_library.rescan();
+    return {};
+}
+
+void LibraryView::askTrash(const QString& path) {
+    QMessageBox box(QMessageBox::Question, tr("Move to Trash"),
+                    tr("Move “%1” to the Trash?").arg(QFileInfo(path).fileName()),
+                    QMessageBox::Cancel, this);
+    box.setInformativeText(QFileInfo(path).isDir()
+                               ? tr("Everything in it goes too. Open games from it are closed.")
+                               : tr("Open games from it are closed."));
+    box.addButton(tr("Move to Trash"), QMessageBox::DestructiveRole);
+    box.setDefaultButton(QMessageBox::Cancel);
+    box.exec();
+    if (box.buttonRole(box.clickedButton()) != QMessageBox::DestructiveRole) {
+        return;
+    }
+    if (const QString error = moveToTrash(path); !error.isEmpty()) {
+        QMessageBox::warning(this, tr("Couldn't move to the Trash"), error);
+    }
+}
+
+QString LibraryView::moveToTrash(const QString& path) {
+    emit pathRemoved(path); // tabs of it close first, so nothing saves it back
+    const bool moved = m_trash ? m_trash(path) : QFile::moveToTrash(path);
+    if (!moved) {
+        return tr("“%1” couldn't be moved to the Trash.").arg(QFileInfo(path).fileName());
     }
     m_library.rescan();
     return {};

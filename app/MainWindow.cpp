@@ -365,6 +365,7 @@ void MainWindow::buildViewMenu(QMenu* menu) {
     connect(flipAction, &QAction::toggled, this, [this](bool on) {
         m_board->setFlipped(on);
         m_evalBar->setFlipped(on);
+        m_repertoirePanel->setViewSide(on ? core::Color::Black : core::Color::White);
         // Remembered for other games; a game with an [Orientation] keeps its own side.
         if (const GameDocument* d = doc(); d == nullptr || d->game.header("Orientation").empty()) {
             QSettings().setValue(kFlippedKey, on);
@@ -493,6 +494,11 @@ void MainWindow::buildLayout() {
                 }
             });
     connect(this, &MainWindow::fileOpened, this, [this](const QString& path) {
+        if (m_jumpOnOpen && path == m_jumpOnOpen->first) {
+            const std::uint64_t position = m_jumpOnOpen->second;
+            m_jumpOnOpen.reset();
+            goToPosition(position);
+        }
         if (!m_practiceOnOpen.isEmpty() && path == m_practiceOnOpen) {
             m_practiceOnOpen.clear();
             startPractice(false, m_repertoirePanel->practiceDepth());
@@ -523,6 +529,16 @@ void MainWindow::buildLayout() {
                 }
                 updateTitles();
             });
+    connect(m_libraryView, &LibraryView::pathRemoved, this, [this](const QString& path) {
+        for (int tab = m_tabs->count() - 1; tab >= 0; --tab) {
+            GameDocument* d = docAt(tab);
+            if (d != nullptr && d->file &&
+                (d->file->path == path || d->file->path.startsWith(path + QLatin1Char('/')))) {
+                d->modified = false; // it's going: nothing to save
+                closeTab(tab);
+            }
+        }
+    });
     connect(m_libraryView, &LibraryView::changeFolderRequested, this,
             &MainWindow::chooseLibraryFolder);
 
@@ -775,6 +791,7 @@ QWidget* MainWindow::buildPanelsCard() {
                                      kStatusMs);
         }
     });
+    connect(m_repertoirePanel, &RepertoirePanel::jumpRequested, this, &MainWindow::jumpToLine);
     connect(m_repertoirePanel, &RepertoirePanel::practiceRequested, this,
             &MainWindow::startPractice);
     panels->addTab(m_repertoirePanel, tr("Repertoire"));
@@ -1568,6 +1585,7 @@ void MainWindow::showNode(NodeId id, bool animate) {
     m_enginePanel->setPosition(m_board->position());
     const bool repertoireFile =
         d->file && RepertoireStore::kindOf(*d->file) == library::FileKind::Repertoire;
+    m_repertoirePanel->setViewSide(m_board->isFlipped() ? core::Color::Black : core::Color::White);
     m_repertoirePanel->setGame(&d->game, id, repertoireFile,
                                d->file ? RepertoireStore::sideOf(*d->file) : core::Color::White);
     updateMovesTitle();
@@ -1666,6 +1684,59 @@ QString MainWindow::createFile(const QString& name, const std::string& text,
     m_library->rescan();
     openFile(path);
     return {};
+}
+
+// ---- Jump to a repertoire's line ---------------------------------------------------------------
+
+namespace {
+
+/// The first node (breadth first: the shortest way) where the game reaches a position.
+std::optional<NodeId> findPosition(const Game& game, std::uint64_t position) {
+    std::vector<std::pair<NodeId, core::Position>> queue{{Game::root(), game.startPosition()}};
+    for (std::size_t i = 0; i < queue.size(); ++i) {
+        const auto [node, at] = queue[i];
+        if (at.hash() == position) {
+            return node;
+        }
+        for (const NodeId child : game.children(node)) {
+            core::Position next = at;
+            next.play(game.node(child).move);
+            queue.emplace_back(child, next);
+        }
+    }
+    return std::nullopt;
+}
+
+} // namespace
+
+void MainWindow::jumpToLine(const QString& path, quint64 position) {
+    const RepertoireFile* built = m_repertoires->builtFile(path);
+    if (built == nullptr) {
+        return;
+    }
+    // The chapter (game) of the file that has the position.
+    for (std::size_t index = 0; index < built->games.size(); ++index) {
+        if (!findPosition(built->games[index], position)) {
+            continue;
+        }
+        m_jumpOnOpen = std::pair{path, static_cast<std::uint64_t>(position)};
+        openGame(built->file, static_cast<int>(index));
+        if (const GameDocument* d = doc(); m_jumpOnOpen && d != nullptr && d->file &&
+                                           d->file->path == path &&
+                                           std::cmp_equal(d->gameIndex, index)) {
+            m_jumpOnOpen.reset(); // it was open already
+            goToPosition(position);
+        }
+        return;
+    }
+}
+
+void MainWindow::goToPosition(std::uint64_t position) {
+    if (const GameDocument* d = doc()) {
+        if (const auto node = findPosition(d->game, position)) {
+            showNode(*node, false);
+        }
+    }
 }
 
 // ---- Practice ----------------------------------------------------------------------------------

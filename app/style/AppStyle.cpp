@@ -1,9 +1,14 @@
 #include "AppStyle.hpp"
 
+#include "Icons.hpp"
+
 #include <QApplication>
 #include <QComboBox>
 #include <QEvent>
+#include <QFileInfo>
 #include <QFrame>
+#include <QImage>
+#include <QMenu>
 #include <QPalette>
 #include <QStyleFactory>
 #include <QStyleHints>
@@ -73,6 +78,10 @@ bool AppStyle::eventFilter(QObject* watched, QEvent* event) {
             combo != nullptr && !combo->property("styledRows").toBool()) {
             combo->setProperty("styledRows", true);
             combo->setItemDelegate(new QStyledItemDelegate(combo));
+        }
+        if (auto* menu = qobject_cast<QMenu*>(watched)) {
+            menu->setAttribute(Qt::WA_TranslucentBackground);
+            menu->setWindowFlag(Qt::NoDropShadowWindowHint, false);
         }
         if (watched->inherits("QComboBoxPrivateContainer")) {
             if (auto* frame = qobject_cast<QFrame*>(watched)) {
@@ -156,17 +165,60 @@ void AppStyle::apply() {
         palette.setColor(QPalette::Disabled, role, c.dimmed);
     }
     QApplication::setPalette(palette);
-    m_app.setStyleSheet(styleSheet(c));
+    m_app.setStyleSheet(styleSheet(c, writeCheckImage(c.accent)));
     emit changed();
 }
 
-QString AppStyle::styleSheet(const Colors& colors) {
+QString AppStyle::writeCheckImage(const QColor& color) {
+    if (!m_images) {
+        m_images = std::make_unique<QTemporaryDir>();
+    }
+    if (!m_images->isValid()) {
+        return {};
+    }
+    // One file per colour (a style sheet may cache an image by its path); a @2x one for Retina.
+    const QString name = QStringLiteral("check-%1").arg(color.name(QColor::HexRgb).mid(1));
+    const QString path = m_images->filePath(name + QStringLiteral(".png"));
+    if (!QFileInfo::exists(path)) {
+        for (const int scale : {1, 2}) {
+            const int size = 14 * scale;
+            const QImage image =
+                makeIcon(IconKind::Check, color, color, size)
+                    .pixmap(size, size)
+                    .toImage()
+                    .scaled(size, size, Qt::KeepAspectRatio, Qt::SmoothTransformation);
+            image.save(m_images->filePath(
+                name + (scale == 2 ? QStringLiteral("@2x.png") : QStringLiteral(".png"))));
+        }
+    }
+    return path;
+}
+
+QString AppStyle::styleSheet(const Colors& colors, const QString& checkImage) {
     const auto hex = [](const QColor& color) {
         return color.name(QColor::HexRgb);
     };
     QString css = QStringLiteral(R"(
 /* One system for every screen: cards have 10 px corners and 16 px padding (style/Layout.hpp);
    every control (button, field, spin box, combo box) is 32 px tall with 8 px corners. */
+
+/* Menus (right-click and button menus; the menu bar is the system's): like the dropdowns,
+   rounded, in the card colour, a soft highlight, and a tick only on what is chosen. */
+QMenu {
+    background: @surface;
+    color: @text;
+    border: 1px solid @border;
+    border-radius: 8px;
+    padding: 4px;
+    font-size: 13px;
+}
+QMenu::item { padding: 5px 22px 5px 10px; border-radius: 6px; background: transparent; }
+QMenu::item:selected { background: @accentTint; color: @accent; }
+QMenu::item:disabled { color: @dimmed; }
+QMenu::separator { height: 1px; background: @border; margin: 4px 6px; }
+QMenu::indicator { width: 14px; height: 14px; padding-left: 6px; }
+QMenu::indicator:unchecked { image: none; }
+QMenu::indicator:checked { image: url(@checkImage); }
 
 /* Cards: the rounded panels */
 QFrame[card="true"] {
@@ -478,12 +530,17 @@ QLineEdit:focus, QPlainTextEdit#commentBox:focus, QComboBox:focus, QSpinBox:focu
 }
 QLineEdit:disabled { color: @dimmed; }
 QComboBox::drop-down { border: none; width: 18px; }
-QComboBox QAbstractItemView {
+/* The popup's window draws the one rounded box; the list inside it is see-through. */
+QComboBoxPrivateContainer {
     background: @surface;
-    color: @text;
     border: 1px solid @border;
     border-radius: 8px;
-    padding: 4px;
+}
+QComboBox QAbstractItemView {
+    background: transparent;
+    color: @text;
+    border: none;
+    padding: 3px;
     outline: none;
     font-size: 13px;
 }
@@ -501,11 +558,17 @@ QTreeWidget#libraryFiles {
     background: transparent;
     color: @text;
     outline: none;
-    show-decoration-selected: 0; /* keep Qt's own fold arrows: styling the branch hides them */
+    show-decoration-selected: 0; /* the fold arrows are drawn by the tree (LibraryView) */
 }
-QTreeWidget#libraryFiles::item { padding: 5px 2px; border: none; }
+QTreeWidget#libraryFiles::item {
+    padding: 4px 4px;
+    margin: 1px 0;
+    border: none;
+    border-radius: 6px; /* rounded like the rows of menus and dropdowns */
+}
 QTreeWidget#libraryFiles::item:hover { background: @raised; }
 QTreeWidget#libraryFiles::item:selected { background: @accentTint; color: @accent; }
+
 QTableView#libraryGames {
     background: transparent;
     color: @text;
@@ -581,6 +644,7 @@ QStatusBar::item { border: none; }
     for (const auto& [name, color] : names) {
         css.replace(QLatin1String(name), hex(color));
     }
+    css.replace(QStringLiteral("@checkImage"), checkImage);
     return css;
 }
 

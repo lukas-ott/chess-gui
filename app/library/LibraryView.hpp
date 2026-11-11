@@ -7,6 +7,7 @@
 #include <QWidget>
 
 #include <array>
+#include <functional>
 #include <memory>
 #include <optional>
 #include <vector>
@@ -77,6 +78,14 @@ public:
     /// the top). Open tabs follow (pathMoved). Empty on success, else the error.
     QString moveToFolder(const QStringList& paths, const QString& folder);
 
+    /// Renames a file (without its ending: "Najdorf" for Najdorf.pgn) or a folder. Open tabs
+    /// follow. Empty on success, else the error.
+    QString rename(const QString& path, const QString& name);
+    /// Moves a file or folder to the Trash; its open tabs close. Empty on success, else the
+    /// error. Tests can put something else in place of the Trash.
+    QString moveToTrash(const QString& path);
+    void setTrashForTests(std::function<bool(const QString&)> trash) { m_trash = std::move(trash); }
+
     /// For tests: what the repertoire overview shows ("1,840", "412", "move 24"), and the
     /// openings listed ("Benko Gambit Accepted  210").
     [[nodiscard]] QStringList repertoireStats() const;
@@ -91,6 +100,8 @@ signals:
     void newFileRequested(const QString& folder);
     /// A file or folder was moved (dragged in the tree): `from` and `to` are absolute paths.
     void pathMoved(const QString& from, const QString& to);
+    /// A file or folder is about to go to the Trash: tabs of its games close.
+    void pathRemoved(const QString& path);
     /// From a file's or folder's menu: set the type of these files (a library::FileKind; for a
     /// repertoire `side` is 0 = White, 1 = Black, else -1).
     void fileKindRequested(const QStringList& paths, int kind, int side);
@@ -98,6 +109,7 @@ signals:
 private:
     void refreshFiles();
     void applyFilters();
+    void filtersChanged();
     void showSelection();
     void showFolder(const QTreeWidgetItem& item);
     void showGames(const std::shared_ptr<PgnFile>& file, library::FileKind kind);
@@ -115,6 +127,7 @@ private:
     /// (relative; empty = the top).
     [[nodiscard]] QString targetFolder() const;
     void askNewFolder();
+    void askTrash(const QString& path);
 
     Library& m_library;
     RepertoireStore& m_store;
@@ -127,7 +140,8 @@ private:
     QLineEdit* m_fileSearch = nullptr;
     QComboBox* m_typeFilter = nullptr;          ///< all files, or only one type
     std::array<QPushButton*, 2> m_newButtons{}; ///< New File, New Folder
-    QString m_selectAfterScan; ///< a new folder (its key), selected when it shows up
+    QString m_selectAfterScan; ///< a new or renamed item (its key), selected when it shows up
+    std::function<bool(const QString&)> m_trash; ///< tests only
     QTreeWidget* m_files = nullptr;
 
     // The selection

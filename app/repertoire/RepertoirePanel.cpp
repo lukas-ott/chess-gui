@@ -15,6 +15,7 @@
 #include <QVBoxLayout>
 
 #include <algorithm>
+#include <utility>
 
 namespace kiebitz::app {
 namespace {
@@ -111,6 +112,20 @@ RepertoirePanel::RepertoirePanel(RepertoireStore& store, const AppStyle& style, 
         row.status = label(QString(), "pvLine");
         box->addWidget(row.status);
         auto* buttons = new QHBoxLayout;
+        buttons->setSpacing(6);
+        row.jump = new QPushButton(tr("Jump to Line"));
+        row.jump->setObjectName(side == core::Color::White ? QStringLiteral("jumpWhite")
+                                                           : QStringLiteral("jumpBlack"));
+        row.jump->setProperty("role", "secondary");
+        row.jump->setFocusPolicy(Qt::NoFocus);
+        row.jump->setToolTip(tr("Open the repertoire file at this position"));
+        connect(row.jump, &QPushButton::clicked, this, [this, side] {
+            const Row& r = m_rows[side == core::Color::White ? 0 : 1];
+            if (!r.file.isEmpty()) {
+                emit jumpRequested(r.file, r.jumpTo);
+            }
+        });
+        buttons->addWidget(row.jump);
         row.add = new QPushButton(tr("Add Line"));
         row.add->setProperty("role", "secondary");
         row.add->setFocusPolicy(Qt::NoFocus);
@@ -182,6 +197,13 @@ void RepertoirePanel::setGame(const core::Game* game, core::NodeId current, bool
     refresh();
 }
 
+void RepertoirePanel::setViewSide(core::Color side) {
+    if (side != m_viewSide) {
+        m_viewSide = side;
+        refresh();
+    }
+}
+
 int RepertoirePanel::practiceDepth() const {
     return m_depth->value();
 }
@@ -230,11 +252,22 @@ void RepertoirePanel::refreshCheck() {
         m_game != nullptr && m_game->startPosition().hash() == core::Position().hash();
     const std::vector<core::Move> line =
         m_game != nullptr ? lineTo(*m_game, m_current) : std::vector<core::Move>{};
+    // The whole line of the game through this move (on along its main line), to find the file
+    // that follows it the longest: that one stays named while you go through the game.
+    std::vector<core::Move> whole = line;
+    if (m_game != nullptr) {
+        for (core::NodeId node = m_game->mainChild(m_current); node != core::kNoNode;
+             node = m_game->mainChild(node)) {
+            whole.push_back(m_game->node(node).move);
+        }
+    }
     for (const core::Color side : {core::Color::White, core::Color::Black}) {
-        const Row& row = m_rows[side == core::Color::White ? 0 : 1];
+        Row& row = m_rows[side == core::Color::White ? 0 : 1];
         const QStringList& files = m_store.files(side);
-        row.widget->setVisible(!files.isEmpty());
-        if (files.isEmpty()) {
+        // Only the repertoire of the side the board is viewed from.
+        const bool shown = side == m_viewSide && !files.isEmpty();
+        row.widget->setVisible(shown);
+        if (!shown) {
             continue;
         }
         row.title->setText(
@@ -242,6 +275,7 @@ void RepertoirePanel::refreshCheck() {
             QStringLiteral("  ·  ") +
             (files.size() == 1 ? tr("1 file") : tr("%1 files").arg(files.size())));
         row.add->setEnabled(false);
+        row.jump->setEnabled(false);
         const BuiltRepertoire* built = m_store.get(side);
         if (built == nullptr) {
             row.status->setText(tr("Reading the repertoire…"));
@@ -252,15 +286,43 @@ void RepertoirePanel::refreshCheck() {
                                                   : tr("This game starts from a set-up position."));
             continue;
         }
+        // The positions along the whole line, as far as the repertoire has them.
+        const repertoire::Book wholeBook = built->tree.follow(core::Position(), whole);
+        std::vector<std::uint64_t> hashes{core::Position().hash()};
+        {
+            core::Position position;
+            for (std::size_t k = 0; std::cmp_less(k, wholeBook.plies); ++k) {
+                position.play(whole[k]);
+                hashes.push_back(position.hash());
+            }
+        }
+        // The file with the deepest of them; the one named before if it is as deep.
+        QString file;
+        for (std::size_t k = hashes.size(); k-- > 0 && file.isEmpty();) {
+            const QStringList with = m_store.filesWith(side, hashes[k]);
+            if (!with.isEmpty()) {
+                file = with.contains(row.file) ? row.file : with.front();
+            }
+        }
+        row.file = file;
+
         const repertoire::Book book = built->tree.follow(core::Position(), line);
         const auto at = static_cast<std::size_t>(book.plies);
         row.add->setEnabled(at < line.size());
-        // Where the game is (or last was) in book, and which files have that position.
+        // Jump to the deepest position up to this move that the file has.
+        row.jumpTo = 0;
+        for (std::size_t k = std::min(at, hashes.size() - 1) + 1; k-- > 0;) {
+            if (m_store.filesWith(side, hashes[k]).contains(file)) {
+                row.jumpTo = hashes[k];
+                break;
+            }
+        }
+        row.jump->setEnabled(!file.isEmpty() && row.jumpTo != 0);
+        const QString where = fileNames(file.isEmpty() ? QStringList{} : QStringList{file});
         core::Position position;
         for (std::size_t k = 0; k < at; ++k) {
             position.play(line[k]);
         }
-        const QString where = fileNames(m_store.filesWith(side, position.hash()));
         if (!book.left) {
             const repertoire::Entry* entry = built->tree.find(position.hash());
             QString text = tr("In book · %1").arg(where);

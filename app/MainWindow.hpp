@@ -156,6 +156,9 @@ private:
     // Practice (a repertoire file: the app plays the opponent, you play your moves)
     [[nodiscard]] QWidget* buildPracticeCard();
     void startPractice(bool fromHere, int depth);
+    /// Jump to Line: opens a repertoire file at a position (its hash).
+    void jumpToLine(const QString& path, quint64 position);
+    void goToPosition(std::uint64_t position);
     void stopPractice();
     /// The status line; `mood` > 0 right (a tick), < 0 wrong (a cross), 0 neither.
     void setPracticeStatus(const QString& text, int mood);
@@ -229,6 +232,8 @@ private:
     bool m_drillFromHere = false;
     int m_drillDepth = 0;
     QString m_practiceOnOpen; ///< a file to practise as soon as its tab has opened
+    /// A repertoire file to show at a position (hash) as soon as its tab has opened.
+    std::optional<std::pair<QString, std::uint64_t>> m_jumpOnOpen;
     core::NodeId m_drillStart = core::Game::root();
     QLabel* m_practiceTitle = nullptr;
     QLabel* m_practiceMark = nullptr; ///< a tick or a cross

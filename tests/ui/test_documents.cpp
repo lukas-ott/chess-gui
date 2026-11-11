@@ -13,6 +13,7 @@
 #include "repertoire/RepertoireStore.hpp"
 #include "style/AppStyle.hpp"
 
+#include <QAbstractItemView>
 #include <QAction>
 #include <QApplication>
 #include <QBuffer>
@@ -25,6 +26,7 @@
 #include <QLabel>
 #include <QLayout>
 #include <QLineEdit>
+#include <QMenu>
 #include <QMessageBox>
 #include <QPlainTextEdit>
 #include <QPushButton>
@@ -284,6 +286,11 @@ TEST_F(LibraryTreeTest, NewFoldersAndMovingFiles) {
     ASSERT_NE(item(QStringLiteral("Blitz")), nullptr);
     EXPECT_EQ(item(QStringLiteral("Blitz"))->parent(), item(QStringLiteral("OTB")));
     EXPECT_EQ(tree->currentItem(), item(QStringLiteral("Blitz")));
+    if (const QString dir = qEnvironmentVariable("KIEBITZ_SNAPSHOT_DIR"); !dir.isEmpty()) {
+        window.resize(1200, 760);
+        QTest::qWait(100);
+        tree->window()->grab().save(QDir(dir).filePath(QStringLiteral("library-tree.png")));
+    }
     EXPECT_NE(view->createFolder(QStringLiteral("OTB"), QStringLiteral("Blitz")), QString());
 
     // Open top.pgn, then move it into the new folder: the tab saves to its new place.
@@ -304,6 +311,32 @@ TEST_F(LibraryTreeTest, NewFoldersAndMovingFiles) {
     EXPECT_NE(view->moveToFolder({path("OTB")}, QStringLiteral("OTB/Blitz")), QString());
     EXPECT_EQ(view->moveToFolder({path("OTB/Blitz")}, QString()), QString());
     EXPECT_TRUE(QFileInfo::exists(path("Blitz/top.pgn")));
+    ASSERT_TRUE(scanned.wait(5000));
+
+    // Rename: a file keeps its .pgn; the open tab follows; a taken name is refused.
+    EXPECT_EQ(view->rename(path("Blitz/top.pgn"), QStringLiteral("Club")), QString());
+    EXPECT_TRUE(QFileInfo::exists(path("Blitz/Club.pgn")));
+    ASSERT_TRUE(scanned.wait(5000));
+    EXPECT_NE(item(QStringLiteral("Club")), nullptr);
+    EXPECT_EQ(tree->currentItem(), item(QStringLiteral("Club")));
+    EXPECT_NE(view->rename(path("Blitz/Club.pgn"), QStringLiteral("a/b")), QString());
+    const bool whiteToMove = fen().find(" w ") != std::string::npos;
+    play(whiteToMove ? "h3" : "h6");
+    ASSERT_TRUE(QTest::qWaitFor(
+        [&] {
+            return readFile(path("Blitz/Club.pgn")).find(whiteToMove ? "h3" : "h6") !=
+                   std::string::npos;
+        },
+        5000));
+
+    // Move to Trash (here: deleted, to keep the real Trash clean): its tab closes.
+    view->setTrashForTests([](const QString& gone) { return QFile::remove(gone); });
+    const int tabsBefore = tabs->count();
+    EXPECT_EQ(view->moveToTrash(path("Blitz/Club.pgn")), QString());
+    EXPECT_FALSE(QFileInfo::exists(path("Blitz/Club.pgn")));
+    EXPECT_EQ(tabs->count(), std::max(tabsBefore - 1, 1));
+    QTest::qWait(1500); // no autosave brings it back
+    EXPECT_FALSE(QFileInfo::exists(path("Blitz/Club.pgn")));
 }
 
 TEST_F(LibraryTreeTest, FoldingIsRemembered) {
@@ -534,19 +567,26 @@ TEST_F(DocumentsTest, FileTypesShowInTheLibraryAndFilterIt) {
     EXPECT_FALSE(items[QStringLiteral("london")]->isHidden());
     EXPECT_TRUE(items[QStringLiteral("games")]->isHidden());
     EXPECT_TRUE(items[QStringLiteral("tactics")]->isHidden());
-    filter->setCurrentIndex(0); // all files
-    EXPECT_FALSE(items[QStringLiteral("games")]->isHidden());
-    // The search over the file names.
-    auto* search = window.findChild<QLineEdit*>(QStringLiteral("libraryFileSearch"));
-    ASSERT_NE(search, nullptr);
-    search->setText(QStringLiteral("LON"));
-    EXPECT_FALSE(items[QStringLiteral("london")]->isHidden());
-    EXPECT_TRUE(items[QStringLiteral("najdorf")]->isHidden());
-    search->clear();
-    // The tree is rebuilt when the search is cleared: look the items up again.
+    // Back to all files: the tree is rebuilt, so items are looked up again from here on.
     const auto find = [&](const QString& name) {
         return tree->findItems(name, Qt::MatchExactly | Qt::MatchRecursive).value(0);
     };
+    filter->setCurrentIndex(0);
+    EXPECT_FALSE(find(QStringLiteral("games"))->isHidden());
+    // The search finds names, and what's inside the files: players, events, openings.
+    auto* search = window.findChild<QLineEdit*>(QStringLiteral("libraryFileSearch"));
+    ASSERT_NE(search, nullptr);
+    search->setText(QStringLiteral("LON"));
+    ASSERT_TRUE(QTest::qWaitFor([&] { return find(QStringLiteral("najdorf"))->isHidden(); }, 2000));
+    EXPECT_FALSE(find(QStringLiteral("london"))->isHidden());
+    search->setText(QStringLiteral("alice")); // a player in games.pgn
+    ASSERT_TRUE(QTest::qWaitFor([&] { return find(QStringLiteral("london"))->isHidden(); }, 2000));
+    EXPECT_FALSE(find(QStringLiteral("games"))->isHidden());
+    tree->setCurrentItem(find(QStringLiteral("games"))); // its games are searched for it too
+    EXPECT_EQ(window.findChild<QLineEdit*>(QStringLiteral("librarySearchGames"))->text(),
+              QStringLiteral("alice"));
+    search->clear();
+    ASSERT_TRUE(QTest::qWaitFor([&] { return !find(QStringLiteral("london"))->isHidden(); }, 2000));
     EXPECT_FALSE(find(QStringLiteral("najdorf"))->isHidden());
 
     // A puzzle file: who is to move, not White and Black.
@@ -575,6 +615,22 @@ TEST_F(DocumentsTest, FileTypesShowInTheLibraryAndFilterIt) {
         tree->setCurrentItem(find(QStringLiteral("games")));
         QTest::qWait(300);
         window.grab().save(QDir(dir).filePath(QStringLiteral("library-games.png")));
+        filter->showPopup(); // the dropdown's list, on its own
+        QTest::qWait(200);
+        filter->view()->window()->grab().save(QDir(dir).filePath(QStringLiteral("dropdown.png")));
+        filter->hidePopup();
+        QMenu menu; // how menus look: a highlighted row, a tick on the chosen one
+        menu.addAction(QStringLiteral("Open"));
+        menu.addSeparator();
+        auto* chosen = menu.addAction(QStringLiteral("Repertoire for Black"));
+        chosen->setCheckable(true);
+        chosen->setChecked(true);
+        menu.addAction(QStringLiteral("Tournament"))->setCheckable(true);
+        menu.popup(QPoint(100, 100));
+        menu.setActiveAction(chosen);
+        QTest::qWait(200);
+        menu.grab().save(QDir(dir).filePath(QStringLiteral("menu.png")));
+        menu.hide();
     }
 }
 
@@ -670,12 +726,31 @@ TEST_F(DocumentsTest, GamesAreCheckedAgainstEveryRepertoireFile) {
     // A different move of ours where the repertoire has one: only added if confirmed.
     action(window, QStringLiteral("Go to Start"))->trigger();
     play("c4");
+    // One file is named: the one that followed the game the longest, kept from before.
     EXPECT_EQ(panel->statusText(core::Color::White),
-              QStringLiteral("Left the book with 1. c4 · Open Games and 1 more plays e4 or d4"));
+              QStringLiteral("Left the book with 1. c4 · Open Games plays e4 or d4"));
     const std::string before = readFile(path("Open Games.pgn"));
     answerNextMessageBox(QMessageBox::Cancel);
     emit panel->addLineRequested(core::Color::White);
     EXPECT_EQ(readFile(path("Open Games.pgn")), before);
+
+    // Only the side the board is viewed from is checked.
+    action(window, QStringLiteral("Flip Board"))->trigger();
+    EXPECT_EQ(panel->statusText(core::Color::White), QString());
+    action(window, QStringLiteral("Flip Board"))->trigger();
+    EXPECT_FALSE(panel->statusText(core::Color::White).isEmpty());
+
+    // Jump to Line: the repertoire file opens at the game's position.
+    action(window, QStringLiteral("Go to Start"))->trigger();
+    play("e4");
+    play("e5");
+    const std::string here = fen();
+    QSignalSpy opened(&window, &MainWindow::fileOpened);
+    QTest::mouseClick(window.findChild<QPushButton*>(QStringLiteral("jumpWhite")), Qt::LeftButton);
+    ASSERT_TRUE(opened.wait(5000));
+    QApplication::processEvents();
+    EXPECT_EQ(tabs->tabText(tabs->currentIndex()), QStringLiteral("Open Games"));
+    EXPECT_EQ(fen(), here);
 }
 
 TEST_F(DocumentsTest, PracticingARepertoireFile) {
