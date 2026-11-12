@@ -13,6 +13,7 @@
 #include "repertoire/RepertoirePanel.hpp"
 #include "repertoire/RepertoireStore.hpp"
 #include "style/AppStyle.hpp"
+#include "widgets/DateRange.hpp"
 
 #include <QAbstractItemView>
 #include <QAction>
@@ -20,15 +21,16 @@
 #include <QBuffer>
 #include <QClipboard>
 #include <QComboBox>
+#include <QDate>
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
+#include <QHeaderView>
 #include <QImage>
 #include <QLabel>
 #include <QLayout>
 #include <QLineEdit>
 #include <QMenu>
-#include <QMessageBox>
 #include <QPlainTextEdit>
 #include <QPushButton>
 #include <QSet>
@@ -173,6 +175,21 @@ TEST_F(DocumentsTest, TheSidebarSwitchesSectionsAndTheBoardAlwaysHasAGame) {
     action(window, QStringLiteral("Close Tab"))->trigger();
     EXPECT_EQ(tabs->count(), 1);
     EXPECT_EQ(tabs->tabText(0), QStringLiteral("New game"));
+}
+
+TEST_F(DocumentsTest, QuittingNeverAsksAndSavesGamesFromFiles) {
+    // A changed game from a file, and a changed new game in no file.
+    writeFile(path("game.pgn"), kOneGame);
+    open(path("game.pgn"));
+    action(window, QStringLiteral("Go to End"))->trigger();
+    play("Nc6");
+    action(window, QStringLiteral("New Tab"))->trigger();
+    play("d4");
+    // Quitting: no question (it would block this test); the file's game is saved.
+    EXPECT_TRUE(window.close());
+    const auto saved = pgn::parseGame(readFile(path("game.pgn")));
+    ASSERT_TRUE(saved.ok());
+    EXPECT_EQ(saved->mainLine().size(), 5U); // root + e4 e5 Nf3 Nc6
 }
 
 TEST_F(DocumentsTest, ClosingATabNeverAsks) {
@@ -565,11 +582,17 @@ TEST_F(DocumentsTest, SavingOneGameLeavesTheOthersAlone) {
 }
 
 /// Answers the next message box with `button` (it blocks the test otherwise).
-void answerNextMessageBox(QMessageBox::StandardButton button) {
-    QTimer::singleShot(0, [button] {
-        for (QWidget* widget : QApplication::topLevelWidgets()) {
-            if (const auto* box = qobject_cast<QMessageBox*>(widget); box && box->isVisible()) {
-                box->button(button)->click();
+/// Answers the next message the app shows (its own dialog): its action, or Cancel / OK.
+void answerNextMessage(bool act) {
+    QTimer::singleShot(0, [act] {
+        for (const QWidget* widget : QApplication::topLevelWidgets()) {
+            if (widget->objectName() == u"messageDialog" && widget->isVisible()) {
+                auto* button = widget->findChild<QPushButton*>(
+                    act ? QStringLiteral("messageAction") : QStringLiteral("messageCancel"));
+                if (button == nullptr) {
+                    button = widget->findChild<QPushButton*>(QStringLiteral("messageOk"));
+                }
+                button->click();
                 return;
             }
         }
@@ -776,7 +799,7 @@ TEST_F(DocumentsTest, GamesAreCheckedAgainstEveryRepertoireFile) {
     EXPECT_EQ(panel->statusText(core::Color::White),
               QStringLiteral("Left the book with 1. c4 · Open Games plays e4 or d4"));
     const std::string before = readFile(path("Open Games.pgn"));
-    answerNextMessageBox(QMessageBox::Cancel);
+    answerNextMessage(false);
     emit panel->addLineRequested(core::Color::White);
     EXPECT_EQ(readFile(path("Open Games.pgn")), before);
     if (const QString dir = qEnvironmentVariable("KIEBITZ_SNAPSHOT_DIR"); !dir.isEmpty()) {
@@ -1329,4 +1352,43 @@ TEST_F(DocumentsTest, TheGapCheckListsUnansweredMovesAndOpensOne) {
     ASSERT_TRUE(opened.wait(5000));
     QApplication::processEvents();
     EXPECT_EQ(fen(), "rnbqkbnr/pp1ppppp/8/2p5/4P3/2P5/PP1P1PPP/RNBQKBNR b KQkq - 0 2");
+}
+
+TEST_F(DocumentsTest, LibraryGamesSortByAnyColumnAndFilterByDate) {
+    writeFile(path("club.pgn"), "[White \"Carol\"]\n[Black \"x\"]\n[Date \"2021.03.01\"]\n"
+                                "[Result \"1-0\"]\n\n1. e4 e5 1-0\n\n"
+                                "[White \"alice\"]\n[Black \"x\"]\n[Date \"2023.07.15\"]\n"
+                                "[Result \"0-1\"]\n\n1. d4 d5 0-1\n\n"
+                                "[White \"Bob\"]\n[Black \"x\"]\n[Date \"2023.01.02\"]\n"
+                                "[Result \"1-0\"]\n\n1. c4 c5 1-0\n");
+    scanLibrary();
+    auto* tree = window.findChild<QTreeWidget*>(QStringLiteral("libraryFiles"));
+    tree->setCurrentItem(
+        tree->findItems(QStringLiteral("club"), Qt::MatchExactly | Qt::MatchRecursive).value(0));
+    auto* games = window.findChild<QTableView*>(QStringLiteral("libraryGames"));
+    ASSERT_NE(games, nullptr);
+    const auto whites = [&] {
+        QStringList names;
+        for (int row = 0; row < games->model()->rowCount(); ++row) {
+            names << games->model()->index(row, 1).data().toString(); // # is column 0
+        }
+        return names;
+    };
+    ASSERT_TRUE(QTest::qWaitFor([&] { return games->model()->rowCount() == 3; }, 5000));
+    EXPECT_EQ(whites(), (QStringList{"Carol", "alice", "Bob"})); // the file's order
+    // A click on DATE's title: oldest first; again: newest first.
+    const auto* header = games->horizontalHeader();
+    const QPoint date(header->sectionViewportPosition(4) + 10, header->height() / 2);
+    QTest::mouseClick(header->viewport(), Qt::LeftButton, {}, date);
+    EXPECT_EQ(whites(), (QStringList{"Carol", "Bob", "alice"}));
+    QTest::mouseClick(header->viewport(), Qt::LeftButton, {}, date);
+    EXPECT_EQ(whites(), (QStringList{"alice", "Bob", "Carol"}));
+    // A third click: the file's order again.
+    QTest::mouseClick(header->viewport(), Qt::LeftButton, {}, date);
+    EXPECT_EQ(whites(), (QStringList{"Carol", "alice", "Bob"}));
+    // From July 2023 on: alice's game only.
+    auto* dates = window.findChild<kiebitz::app::DateRange*>(QStringLiteral("libraryDate"));
+    ASSERT_NE(dates, nullptr);
+    dates->setRange(QDate(2023, 7, 1), std::nullopt);
+    ASSERT_TRUE(QTest::qWaitFor([&] { return whites() == QStringList{"alice"}; }, 5000));
 }

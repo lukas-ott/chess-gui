@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Fide.hpp"
+#include "kiebitz/core/game.hpp"
 #include "kiebitz/gamedb/database.hpp"
 
 #include <QDateTime>
@@ -27,8 +28,11 @@ struct Account {
     QString id; ///< "lichess-name", "chesscom-name": also its folder
     AccountSite site = AccountSite::Lichess;
     QString username;
-    QDateTime synced;           ///< the last download (invalid: never)
-    qint64 lichessSince = 0;    ///< Lichess: games after this time (ms) are new
+    QDateTime synced;        ///< the last download (invalid: never)
+    qint64 lichessSince = 0; ///< Lichess: games after this time (ms) are new
+    /// Lichess: its games were downloaded with their clocks. Accounts from before that are
+    /// downloaded once more, whole.
+    bool lichessClocks = false;
     QStringList chessComMonths; ///< chess.com: months downloaded for good ("2026/10")
     QString title;              ///< on the site ("FM"), or empty
     /// The current ratings by time control ("bullet", "blitz", "rapid", "classical",
@@ -90,13 +94,32 @@ public:
     /// Removes a profile and its games (not the main one).
     void removeProfile(const QString& id);
 
+    /// Asks the site whether an account exists. `done` gets its name as the site writes it, or
+    /// empty if there is no such account; `error` is set when the site couldn't be asked.
+    void checkAccount(AccountSite site, const QString& username,
+                      std::function<void(const QString& name, const QString& error)> done);
     /// Adds an account and downloads its games. Returns its id, or empty if it is there already.
     QString addAccount(const QString& profileId, AccountSite site, const QString& username);
     void removeAccount(const QString& profileId, const QString& accountId);
     /// Downloads the new games of all of a profile's accounts, then rebuilds its databases.
     void sync(const QString& profileId);
     /// Adds over-the-board games (PGN files) to a profile.
+    /// Adds PGN files' games to the profile's over-the-board games. Games it already has (the same
+    /// players, date, result and moves) are left out, so adding a file twice changes nothing;
+    /// otbAdded() says how many were new.
     void addOtbGames(const QString& profileId, const QStringList& files);
+    /// Deletes a game from the profile's files (one copy of it: a duplicate keeps the other) and
+    /// rebuilds. `part`: where to look ("" = everywhere: every account and the OTB games).
+    void deleteGame(const QString& profileId, const QString& part, const core::Game& game);
+    /// What a part's database is right now ("" = all its games): changes whenever it is built
+    /// again (a sync, games added or deleted). For caches of what was worked out from it.
+    [[nodiscard]] QString databaseStamp(const QString& profileId, const QString& part) const;
+    /// A file in the profile's folder for such a cache (its folder is made).
+    [[nodiscard]] QString cacheFile(const QString& profileId, const QString& name) const;
+    /// A game as its PGN file has it, with its clocks and comments (the database keeps only the
+    /// moves), found in the background; `done` gets it, or the game as given if it isn't found.
+    void originalGame(const QString& profileId, const QString& part, const core::Game& game,
+                      std::function<void(const core::Game&)> done);
 
     /// Who the profile is in a part's games ("" = all): usernames, and its names over the board.
     [[nodiscard]] static QStringList namesOf(const Profile& profile, const QString& part);
@@ -112,8 +135,11 @@ public:
 
     /// The servers (tests point them at a fake one).
     void setServers(const QUrl& lichess, const QUrl& chessCom, const QUrl& fide = {});
-    /// The Lichess login's token (empty: not signed in). Downloads with it go faster.
-    void setLichessToken(std::function<QByteArray()> token) { m_lichessToken = std::move(token); }
+    /// The Lichess token to download an account's games with (its own, else any; empty: not
+    /// signed in). Downloads with one go faster, an account's own games faster still.
+    void setLichessToken(std::function<QByteArray(const QString& username)> token) {
+        m_lichessToken = std::move(token);
+    }
     /// Waits for running builds (tests, quitting).
     void wait();
 
@@ -121,6 +147,8 @@ signals:
     void changed();
     void progress(const QString& profileId);
     void failed(const QString& profileId, const QString& message);
+    /// Over-the-board games added: `added` new ones, `skipped` already there.
+    void otbAdded(const QString& profileId, int added, int skipped);
 
 private:
     struct Job; ///< a sync in progress
@@ -129,6 +157,8 @@ private:
     void save() const;
     [[nodiscard]] Profile* find(const QString& id);
     [[nodiscard]] QString folderOf(const QString& profileId) const;
+    /// Where a part's PGN files are ("" = every account's and the OTB games').
+    [[nodiscard]] QStringList partFolders(const Profile& profile, const QString& part) const;
     void setStatus(const QString& profileId, const QString& status);
     void next(const std::shared_ptr<Job>& job);
     void downloadLichess(const std::shared_ptr<Job>& job, Account& account);
@@ -143,8 +173,8 @@ private:
     std::map<QString, QString> m_status; ///< profile id → what it is doing
     QUrl m_lichess{QStringLiteral("https://lichess.org")};
     QUrl m_chessCom{QStringLiteral("https://api.chess.com")};
-    std::function<QByteArray()> m_lichessToken;
-    QUrl m_fide{QStringLiteral("https://ratings.fide.com")};
+    std::function<QByteArray(const QString& username)> m_lichessToken;
+    QUrl m_fide{QStringLiteral("https://lichess.org")}; ///< Lichess keeps FIDE's rating list
     QNetworkAccessManager* m_network = nullptr;
     std::vector<QFuture<void>> m_builds;
 };

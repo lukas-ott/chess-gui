@@ -239,6 +239,14 @@ void draw(QPainter& painter, IconKind kind, const QColor& color, int size) {
         painter.drawPoint(QPointF(8.0, 4.9));
         break;
     }
+    case IconKind::Calendar: { // a rounded page with two rings and a header line
+        painter.setPen(QPen(color, 1.3, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
+        painter.drawRoundedRect(QRectF(2.5, 3.5, 11.0, 10.0), 2.0, 2.0);
+        painter.drawLine(QPointF(2.5, 6.5), QPointF(13.5, 6.5));
+        painter.drawLine(QPointF(5.5, 2.0), QPointF(5.5, 4.5));
+        painter.drawLine(QPointF(10.5, 2.0), QPointF(10.5, 4.5));
+        break;
+    }
     case IconKind::Refresh: { // most of a circle, with an arrow head
         painter.setPen(QPen(color, 1.3, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
         painter.drawArc(QRectF(3.0, 3.0, 10.0, 10.0), 60 * 16, 290 * 16);

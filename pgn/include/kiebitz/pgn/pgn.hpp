@@ -49,6 +49,11 @@ struct GameEntry {
 [[nodiscard]] std::string setHeaderInAllGames(std::string_view text, std::string_view name,
                                               std::optional<std::string_view> value);
 
+/// What makes two games the same game, for finding duplicates: the players, the date, the
+/// result and the main line's moves (any case and spacing; comments, clocks, variations and
+/// other headers don't count).
+[[nodiscard]] std::string gameKey(const core::Game& game);
+
 /// Writes a game as standard PGN: headers, a blank line, then the moves wrapped at 80 columns,
 /// with variations, comments (arrows and marks as [%cal]/[%csl]) and NAGs as $n.
 [[nodiscard]] std::string writeGame(const core::Game& game);

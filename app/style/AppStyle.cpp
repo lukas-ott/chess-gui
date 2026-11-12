@@ -345,6 +345,17 @@ QPushButton[role="primary"] {
     font-weight: 600;
 }
 QPushButton[role="primary"]:hover { background: @accentHover; }
+/* An action that deletes or removes something (in a question): red */
+QPushButton[role="danger"] {
+    background: @bad;
+    color: @accentText;
+    border: none;
+    border-radius: 8px;
+    padding: 7px 16px;
+    min-height: 18px;
+    font-weight: 600;
+}
+QPushButton[role="danger"]:hover { background: @badTint; color: @bad; }
 /* Quiet buttons */
 QPushButton[role="secondary"] {
     background: @surface;
@@ -493,6 +504,41 @@ QPushButton[role="secondary"][compact="true"] {
     border-radius: 6px;
 }
 
+/* The date range: a button (accent while a range is set) and its picker's calendars */
+QPushButton[active="true"] { color: @accent; border-color: @accent; }
+QCalendarWidget QWidget#qt_calendar_navigationbar { background: transparent; }
+QCalendarWidget QToolButton {
+    color: @text;
+    background: transparent;
+    border: none;
+    border-radius: 6px;
+    padding: 3px 6px;
+    font-size: 13px;
+    font-weight: 600;
+}
+QCalendarWidget QToolButton:hover { background: @raised; }
+QCalendarWidget QToolButton::menu-indicator { image: none; width: 0; }
+QCalendarWidget QMenu { font-size: 13px; }
+QCalendarWidget QSpinBox {
+    background: @window;
+    color: @text;
+    border: 1px solid @border;
+    border-radius: 6px;
+    padding: 2px 4px;
+    selection-background-color: @accent;
+}
+QCalendarWidget QTableView {
+    background: @surface;
+    alternate-background-color: @surface;
+    border: none;
+    outline: none;
+    selection-background-color: transparent;
+}
+QPushButton[role="link"][compact="true"] { font-size: 12px; padding: 0; }
+
+/* A field whose text isn't what it asks for (a date range's "2024.13") */
+QLineEdit[invalid="true"] { border-color: @bad; }
+
 /* Chips: small toggles (the explorer's time controls) */
 QPushButton[role="chip"] {
     background: @raised;
@@ -506,18 +552,22 @@ QPushButton[role="chip"] {
 QPushButton[role="chip"]:hover { color: @text; }
 QPushButton[role="chip"]:checked { background: @accentTint; color: @accent; border-color: @accent; }
 
-/* Explorer: the moves and the top games, like the Library's lists */
-QTreeWidget#explorerMoves, QTreeWidget#explorerGames {
+/* Explorer: the moves and the top games, like the Library's lists; the profile's theory check
+   looks the same */
+QTreeWidget#explorerMoves, QTreeWidget#explorerGames, QTreeWidget#profileTheory {
     background: transparent;
     color: @text;
     outline: none;
 }
-QTreeWidget#explorerMoves::item, QTreeWidget#explorerGames::item {
+QTreeWidget#explorerMoves::item, QTreeWidget#explorerGames::item, QTreeWidget#profileTheory::item {
     padding: 5px 4px;
     border: none;
 }
-QTreeWidget#explorerMoves QHeaderView { background: transparent; border: none; }
-QTreeWidget#explorerMoves QHeaderView::section {
+QTreeWidget#explorerMoves QHeaderView, QTreeWidget#profileTheory QHeaderView {
+    background: transparent;
+    border: none;
+}
+QTreeWidget#explorerMoves QHeaderView::section, QTreeWidget#profileTheory QHeaderView::section {
     background: transparent;
     color: @muted;
     border: none;
@@ -526,10 +576,12 @@ QTreeWidget#explorerMoves QHeaderView::section {
     font-size: 10px;
     font-weight: 600;
 }
-QTreeWidget#explorerMoves::item:hover, QTreeWidget#explorerGames::item:hover {
+QTreeWidget#explorerMoves::item:hover, QTreeWidget#explorerGames::item:hover,
+QTreeWidget#profileTheory::item:hover {
     background: @raised;
 }
-QTreeWidget#explorerMoves::item:selected, QTreeWidget#explorerGames::item:selected {
+QTreeWidget#explorerMoves::item:selected, QTreeWidget#explorerGames::item:selected,
+QTreeWidget#profileTheory::item:selected {
     background: @accentTint;
     color: @accent;
 }

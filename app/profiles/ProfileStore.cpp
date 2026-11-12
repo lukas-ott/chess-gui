@@ -2,6 +2,7 @@
 
 #include "kiebitz/core/version.hpp"
 #include "kiebitz/gamedb/import.hpp"
+#include "kiebitz/pgn/pgn.hpp"
 
 #include <QDir>
 #include <QDirIterator>
@@ -22,6 +23,7 @@
 #include <deque>
 #include <functional>
 #include <tuple>
+#include <unordered_set>
 
 namespace kiebitz::app {
 
@@ -94,6 +96,17 @@ QString downloadError(const QString& site, const QString& name, int status, cons
         return ProfileStore::tr("%1 asks to wait a minute before the next download.").arg(site);
     }
     return ProfileStore::tr("%1's %2 games couldn't be downloaded: %3").arg(name, site, error);
+}
+
+std::string readAll(const QString& path) {
+    QFile file(path);
+    return file.open(QIODevice::ReadOnly) ? file.readAll().toStdString() : std::string();
+}
+
+/// What makes a game in a PGN text the same game (pgn::gameKey); empty if it can't be read.
+std::string keyOf(std::string_view text) {
+    const auto game = pgn::parseGame(text);
+    return game.ok() ? pgn::gameKey(*game) : std::string();
 }
 
 /// The PGN files of a folder, oldest name first.
@@ -205,6 +218,7 @@ void ProfileStore::load() {
                     QDateTime::fromString(a[QStringLiteral("synced")].toString(), Qt::ISODate);
                 account.lichessSince =
                     static_cast<qint64>(a[QStringLiteral("lichessSince")].toDouble());
+                account.lichessClocks = a[QStringLiteral("lichessClocks")].toBool();
                 for (const auto& month : a[QStringLiteral("chessComMonths")].toArray()) {
                     account.chessComMonths << month.toString();
                 }
@@ -274,6 +288,7 @@ void ProfileStore::save() const {
                 {QStringLiteral("username"), account.username},
                 {QStringLiteral("synced"), account.synced.toString(Qt::ISODate)},
                 {QStringLiteral("lichessSince"), static_cast<double>(account.lichessSince)},
+                {QStringLiteral("lichessClocks"), account.lichessClocks},
                 {QStringLiteral("chessComMonths"),
                  QJsonArray::fromStringList(account.chessComMonths)},
                 {QStringLiteral("title"), account.title},
@@ -415,22 +430,221 @@ void ProfileStore::addOtbGames(const QString& profileId, const QStringList& file
     }
     setStatus(profileId, tr("Adding games…"));
     const QString otb = QDir(folderOf(profileId)).filePath(QString::fromLatin1(kOtb));
+    // Only the games not there yet (nor twice in what's added): each file's new games are
+    // copied into a file of their own.
     const auto future = QtConcurrent::run([files, otb] {
         QDir().mkpath(otb);
+        std::unordered_set<std::string> seen;
+        for (const QString& file : pgnFiles(otb)) {
+            const std::string text = readAll(file);
+            for (const pgn::GameEntry& entry : pgn::indexGames(text)) {
+                seen.insert(keyOf(std::string_view(text).substr(entry.offset, entry.length)));
+            }
+        }
+        std::pair<int, int> counts{0, 0}; // added, skipped
         for (const QString& file : files) {
+            const std::string text = readAll(file);
+            std::string fresh;
+            for (const pgn::GameEntry& entry : pgn::indexGames(text)) {
+                const std::string_view game =
+                    std::string_view(text).substr(entry.offset, entry.length);
+                const std::string key = keyOf(game);
+                if (!key.empty() && !seen.insert(key).second) {
+                    ++counts.second; // already there
+                    continue;
+                }
+                fresh.append(game);
+                fresh += "\n\n";
+                ++counts.first;
+            }
+            if (fresh.empty()) {
+                continue;
+            }
             const QFileInfo info(file);
             QString target = QDir(otb).filePath(info.completeBaseName() + QStringLiteral(".pgn"));
             for (int n = 2; QFileInfo::exists(target); ++n) {
                 target = QDir(otb).filePath(
                     QStringLiteral("%1 %2.pgn").arg(info.completeBaseName()).arg(n));
             }
-            QFile::copy(file, target);
+            QFile out(target);
+            if (out.open(QIODevice::WriteOnly)) {
+                out.write(fresh.data(), static_cast<qint64>(fresh.size()));
+            }
         }
+        return counts;
+    });
+    auto* watcher = new QFutureWatcher<std::pair<int, int>>(
+        this); // NOLINT(clang-analyzer-cplusplus.NewDeleteLeaks)
+    connect(watcher, &QFutureWatcher<std::pair<int, int>>::finished, this,
+            [this, watcher, profileId] {
+                watcher->deleteLater();
+                const auto [added, skipped] = watcher->result();
+                emit otbAdded(profileId, added, skipped);
+                build(profileId);
+            });
+    watcher->setFuture(future);
+} // NOLINT(clang-analyzer-cplusplus.NewDeleteLeaks)
+
+void ProfileStore::checkAccount(
+    AccountSite site, const QString& username,
+    std::function<void(const QString& name, const QString& error)> done) {
+    // Lichess: /api/user/<name>; chess.com: /pub/player/<name>. A 404: no such account.
+    const QString user = username.trimmed();
+    QNetworkRequest request(
+        site == AccountSite::Lichess
+            ? m_lichess.resolved(QUrl(QStringLiteral("/api/user/") + user))
+            : m_chessCom.resolved(QUrl(QStringLiteral("/pub/player/") + user.toLower())));
+    request.setHeader(QNetworkRequest::UserAgentHeader, userAgent());
+    request.setTransferTimeout(15000);
+    QNetworkReply* reply = m_network->get(request);
+    const QString siteName =
+        site == AccountSite::Lichess ? QStringLiteral("Lichess") : QStringLiteral("chess.com");
+    connect(reply, &QNetworkReply::finished, this,
+            [reply, site, user, siteName, done = std::move(done)] {
+                reply->deleteLater();
+                const int status =
+                    reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+                if (status == 404) {
+                    done({}, {});
+                    return;
+                }
+                if (reply->error() != QNetworkReply::NoError || status != 200) {
+                    done({}, tr("Couldn't reach %1 to look up %2. Try again in a moment.")
+                                 .arg(siteName, user));
+                    return;
+                }
+                const QJsonObject account = QJsonDocument::fromJson(reply->readAll()).object();
+                if (account.isEmpty() || account[QStringLiteral("closed")].toBool() ||
+                    account[QStringLiteral("disabled")].toBool()) {
+                    done({}, {}); // closed accounts have no games to follow
+                    return;
+                }
+                // Lichess writes the name as its owner does ("CatalanSimp"); chess.com in lower
+                // case, so there the name as typed stays.
+                const QString name = site == AccountSite::Lichess
+                                         ? account[QStringLiteral("username")].toString(user)
+                                         : user;
+                done(name, {});
+            });
+}
+
+QString ProfileStore::databaseStamp(const QString& profileId, const QString& part) const {
+    // The database's moves file: its size and when it was written.
+    const QFileInfo moves(
+        QDir(folderOf(profileId))
+            .filePath(QStringLiteral("db/%1/moves.bin")
+                          .arg(part.isEmpty() ? QString::fromLatin1(kAll) : part)));
+    return moves.exists() ? QStringLiteral("%1-%2")
+                                .arg(moves.size())
+                                .arg(moves.lastModified().toMSecsSinceEpoch())
+                          : QString();
+}
+
+QString ProfileStore::cacheFile(const QString& profileId, const QString& name) const {
+    const QString folder = QDir(folderOf(profileId)).filePath(QStringLiteral("cache"));
+    QDir().mkpath(folder);
+    return QDir(folder).filePath(name);
+}
+
+QStringList ProfileStore::partFolders(const Profile& profile, const QString& part) const {
+    QStringList parts;
+    if (part.isEmpty()) {
+        parts << QString::fromLatin1(kOtb);
+        for (const Account& account : profile.accounts) {
+            parts << account.id;
+        }
+    } else {
+        parts << part;
+    }
+    QStringList folders;
+    for (const QString& name : parts) {
+        folders << QDir(folderOf(profile.id)).filePath(name);
+    }
+    return folders;
+}
+
+void ProfileStore::originalGame(const QString& profileId, const QString& part,
+                                const core::Game& game,
+                                std::function<void(const core::Game&)> done) {
+    const Profile* profile = find(profileId);
+    if (profile == nullptr) {
+        done(game);
+        return;
+    }
+    // Owned by the store and deleted when done (deleteLater); the analyzer can't see that.
+    auto* watcher = new QFutureWatcher<std::optional<core::Game>>(
+        this); // NOLINT(clang-analyzer-cplusplus.NewDeleteLeaks)
+    connect(watcher, &QFutureWatcher<std::optional<core::Game>>::finished, this,
+            // NOLINTNEXTLINE(bugprone-exception-escape): `done` opens a tab, as any slot does
+            [watcher, game, done = std::move(done)] {
+                watcher->deleteLater();
+                const std::optional<core::Game> found = watcher->result();
+                done(found ? *found : game);
+            });
+    watcher->setFuture(QtConcurrent::run([folders = partFolders(*profile, part),
+                                          key = pgn::gameKey(game)]() -> std::optional<core::Game> {
+        for (const QString& folder : folders) {
+            for (const QString& file : pgnFiles(folder)) {
+                const std::string text = readAll(file);
+                for (const pgn::GameEntry& entry : pgn::indexGames(text)) {
+                    auto parsed =
+                        pgn::parseGame(std::string_view(text).substr(entry.offset, entry.length));
+                    if (parsed.ok() && pgn::gameKey(*parsed) == key) {
+                        return std::move(*parsed);
+                    }
+                }
+            }
+        }
+        return std::nullopt;
+    }));
+} // NOLINT(clang-analyzer-cplusplus.NewDeleteLeaks)
+
+void ProfileStore::deleteGame(const QString& profileId, const QString& part,
+                              const core::Game& game) {
+    const Profile* profile = find(profileId);
+    if (profile == nullptr || busy(profileId)) {
+        return;
+    }
+    setStatus(profileId, tr("Deleting the game…"));
+    const auto future = QtConcurrent::run([folders = partFolders(*profile, part),
+                                           key = pgn::gameKey(game)] {
+        // The first copy of the game, taken out of its file (the file goes if it's left empty).
+        for (const QString& folder : folders) {
+            for (const QString& file : pgnFiles(folder)) {
+                std::string text = readAll(file);
+                const auto entries = pgn::indexGames(text);
+                for (std::size_t k = 0; k < entries.size(); ++k) {
+                    const pgn::GameEntry& entry = entries[k];
+                    if (keyOf(std::string_view(text).substr(entry.offset, entry.length)) != key) {
+                        continue;
+                    }
+                    // Up to the next game (the blank lines after it go too).
+                    const std::size_t end =
+                        k + 1 < entries.size() ? entries[k + 1].offset : text.size();
+                    text.erase(entry.offset, end - entry.offset);
+                    if (entries.size() == 1) {
+                        QFile::remove(file);
+                    } else {
+                        QFile out(file);
+                        if (out.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+                            out.write(text.data(), static_cast<qint64>(text.size()));
+                        }
+                    }
+                    return true;
+                }
+            }
+        }
+        return false;
     });
     auto* watcher =
-        new QFutureWatcher<void>(this); // NOLINT(clang-analyzer-cplusplus.NewDeleteLeaks)
-    connect(watcher, &QFutureWatcher<void>::finished, this, [this, watcher, profileId] {
+        new QFutureWatcher<bool>(this); // NOLINT(clang-analyzer-cplusplus.NewDeleteLeaks)
+    connect(watcher, &QFutureWatcher<bool>::finished, this, [this, watcher, profileId] {
         watcher->deleteLater();
+        if (!watcher->result()) {
+            setStatus(profileId, {});
+            emit failed(profileId, tr("That game wasn't found in the profile's files."));
+            return;
+        }
         build(profileId);
     });
     watcher->setFuture(future);
@@ -469,17 +683,16 @@ void ProfileStore::lookUpFide(const QString& profileId) {
     if (profile == nullptr || !worthLookingUp(profile->name)) {
         return;
     }
-    // FIDE's own search, as its rating page asks it (an HTML table of everyone who fits).
-    QUrl url = m_fide.resolved(QUrl(QStringLiteral("/incl_search_l.php")));
+    // FIDE's rating list as Lichess keeps it (FIDE's own site, ratings.fide.com, is often away):
+    // everyone whose name fits, roughly; ranked here by how well.
+    QUrl url = m_fide.resolved(QUrl(QStringLiteral("/api/fide/player")));
     QUrlQuery query;
-    query.addQueryItem(QStringLiteral("search"), profile->name);
-    query.addQueryItem(QStringLiteral("simple"), QStringLiteral("1"));
+    query.addQueryItem(QStringLiteral("q"), profile->name);
     url.setQuery(query);
     QNetworkRequest request(url);
-    request.setRawHeader("X-Requested-With", "XMLHttpRequest");
-    request.setRawHeader("Referer", "https://ratings.fide.com/");
+    request.setRawHeader("Accept", "application/json");
     request.setHeader(QNetworkRequest::UserAgentHeader, userAgent());
-    request.setTransferTimeout(15000); // FIDE's site is sometimes slow or away
+    request.setTransferTimeout(15000);
     QNetworkReply* reply = m_network->get(request);
     const QString name = profile->name;
     if (Profile* looking = find(profileId)) {
@@ -496,12 +709,11 @@ void ProfileStore::lookUpFide(const QString& profileId) {
         found->fideLooking = false;
         if (reply->error() != QNetworkReply::NoError) {
             // Tried again on the next start, or with "Try Again".
-            found->fideError = tr("FIDE's rating site isn't answering right now.");
+            found->fideError = tr("Couldn't reach FIDE's rating list (on Lichess) right now.");
             emit changed();
             return;
         }
-        std::vector<FidePlayer> matches =
-            rankFideMatches(parseFideSearch(QString::fromUtf8(reply->readAll())), name);
+        std::vector<FidePlayer> matches = rankFideMatches(parseFideSearch(reply->readAll()), name);
         if (matches.size() > 8) {
             matches.resize(8);
         }
@@ -579,13 +791,16 @@ void ProfileStore::next(const std::shared_ptr<Job>& job) {
 }
 
 void ProfileStore::downloadLichess(const std::shared_ptr<Job>& job, Account& account) {
-    // All finished games since the last download, as PGN (main lines, no clocks or evals).
+    // All finished games since the last download, as PGN with their clocks ([%clk]); main lines,
+    // no evals. Games downloaded before clocks were asked for: all of them once more, replacing
+    // those files when it worked.
+    const bool again = !account.lichessClocks && account.lichessSince > 0;
     QUrl url = m_lichess.resolved(QUrl(QStringLiteral("/api/games/user/") + account.username));
     QUrlQuery query;
-    if (account.lichessSince > 0) {
+    if (account.lichessSince > 0 && !again) {
         query.addQueryItem(QStringLiteral("since"), QString::number(account.lichessSince));
     }
-    query.addQueryItem(QStringLiteral("clocks"), QStringLiteral("false"));
+    query.addQueryItem(QStringLiteral("clocks"), QStringLiteral("true"));
     query.addQueryItem(QStringLiteral("evals"), QStringLiteral("false"));
     query.addQueryItem(QStringLiteral("opening"), QStringLiteral("true"));
     url.setQuery(query);
@@ -593,7 +808,7 @@ void ProfileStore::downloadLichess(const std::shared_ptr<Job>& job, Account& acc
     request.setRawHeader("Accept", "application/x-chess-pgn");
     request.setHeader(QNetworkRequest::UserAgentHeader, userAgent());
     // Signed in, Lichess sends games faster (and your own games faster still).
-    if (const QByteArray token = m_lichessToken ? m_lichessToken() : QByteArray();
+    if (const QByteArray token = m_lichessToken ? m_lichessToken(account.username) : QByteArray();
         !token.isEmpty()) {
         request.setRawHeader("Authorization", "Bearer " + token);
     }
@@ -609,17 +824,18 @@ void ProfileStore::downloadLichess(const std::shared_ptr<Job>& job, Account& acc
     QNetworkReply* reply = m_network->get(request);
     const auto games = std::make_shared<int>(0);
     const QString name = account.username;
-    setStatus(job->profileId, tr("Downloading %1's games from Lichess…").arg(name));
-    connect(reply, &QNetworkReply::readyRead, this, [this, reply, file, games, job, name] {
+    const QString doing = again ? tr("Downloading %1's games again, with their clocks…")
+                                : tr("Downloading %1's games from Lichess…");
+    setStatus(job->profileId, doing.arg(name));
+    connect(reply, &QNetworkReply::readyRead, this, [this, reply, file, games, job, name, doing] {
         const QByteArray data = reply->readAll();
         file->write(data);
         *games += static_cast<int>(data.count("[Event "));
-        setStatus(job->profileId,
-                  tr("Downloading %1's games from Lichess… %2").arg(name).arg(*games));
+        setStatus(job->profileId, doing.arg(name) + QStringLiteral(" %1").arg(*games));
     });
     const QString accountId = account.id;
     connect(reply, &QNetworkReply::finished, this,
-            [this, reply, file, target, job, accountId, name, started] {
+            [this, reply, file, target, job, accountId, name, started, again] {
                 reply->deleteLater();
                 file->write(reply->readAll());
                 file->close();
@@ -630,6 +846,11 @@ void ProfileStore::downloadLichess(const std::shared_ptr<Job>& job, Account& acc
                     emit failed(job->profileId, downloadError(QStringLiteral("Lichess"), name,
                                                               status, reply->errorString()));
                 } else {
+                    if (again) { // the new download has them all: the old files go
+                        for (const QString& old : pgnFiles(QFileInfo(target).absolutePath())) {
+                            QFile::remove(old);
+                        }
+                    }
                     if (file->size() == 0) {
                         file->remove(); // nothing new
                     } else {
@@ -639,6 +860,7 @@ void ProfileStore::downloadLichess(const std::shared_ptr<Job>& job, Account& acc
                         for (Account& a : profile->accounts) {
                             if (a.id == accountId) {
                                 a.lichessSince = started;
+                                a.lichessClocks = true;
                                 a.synced = QDateTime::currentDateTime();
                             }
                         }

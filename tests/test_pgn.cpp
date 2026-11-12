@@ -358,3 +358,29 @@ TEST(PgnEdit, GameWithoutHeadersGetsOne) {
     EXPECT_EQ(marked, "[Repertoire \"Black\"]\n\n1. e4 e5 *\n");
     EXPECT_EQ(pgn::indexGames(marked).front().header("Repertoire"), "Black");
 }
+
+TEST(PgnKey, TheSameGameWithOtherCommentsOrHeadersIsTheSame) {
+    const auto key = [](std::string_view text) {
+        auto game = pgn::parseGame(text);
+        EXPECT_TRUE(game.ok());
+        return game.ok() ? pgn::gameKey(*game) : std::string();
+    };
+    const std::string base =
+        key("[White \"Vetle Støren\"]\n[Black \"Lukas Ott\"]\n"
+            "[Date \"2026.02.14\"]\n[Result \"1-0\"]\n\n1. e4 c6 2. d4 d5 1-0\n");
+    // Comments, clocks, variations, other headers, case and spacing: still the same game.
+    EXPECT_EQ(key("[Event \"Division 2\"]\n[White \"vetle  støren\"]\n[Black \"Lukas Ott\"]\n"
+                  "[Date \"2026.02.14\"]\n[Result \"1-0\"]\n[WhiteElo \"1787\"]\n\n"
+                  "1. e4 { [%clk 1:30:00] } c6 (1... e5) 2. d4 d5 { good } 1-0\n"),
+              base);
+    // Another move, result or date: another game.
+    EXPECT_NE(key("[White \"Vetle Støren\"]\n[Black \"Lukas Ott\"]\n[Date \"2026.02.14\"]\n"
+                  "[Result \"1-0\"]\n\n1. e4 c6 2. d4 d6 1-0\n"),
+              base);
+    EXPECT_NE(key("[White \"Vetle Støren\"]\n[Black \"Lukas Ott\"]\n[Date \"2026.02.14\"]\n"
+                  "[Result \"0-1\"]\n\n1. e4 c6 2. d4 d5 0-1\n"),
+              base);
+    EXPECT_NE(key("[White \"Vetle Støren\"]\n[Black \"Lukas Ott\"]\n[Date \"2026.02.15\"]\n"
+                  "[Result \"1-0\"]\n\n1. e4 c6 2. d4 d5 1-0\n"),
+              base);
+}

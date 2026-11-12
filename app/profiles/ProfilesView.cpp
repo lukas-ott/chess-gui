@@ -5,37 +5,55 @@
 #include "LichessLogin.hpp"
 #include "ProfileStore.hpp"
 #include "databases/GamesModel.hpp"
+#include "repertoire/RepertoireStore.hpp"
 #include "style/AppStyle.hpp"
 #include "style/Icons.hpp"
 #include "style/Layout.hpp"
 #include "style/PageHeader.hpp"
 #include "widgets/ActivityChart.hpp"
+#include "widgets/DateRange.hpp"
 #include "widgets/ElidedLabel.hpp"
+#include "widgets/Message.hpp"
 #include "widgets/NameDialog.hpp"
 #include "widgets/ResultBar.hpp"
+#include "widgets/SortCycle.hpp"
+#include "widgets/SortableItem.hpp"
 
 #include <QComboBox>
+#include <QCryptographicHash>
+#include <QFile>
 #include <QFileDialog>
 #include <QFutureWatcher>
 #include <QHBoxLayout>
+#include <QHeaderView>
+#include <QJsonArray>
+#include <QJsonDocument>
+#include <QJsonObject>
 #include <QLabel>
 #include <QLineEdit>
 #include <QListWidget>
 #include <QLocale>
-#include <QMessageBox>
+#include <QMenu>
 #include <QProgressBar>
 #include <QPushButton>
+#include <QSaveFile>
 #include <QScrollArea>
+#include <QShortcut>
 #include <QSignalBlocker>
 #include <QSplitter>
 #include <QStackedWidget>
 #include <QStandardPaths>
 #include <QTableView>
 #include <QTimer>
+#include <QTreeWidget>
 #include <QVBoxLayout>
 #include <QtConcurrent/QtConcurrentRun>
 
 #include <array>
+#include <map>
+#include <optional>
+#include <tuple>
+#include <utility>
 
 namespace kiebitz::app {
 namespace {
@@ -43,6 +61,8 @@ namespace {
 constexpr int kIdRole = Qt::UserRole;
 constexpr auto kOtb = "otb";
 constexpr int kAccountsWidth = 300;
+constexpr int kGroupRole = Qt::UserRole + 1; ///< a theory row: its group in the report
+constexpr int kGameRole = Qt::UserRole + 2;  ///< a theory game row: its game
 
 QLabel* label(const QString& text, const char* role) {
     auto* result = new QLabel(text);
@@ -93,6 +113,100 @@ QString scoreText(std::uint64_t won, std::uint64_t drawn, std::uint64_t lost) {
     return QStringLiteral("%1%").arg(qRound(100.0 * points / static_cast<double>(games)));
 }
 
+/// A theory check's result as JSON, and back (with the games it counts).
+QJsonObject theoryToJson(const QString& fingerprint, const repertoire::TheoryReport& report,
+                         const std::vector<gamedb::GameInfo>& games) {
+    QJsonArray groups;
+    for (const repertoire::DepartureGroup& group : report.groups) {
+        QJsonArray line;
+        for (const core::Move& move : group.line) {
+            line.append(QString::fromStdString(move.uci()));
+        }
+        QJsonArray expected;
+        for (const std::string& san : group.expected) {
+            expected.append(QString::fromStdString(san));
+        }
+        QJsonArray indexes;
+        for (const std::size_t index : group.games) {
+            indexes.append(static_cast<qint64>(index));
+        }
+        groups.append(QJsonObject{
+            {QStringLiteral("kind"), static_cast<int>(group.kind)},
+            {QStringLiteral("side"), group.side == core::Color::White ? 0 : 1},
+            {QStringLiteral("line"), line},
+            {QStringLiteral("played"), QString::fromStdString(group.played.uci())},
+            {QStringLiteral("san"), QString::fromStdString(group.san)},
+            {QStringLiteral("expected"), expected},
+            {QStringLiteral("games"), indexes},
+        });
+    }
+    QJsonArray infos;
+    for (const gamedb::GameInfo& game : games) {
+        infos.append(QJsonArray{static_cast<qint64>(game.id), QString::fromStdString(game.white),
+                                QString::fromStdString(game.black),
+                                QString::fromStdString(game.date), static_cast<int>(game.result)});
+    }
+    return {{QStringLiteral("fingerprint"), fingerprint},
+            {QStringLiteral("checked"), static_cast<qint64>(report.checked)},
+            {QStringLiteral("stayed"), static_cast<qint64>(report.stayed)},
+            {QStringLiteral("average"), report.averageBookMoves},
+            {QStringLiteral("groups"), groups},
+            {QStringLiteral("games"), infos}};
+}
+
+std::optional<std::tuple<QString, repertoire::TheoryReport, std::vector<gamedb::GameInfo>>>
+theoryFromJson(const QJsonObject& object) {
+    repertoire::TheoryReport report;
+    report.checked = static_cast<std::size_t>(object[QStringLiteral("checked")].toInteger());
+    report.stayed = static_cast<std::size_t>(object[QStringLiteral("stayed")].toInteger());
+    report.averageBookMoves = object[QStringLiteral("average")].toDouble();
+    std::vector<gamedb::GameInfo> games;
+    for (const auto& value : object[QStringLiteral("games")].toArray()) {
+        const QJsonArray info = value.toArray();
+        gamedb::GameInfo game;
+        game.id = static_cast<gamedb::GameId>(info.at(0).toInteger());
+        game.white = info.at(1).toString().toStdString();
+        game.black = info.at(2).toString().toStdString();
+        game.date = info.at(3).toString().toStdString();
+        game.result = static_cast<gamedb::GameResult>(info.at(4).toInt());
+        games.push_back(std::move(game));
+    }
+    for (const auto& value : object[QStringLiteral("groups")].toArray()) {
+        const QJsonObject entry = value.toObject();
+        repertoire::DepartureGroup group;
+        group.kind = static_cast<repertoire::Departure>(entry[QStringLiteral("kind")].toInt());
+        group.side =
+            entry[QStringLiteral("side")].toInt() == 0 ? core::Color::White : core::Color::Black;
+        for (const auto& move : entry[QStringLiteral("line")].toArray()) {
+            const auto parsed = core::Move::fromUci(move.toString().toStdString());
+            if (!parsed) {
+                return std::nullopt; // not ours, or damaged: worked out again
+            }
+            group.line.push_back(*parsed);
+        }
+        const auto played =
+            core::Move::fromUci(entry[QStringLiteral("played")].toString().toStdString());
+        if (!played) {
+            return std::nullopt;
+        }
+        group.played = *played;
+        group.san = entry[QStringLiteral("san")].toString().toStdString();
+        for (const auto& san : entry[QStringLiteral("expected")].toArray()) {
+            group.expected.push_back(san.toString().toStdString());
+        }
+        for (const auto& index : entry[QStringLiteral("games")].toArray()) {
+            const auto at = static_cast<std::size_t>(index.toInteger());
+            if (at >= games.size()) {
+                return std::nullopt;
+            }
+            group.games.push_back(at);
+        }
+        report.groups.push_back(std::move(group));
+    }
+    return std::tuple{object[QStringLiteral("fingerprint")].toString(), std::move(report),
+                      std::move(games)};
+}
+
 /// A chip: a small toggle, one of a group where one is on.
 QPushButton* chip(const QString& text, const QString& name) {
     auto* button = new QPushButton(text);
@@ -110,10 +224,10 @@ QString siteText(AccountSite site) {
 
 } // namespace
 
-ProfilesView::ProfilesView(ProfileStore& store, LichessLogin& lichess, const AppStyle& style,
-                           QWidget* parent)
-    : QWidget(parent), m_store(store), m_lichess(lichess), m_style(style),
-      m_model(new GamesModel(this)) {
+ProfilesView::ProfilesView(ProfileStore& store, LichessLogin& lichess, RepertoireStore& repertoires,
+                           const AppStyle& style, QWidget* parent)
+    : QWidget(parent), m_store(store), m_repertoires(repertoires), m_lichess(lichess),
+      m_style(style), m_model(new GamesModel(this)) {
     setObjectName(QStringLiteral("profilesView"));
     auto* layout = new QVBoxLayout(this);
     layout->setContentsMargins(layout::kPage);
@@ -176,10 +290,9 @@ ProfilesView::ProfilesView(ProfileStore& store, LichessLogin& lichess, const App
         if (profile == nullptr || profile->main) {
             return;
         }
-        if (QMessageBox::question(
-                this, tr("Remove Profile"),
-                tr("Remove “%1” and the games downloaded for it?").arg(profile->name)) ==
-            QMessageBox::Yes) {
+        if (confirm(this, tr("Remove Profile"),
+                    tr("Remove “%1” and the games downloaded for it?").arg(profile->name),
+                    tr("Remove"), MessageDialog::Action::Destructive)) {
             m_store.removeProfile(m_current);
         }
     });
@@ -227,8 +340,10 @@ ProfilesView::ProfilesView(ProfileStore& store, LichessLogin& lichess, const App
     viewsRow->setContentsMargins(2, 2, 2, 2);
     viewsRow->setSpacing(2);
     m_pages = new QStackedWidget;
-    for (const auto& [index, text, name] : {std::tuple{0, tr("Overview"), "profileShowOverview"},
-                                            std::tuple{1, tr("Games"), "profileShowGames"}}) {
+    for (const auto& [index, text, name] :
+         {std::tuple{0, tr("Overview"), "profileShowOverview"},
+          std::tuple{1, tr("Games"), "profileShowGames"},
+          std::tuple{2, tr("Repertoire"), "profileShowRepertoire"}}) {
         auto* button = new QPushButton(text);
         button->setObjectName(QString::fromLatin1(name));
         button->setProperty("role", "segment");
@@ -236,8 +351,12 @@ ProfilesView::ProfilesView(ProfileStore& store, LichessLogin& lichess, const App
         button->setChecked(index == 0);
         button->setAutoExclusive(true);
         button->setFocusPolicy(Qt::NoFocus);
-        connect(button, &QPushButton::clicked, m_pages,
-                [this, index] { m_pages->setCurrentIndex(index); });
+        connect(button, &QPushButton::clicked, m_pages, [this, index] {
+            m_pages->setCurrentIndex(index);
+            if (index == 2) {
+                showTheory();
+            }
+        });
         viewsRow->addWidget(button);
     }
     m_parts = new QComboBox;
@@ -348,22 +467,130 @@ ProfilesView::ProfilesView(ProfileStore& store, LichessLogin& lichess, const App
     searchDelay->setSingleShot(true);
     searchDelay->setInterval(250);
     connect(m_search, &QLineEdit::textChanged, searchDelay, qOverload<>(&QTimer::start));
-    connect(searchDelay, &QTimer::timeout, this, &ProfilesView::search);
+    connect(searchDelay, &QTimer::timeout, this, [this] { m_model->setText(m_search->text()); });
+    m_dates = new DateRange(QStringLiteral("profileDate"), m_style);
+    connect(m_dates, &DateRange::changed, this,
+            [this] { m_model->setDates(m_dates->from(), m_dates->to()); });
+    m_gamesStatus = label(QString(), "emptyHint");
+    m_gamesStatus->setObjectName(QStringLiteral("profileGamesStatus"));
+    connect(m_model, &GamesModel::statusChanged, this,
+            [this] { m_gamesStatus->setText(m_model->status()); });
     m_games = new QTableView;
     m_games->setObjectName(QStringLiteral("profileGames"));
     m_games->setModel(m_model);
     GamesModel::setUpTable(*m_games);
+    // Delete a game: from its menu, or with the Delete key.
+    m_games->setContextMenuPolicy(Qt::CustomContextMenu);
+    connect(m_games, &QWidget::customContextMenuRequested, this, [this](const QPoint& at) {
+        const QModelIndex index = m_games->indexAt(at);
+        if (!index.isValid()) {
+            return;
+        }
+        m_games->setCurrentIndex(index);
+        QMenu menu;
+        menu.addAction(tr("Open"), this, [this, index] { emit m_games->doubleClicked(index); });
+        menu.addSeparator();
+        menu.addAction(tr("Delete Game…"), this, &ProfilesView::deleteSelectedGame);
+        menu.exec(m_games->viewport()->mapToGlobal(at));
+    });
+    auto* deleteKey = new QShortcut(QKeySequence::Delete, m_games);
+    deleteKey->setContext(Qt::WidgetShortcut);
+    connect(deleteKey, &QShortcut::activated, this, &ProfilesView::deleteSelectedGame);
+    auto* backspace = new QShortcut(QKeySequence(Qt::Key_Backspace), m_games);
+    backspace->setContext(Qt::WidgetShortcut);
+    connect(backspace, &QShortcut::activated, this, &ProfilesView::deleteSelectedGame);
     connect(m_games, &QTableView::doubleClicked, this, [this](const QModelIndex& index) {
         const gamedb::GameInfo* info = m_model->at(index.row());
         if (info != nullptr && m_db) {
             if (const auto game = m_db->game(info->id)) {
-                emit openGameRequested(*game);
+                // As its PGN has it: with its clocks and comments.
+                m_store.originalGame(m_current, m_part, *game, [this](const core::Game& whole) {
+                    emit openGameRequested(whole);
+                });
             }
         }
     });
-    gamesBox->addWidget(m_search);
+    auto* gamesTop = new QHBoxLayout;
+    gamesTop->setSpacing(6);
+    gamesTop->addWidget(m_search, 1);
+    gamesTop->addWidget(m_dates);
+    gamesTop->addSpacing(6);
+    gamesTop->addWidget(m_gamesStatus);
+    gamesBox->addLayout(gamesTop);
     gamesBox->addWidget(m_games, 1);
     m_pages->addWidget(gamesPage);
+
+    // Repertoire: where these games left your repertoire, grouped by position and move.
+    auto* theoryPage = new QWidget;
+    auto* theoryBox = new QVBoxLayout(theoryPage);
+    theoryBox->setContentsMargins(0, 0, 0, 0);
+    theoryBox->setSpacing(8);
+    auto* kinds = new QHBoxLayout;
+    kinds->setSpacing(4);
+    for (const auto& [kind, text, name] :
+         {std::tuple{-1, tr("All"), "all"},
+          std::tuple{static_cast<int>(repertoire::Departure::You), tr("You left it"), "you"},
+          std::tuple{static_cast<int>(repertoire::Departure::Opponent), tr("They left it"),
+                     "opponent"},
+          std::tuple{static_cast<int>(repertoire::Departure::End), tr("Book ended"), "end"}}) {
+        auto* button = chip(text, QStringLiteral("profileTheoryKind:") + QString::fromLatin1(name));
+        button->setChecked(kind == -1);
+        connect(button, &QPushButton::clicked, this, [this, which = kind] {
+            m_theoryKind = which;
+            fillTheory();
+        });
+        kinds->addWidget(button);
+    }
+    kinds->addStretch();
+    theoryBox->addLayout(kinds);
+    m_theorySummary = label(QString(), "emptyHint");
+    m_theorySummary->setObjectName(QStringLiteral("profileTheorySummary"));
+    m_theorySummary->setWordWrap(true);
+    theoryBox->addWidget(m_theorySummary);
+    m_theory = new QTreeWidget;
+    m_theory->setObjectName(QStringLiteral("profileTheory"));
+    m_theory->setColumnCount(4);
+    m_theory->setHeaderLabels({tr("OPENING · MOVE"), tr("WHO"), tr("GAMES"), tr("THE BOOK")});
+    m_theory->setUniformRowHeights(true);
+    m_theory->setFrameShape(QFrame::NoFrame);
+    m_theory->header()->setStretchLastSection(true);
+    m_theory->header()->setSectionResizeMode(0, QHeaderView::Stretch);
+    m_theory->header()->setSectionResizeMode(1, QHeaderView::ResizeToContents);
+    m_theory->header()->setSectionResizeMode(2, QHeaderView::ResizeToContents);
+    m_theory->header()->setDefaultAlignment(Qt::AlignLeft | Qt::AlignVCenter);
+    m_theory->setSortingEnabled(true);
+    m_theory->sortByColumn(2, Qt::DescendingOrder); // the most games first
+    sortOnClicksThenReset(m_theory->header(), 2, Qt::DescendingOrder);
+    m_theory->setToolTip(tr("Double-click a move to open your repertoire there, a game to open "
+                            "it at that move"));
+    connect(m_theory, &QTreeWidget::itemDoubleClicked, this, [this](QTreeWidgetItem* item) {
+        if (!item->data(0, kGroupRole).isValid()) {
+            return; // an opening: it opens and closes
+        }
+        const int group = item->data(0, kGroupRole).toInt();
+        if (group < 0 || std::cmp_greater_equal(group, m_theoryReport.groups.size())) {
+            return;
+        }
+        const repertoire::DepartureGroup& departure =
+            m_theoryReport.groups[static_cast<std::size_t>(group)];
+        const QVariant game = item->data(0, kGameRole);
+        if (!game.isValid()) {
+            emit repertoireRequested(departure.side, departure.line);
+            return;
+        }
+        const auto index = static_cast<std::size_t>(game.toInt());
+        if (index < m_theoryGames.size() && index < m_theorySources.size()) {
+            if (const auto whole = m_theorySources[index]->game(m_theoryGames[index].id)) {
+                const int ply = static_cast<int>(departure.line.size()) + 1;
+                m_store.originalGame(m_current, m_part, *whole,
+                                     [this, ply](const core::Game& original) {
+                                         emit openGameAtRequested(original, ply);
+                                     });
+            }
+        }
+    });
+    theoryBox->addWidget(m_theory, 1);
+    m_pages->addWidget(theoryPage);
 
     auto* panel = new QVBoxLayout;
     panel->setSpacing(12);
@@ -392,25 +619,43 @@ ProfilesView::ProfilesView(ProfileStore& store, LichessLogin& lichess, const App
     layout->addWidget(splitter, 1);
 
     connect(&m_store, &ProfileStore::changed, this, &ProfilesView::refreshList);
-    connect(&m_lichess, &LichessLogin::changed, this, [this] {
-        // Signed in: your Lichess account belongs to your profile (its games come with it).
-        if (m_lichess.signedIn()) {
-            for (const Profile& profile : m_store.profiles()) {
-                if (profile.main) {
-                    const bool has = std::any_of(
-                        profile.accounts.begin(), profile.accounts.end(), [this](const auto& a) {
-                            return a.site == AccountSite::Lichess &&
-                                   a.username.compare(m_lichess.username(), Qt::CaseInsensitive) ==
-                                       0;
-                        });
-                    if (!has) {
-                        m_store.addAccount(profile.id, AccountSite::Lichess, m_lichess.username());
+    connect(&m_repertoires, &RepertoireStore::openingsReady, this, &ProfilesView::fillTheory);
+    connect(&m_repertoires, &RepertoireStore::changed, this, [this] {
+        if (m_pages->currentIndex() == 2) {
+            showTheory(); // a file marked as a repertoire, or changed: check again
+        }
+    });
+    connect(&m_lichess, &LichessLogin::changed, this, &ProfilesView::showProfile);
+    connect(&m_lichess, &LichessLogin::signedInNow, this,
+            [this](const QString& name, const QString& wanted) {
+                m_signingInFor.clear();
+                // Asked for one account, signed in as another (logged in as that one on Lichess's
+                // page): both fine, but say so.
+                if (!wanted.isEmpty() && wanted.compare(name, Qt::CaseInsensitive) != 0) {
+                    notice(this, tr("Lichess"),
+                           tr("Kiebitz is signed in as %1 now (not %2): that's the "
+                              "account you logged in to on Lichess.")
+                               .arg(name, wanted));
+                }
+                // An account no profile has yet goes to yours (its games come with it).
+                const bool known = std::any_of(
+                    m_store.profiles().begin(), m_store.profiles().end(),
+                    [&](const Profile& profile) {
+                        return std::any_of(profile.accounts.begin(), profile.accounts.end(),
+                                           [&](const Account& account) {
+                                               return account.site == AccountSite::Lichess &&
+                                                      account.username.compare(
+                                                          name, Qt::CaseInsensitive) == 0;
+                                           });
+                    });
+                if (!known) {
+                    for (const Profile& profile : m_store.profiles()) {
+                        if (profile.main) {
+                            m_store.addAccount(profile.id, AccountSite::Lichess, name);
+                        }
                     }
                 }
-            }
-        }
-        showProfile();
-    });
+            });
     connect(&m_store, &ProfileStore::progress, this, [this](const QString& id) {
         if (id == m_current) {
             const QString status = m_store.status(id);
@@ -420,8 +665,26 @@ ProfilesView::ProfilesView(ProfileStore& store, LichessLogin& lichess, const App
         }
     });
     connect(&m_store, &ProfileStore::failed, this, [this](const QString&, const QString& message) {
-        QMessageBox::warning(this, tr("Profiles"), message);
+        notice(this, tr("Profiles"), message);
     });
+    // Over-the-board games added: say how many, when some were there already.
+    connect(
+        &m_store, &ProfileStore::otbAdded, this, [this](const QString& id, int added, int skipped) {
+            if (id != m_current || skipped == 0) {
+                return;
+            }
+            const QString already =
+                skipped == 1
+                    ? tr("1 game was already in this profile and was left out.")
+                    : tr("%1 games were already in this profile and were left out.").arg(skipped);
+            QString news = tr("%1 new games added.").arg(added);
+            if (added == 0) {
+                news = tr("No new games.");
+            } else if (added == 1) {
+                news = tr("1 new game added.");
+            }
+            notice(this, tr("Add Over-the-Board Games"), news + QLatin1Char(' ') + already);
+        });
     refreshList();
 }
 
@@ -582,7 +845,9 @@ void ProfilesView::showAccounts(const Profile& profile) {
         }
     };
 
-    if (profile.main) {
+    if (profile.main &&
+        std::none_of(profile.accounts.begin(), profile.accounts.end(),
+                     [](const Account& account) { return account.site == AccountSite::Lichess; })) {
         showLichessLogin();
     }
     for (const Account& account : profile.accounts) {
@@ -593,10 +858,9 @@ void ProfilesView::showAccounts(const Profile& profile) {
         remove->setFixedSize(24, 24);
         connect(remove, &QPushButton::clicked, this,
                 [this, id = account.id, name = account.username] {
-                    if (QMessageBox::question(
-                            this, tr("Remove Account"),
-                            tr("Remove %1 and its games from this profile?").arg(name)) ==
-                        QMessageBox::Yes) {
+                    if (confirm(this, tr("Remove Account"),
+                                tr("Remove %1 and its games from this profile?").arg(name),
+                                tr("Remove"), MessageDialog::Action::Destructive)) {
                         m_store.removeAccount(m_current, id);
                     }
                 });
@@ -626,7 +890,37 @@ void ProfilesView::showAccounts(const Profile& profile) {
             row(box, caption, label(QString::number(found->second), "ratingValue"), change);
         }
         gamesRow(box, partGames(account.id), static_cast<quint64>(std::max(account.siteGames, 0)));
-        box->addWidget(label(ago(account.synced), "cardFoot"));
+        // "synced 2 h ago", and for Lichess: signed in or not, with what to do about it.
+        auto* foot = new QHBoxLayout;
+        foot->setSpacing(6);
+        foot->addWidget(label(ago(account.synced), "cardFoot"), 1);
+        if (account.site == AccountSite::Lichess) {
+            auto* action = new QPushButton;
+            action->setProperty("role", "link");
+            action->setFocusPolicy(Qt::NoFocus);
+            action->setObjectName(QStringLiteral("lichessSignIn:") + account.username);
+            if (m_lichess.signedIn(account.username)) {
+                foot->addWidget(label(tr("Signed in"), "cardFoot"));
+                action->setText(tr("Sign Out"));
+                connect(action, &QPushButton::clicked, this,
+                        [this, name = account.username] { m_lichess.signOut(name); });
+            } else if (m_lichess.busy() &&
+                       m_signingInFor.compare(account.username, Qt::CaseInsensitive) == 0) {
+                foot->addWidget(label(tr("Waiting for your browser…"), "cardFoot"));
+                action->setText(tr("Cancel"));
+                connect(action, &QPushButton::clicked, &m_lichess, &LichessLogin::cancel);
+            } else {
+                action->setText(tr("Sign In"));
+                action->setToolTip(tr("For faster downloads, and Lichess's opening explorer. "
+                                      "Your browser opens Lichess's sign-in page."));
+                connect(action, &QPushButton::clicked, this, [this, name = account.username] {
+                    m_signingInFor = name;
+                    m_lichess.signIn(name); // that account: Lichess asks for its login if need be
+                });
+            }
+            foot->addWidget(action);
+        }
+        box->addLayout(foot);
     }
 
     auto* addOtb = new QPushButton(tr("Add PGN…"));
@@ -662,15 +956,10 @@ void ProfilesView::showLichessLogin() {
     button->setObjectName(QStringLiteral("lichessSignIn"));
     QString title;
     QString foot;
-    if (m_lichess.signedIn()) {
-        title = tr("Signed in as %1").arg(m_lichess.username());
-        foot = tr("Its opening explorer is in the Explorer tab; your games download faster.");
-        button->setText(tr("Sign Out"));
-        button->setProperty("role", "secondary");
-        connect(button, &QPushButton::clicked, &m_lichess, &LichessLogin::signOut);
-    } else if (m_lichess.busy()) {
+    if (m_lichess.busy()) {
         title = tr("Waiting for your browser…");
-        foot = tr("Allow Kiebitz on the Lichess page that opened, then come back here.");
+        foot = tr("Allow Kiebitz on the Lichess page that opened in your browser. Lichess then "
+                  "sends the browser back to Kiebitz (a page from 127.0.0.1, this Mac).");
         button->setText(tr("Cancel"));
         button->setProperty("role", "secondary");
         connect(button, &QPushButton::clicked, &m_lichess, &LichessLogin::cancel);
@@ -679,7 +968,10 @@ void ProfilesView::showLichessLogin() {
         foot = tr("For Lichess's opening explorer, and faster downloads of your games.");
         button->setText(tr("Sign In"));
         button->setProperty("role", "primary");
-        connect(button, &QPushButton::clicked, &m_lichess, &LichessLogin::signIn);
+        connect(button, &QPushButton::clicked, this, [this] {
+            m_signingInFor.clear();
+            m_lichess.signIn({});
+        });
     }
     button->setProperty("compact", true);
     auto* titleLabel = label(title, "databaseName");
@@ -718,10 +1010,10 @@ void ProfilesView::showGames() {
         }
     }
     m_model->setDatabase(m_db);
-    if (!m_search->text().trimmed().isEmpty()) {
-        search();
-    }
     showStats();
+    if (m_pages->currentIndex() == 2) {
+        showTheory();
+    }
 }
 
 void ProfilesView::showStats() {
@@ -785,26 +1077,328 @@ void ProfilesView::showStats() {
     }));
 } // NOLINT(clang-analyzer-cplusplus.NewDeleteLeaks)
 
-void ProfilesView::search() {
-    const QString text = m_search->text().trimmed();
-    if (!m_db || text.isEmpty()) {
-        m_model->setDatabase(m_db);
+void ProfilesView::showTheory() {
+    const Profile* profile = m_store.profile(m_current);
+    const BuiltRepertoire* white = m_repertoires.get(core::Color::White);
+    const BuiltRepertoire* black = m_repertoires.get(core::Color::Black);
+    const int request = ++m_theoryRequest;
+    m_theoryReport = {};
+    m_theoryGames.clear();
+    m_theorySources.clear();
+    m_theory->clear();
+    if (profile == nullptr || !m_db) {
+        m_theorySummary->setText(tr("No games here yet."));
+        emit theoryChecked();
         return;
     }
-    const int request = ++m_searchRequest;
-    using Found = std::vector<gamedb::GameInfo>;
+    if ((white == nullptr || white->tree.empty()) && (black == nullptr || black->tree.empty())) {
+        m_theorySummary->setText(
+            tr("No repertoire yet. Set a file's type to Repertoire (right-click "
+               "it in the Library) to check these games against it."));
+        emit theoryChecked();
+        return;
+    }
+    // Saved from before (in memory, else on disk): shown at once; checked again only if the
+    // repertoire files, the games or the names have changed since.
+    const QString key = m_current + u'|' + m_part;
+    const QString file = m_store.cacheFile(
+        m_current,
+        QStringLiteral("theory-%1.json").arg(m_part.isEmpty() ? QStringLiteral("all") : m_part));
+    if (!m_theorySaved.contains(key)) {
+        QFile saved(file);
+        if (saved.open(QIODevice::ReadOnly)) {
+            if (auto read = theoryFromJson(QJsonDocument::fromJson(saved.readAll()).object())) {
+                auto& [fingerprint, report, games] = *read;
+                m_theorySaved[key] = {fingerprint, std::move(report), std::move(games)};
+            }
+        }
+    }
+    const QString fingerprint = theoryFingerprint(*profile);
+    bool stale = false;
+    if (const auto found = m_theorySaved.find(key); found != m_theorySaved.end()) {
+        m_theoryReport = found->second.report;
+        m_theoryGames = found->second.games;
+        stale = found->second.fingerprint != fingerprint;
+        if (!stale) {
+            m_theorySources.assign(m_theoryGames.size(), m_db);
+        } // else its games may not be where they were: not opened until checked again
+        fillTheory();
+        if (!stale) {
+            emit theoryChecked();
+            return;
+        }
+    }
+    // A repertoire still being read: checked once it is there (its change brings us back).
+    if (m_repertoires.isBuilding(core::Color::White) ||
+        m_repertoires.isBuilding(core::Color::Black)) {
+        if (!stale) {
+            m_theorySummary->setText(tr("Reading your repertoire…"));
+        }
+        return;
+    }
+    if (stale) {
+        m_theorySummary->setText(m_theorySummary->text() + QLatin1Char(' ') +
+                                 tr("Updating, as games or the repertoire changed…"));
+    } else {
+        m_theorySummary->setText(tr("Checking the games against your repertoire…"));
+    }
+    QStringList names; // who the profile is in these games, in lower case
+    for (const QString& name : ProfileStore::namesOf(*profile, m_part)) {
+        names << name.toLower();
+    }
+    struct Checked {
+        repertoire::TheoryReport report;
+        std::vector<gamedb::GameInfo> games;
+    };
     // Owned by the view and deleted when done (deleteLater); the analyzer can't see that.
     auto* watcher =
-        new QFutureWatcher<Found>(this); // NOLINT(clang-analyzer-cplusplus.NewDeleteLeaks)
-    connect(watcher, &QFutureWatcher<Found>::finished, this, [this, watcher, request] {
-        watcher->deleteLater();
-        if (request == m_searchRequest) {
-            m_model->setResults(watcher->result());
-        }
-    });
+        new QFutureWatcher<Checked>(this); // NOLINT(clang-analyzer-cplusplus.NewDeleteLeaks)
+    connect(watcher, &QFutureWatcher<Checked>::finished, this,
+            [this, watcher, request, key, file, fingerprint] {
+                watcher->deleteLater();
+                if (request != m_theoryRequest) {
+                    return;
+                }
+                Checked checked = watcher->result();
+                m_theoryReport = std::move(checked.report);
+                m_theoryGames = std::move(checked.games);
+                m_theorySources.assign(m_theoryGames.size(), m_db);
+                // Kept for next time, here and in the profile's folder.
+                m_theorySaved[key] = {fingerprint, m_theoryReport, m_theoryGames};
+                QSaveFile out(file);
+                if (out.open(QIODevice::WriteOnly)) {
+                    out.write(
+                        QJsonDocument(theoryToJson(fingerprint, m_theoryReport, m_theoryGames))
+                            .toJson(QJsonDocument::Compact));
+                    out.commit();
+                }
+                fillTheory();
+                emit theoryChecked();
+            });
+    // From copies: the repertoire may be rebuilt meanwhile.
     watcher->setFuture(QtConcurrent::run(
-        [db = m_db, words = text.toStdString()] { return db->search(words, 1000); }));
+        [db = m_db, names,
+         whiteTree = white != nullptr ? white->tree : repertoire::Tree(core::Color::White),
+         blackTree = black != nullptr ? black->tree : repertoire::Tree(core::Color::Black)] {
+            Checked result;
+            std::vector<repertoire::CheckedGame> games;
+            const auto all = db->games(1, static_cast<std::size_t>(db->gameCount()));
+            for (const gamedb::GameInfo& info : all) {
+                // The profile's colour: the side with one of its names.
+                const bool asWhite = names.contains(QString::fromStdString(info.white).toLower());
+                const bool asBlack = names.contains(QString::fromStdString(info.black).toLower());
+                if (asWhite == asBlack) {
+                    continue; // neither (or both): not theirs to judge
+                }
+                const auto game = db->game(info.id);
+                if (!game || game->startPosition().hash() != core::Position().hash()) {
+                    continue;
+                }
+                repertoire::CheckedGame checkedGame;
+                checkedGame.side = asWhite ? core::Color::White : core::Color::Black;
+                for (const core::NodeId node : game->mainLine()) {
+                    if (node != core::Game::root()) {
+                        checkedGame.line.push_back(game->node(node).move);
+                    }
+                }
+                games.push_back(std::move(checkedGame));
+                result.games.push_back(info);
+            }
+            result.report = repertoire::checkTheory(whiteTree, blackTree, games);
+            return result;
+        }));
 } // NOLINT(clang-analyzer-cplusplus.NewDeleteLeaks)
+
+QString ProfilesView::theoryFingerprint(const Profile& profile) const {
+    // What the check is worked out from: the games (the database as built), the repertoire's
+    // files (each one's text) and who the profile is in its games.
+    QStringList parts{m_store.databaseStamp(profile.id, m_part)};
+    for (const core::Color side : {core::Color::White, core::Color::Black}) {
+        const BuiltRepertoire* built = m_repertoires.get(side);
+        if (built == nullptr) {
+            parts << QStringLiteral("-");
+            continue;
+        }
+        for (const RepertoireFile& file : built->files) {
+            parts << QStringLiteral("%1:%2").arg(file.file->path).arg(file.textHash);
+        }
+    }
+    parts << ProfileStore::namesOf(profile, m_part).join(u'|').toLower();
+    return QString::fromLatin1(
+        QCryptographicHash::hash(parts.join(u'\n').toUtf8(), QCryptographicHash::Sha1).toHex());
+}
+
+void ProfilesView::fillTheory() {
+    const repertoire::TheoryReport& report = m_theoryReport;
+    m_theory->setSortingEnabled(false);
+    m_theory->clear();
+    const auto& c = m_style.colors();
+    std::array<std::size_t, 3> counts{};
+    // Grouped by opening: its family's name ("Caro-Kann Defense") where the game left the book.
+    const repertoire::OpeningNames* names = m_repertoires.openings();
+    if (names == nullptr) {
+        m_repertoires.loadOpenings(); // fills in again when they're there
+    }
+    std::map<QString, SortableItem*> openings;
+    const auto openingOf = [&](const repertoire::DepartureGroup& group) {
+        auto* found = static_cast<SortableItem*>(nullptr);
+        QString name = tr("Other openings");
+        if (names != nullptr) {
+            std::vector<core::Move> moves = group.line;
+            moves.push_back(group.played);
+            if (const repertoire::Opening* opening = names->along(core::Position(), moves)) {
+                name = QString::fromStdString(opening->name).section(u':', 0, 0).trimmed();
+            }
+        }
+        if (const auto it = openings.find(name); it != openings.end()) {
+            found = it->second;
+        } else {
+            found = new SortableItem(m_theory);
+            found->setText(0, name);
+            QFont bold = found->font(0);
+            bold.setWeight(QFont::DemiBold);
+            found->setFont(0, bold);
+            found->setSortValue(2, 0);
+            openings.emplace(name, found);
+        }
+        // Its games, summed up.
+        const double games = found->data(2, SortableItem::kSortRole).toDouble() +
+                             static_cast<double>(group.games.size());
+        found->setSortValue(2, games);
+        found->setText(2, number(static_cast<std::uint64_t>(games)));
+        return found;
+    };
+    for (std::size_t g = 0; g < report.groups.size(); ++g) {
+        const repertoire::DepartureGroup& group = report.groups[g];
+        counts[static_cast<std::size_t>(group.kind)] += group.games.size();
+        if (m_theoryKind >= 0 && static_cast<int>(group.kind) != m_theoryKind) {
+            continue;
+        }
+        // "7. f3", "7… h6"; the line in the tooltip.
+        const auto moveText = [](std::size_t ply, const std::string& san) {
+            return QStringLiteral("%1%2 %3")
+                .arg((ply / 2) + 1)
+                .arg(ply % 2 == 0 ? QStringLiteral(".") : QStringLiteral("…"))
+                .arg(QString::fromStdString(san));
+        };
+        auto* item = new SortableItem(openingOf(group));
+        item->setData(0, kGroupRole, static_cast<int>(g));
+        const std::size_t ply = group.line.size();
+        QStringList line; // "1. e4", "e5", "2. Nf3", ...: as a score sheet writes it
+        QString last;     // the last move on its own: "1… e5"
+        core::Position position;
+        for (std::size_t k = 0; k < ply; ++k) {
+            const std::string san = position.san(group.line[k]);
+            line << (k % 2 == 0 ? moveText(k, san) : QString::fromStdString(san));
+            last = moveText(k, san);
+            position.play(group.line[k]);
+        }
+        // Where it left the book; for the book's end, the last move it had.
+        if (group.kind == repertoire::Departure::End) {
+            item->setText(0, ply == 0 ? tr("at the start") : tr("after %1").arg(last));
+        } else {
+            item->setText(0, moveText(ply, group.san));
+        }
+        item->setSortValue(0, static_cast<double>(ply));
+        item->setToolTip(0, line.join(u' '));
+        switch (group.kind) {
+        case repertoire::Departure::You:
+            item->setText(1, tr("You"));
+            item->setForeground(1, c.bad);
+            break;
+        case repertoire::Departure::Opponent:
+            item->setText(1, tr("They"));
+            item->setForeground(1, c.accent);
+            break;
+        case repertoire::Departure::End:
+            item->setText(1, tr("Book ended"));
+            item->setForeground(1, c.muted);
+            break;
+        }
+        item->setText(2, number(group.games.size()));
+        item->setSortValue(2, static_cast<double>(group.games.size()));
+        QStringList expected;
+        for (const std::string& san : group.expected) {
+            expected << moveText(ply, san);
+        }
+        item->setText(3, group.kind == repertoire::Departure::Opponent
+                             ? tr("covers %1").arg(expected.join(QStringLiteral(", ")))
+                             : expected.join(tr(" or ")));
+        item->setForeground(3, c.muted);
+        // Its games: the date, the opponent, the result; double-click opens one there.
+        for (const std::size_t index : group.games) {
+            if (index >= m_theoryGames.size()) {
+                continue;
+            }
+            const gamedb::GameInfo& game = m_theoryGames[index];
+            const bool white = group.side == core::Color::White;
+            const QString opponent = QString::fromStdString(white ? game.black : game.white);
+            auto* child = new SortableItem(item);
+            child->setData(0, kGroupRole, static_cast<int>(g));
+            child->setData(0, kGameRole, static_cast<int>(index));
+            child->setText(0, QStringLiteral("%1  ·  %2 %3")
+                                  .arg(QString::fromStdString(game.date),
+                                       white ? tr("with White against") : tr("with Black against"),
+                                       opponent));
+            child->setText(1, resultText(game.result));
+            child->setForeground(0, c.muted);
+            child->setForeground(1, c.muted);
+        }
+    }
+    m_theory->setSortingEnabled(true);
+    m_theory->expandToDepth(0); // the openings open, their games not
+    if (report.checked == 0) {
+        m_theorySummary->setText(tr("None of these games has a colour you have a repertoire for."));
+        return;
+    }
+    m_theorySummary->setText(
+        tr("%1 games checked: you left the book in %2, your opponents in %3, the book ended in %4, "
+           "and %5 stayed in it. On average the games were in the book until move %6.")
+            .arg(number(report.checked), number(counts[0]), number(counts[1]), number(counts[2]),
+                 number(report.stayed))
+            .arg(qRound(report.averageBookMoves) + 1));
+}
+
+QStringList ProfilesView::theoryRows() const {
+    QStringList rows;
+    for (int i = 0; i < m_theory->topLevelItemCount(); ++i) {
+        const auto* opening = m_theory->topLevelItem(i);
+        for (int k = 0; k < opening->childCount(); ++k) {
+            const auto* item = opening->child(k);
+            rows << QStringLiteral("%1: %2  %3  %4  %5")
+                        .arg(opening->text(0), item->text(0), item->text(1), item->text(2),
+                             item->text(3));
+        }
+    }
+    return rows;
+}
+
+QString ProfilesView::theorySummary() const {
+    return m_theorySummary->text();
+}
+
+void ProfilesView::deleteSelectedGame() {
+    const gamedb::GameInfo* info = m_model->at(m_games->currentIndex().row());
+    if (info == nullptr || !m_db) {
+        return;
+    }
+    const auto game = m_db->game(info->id);
+    if (!game) {
+        return;
+    }
+    const QString what =
+        QStringLiteral("%1 – %2%3")
+            .arg(QString::fromStdString(info->white), QString::fromStdString(info->black),
+                 info->date.empty()
+                     ? QString()
+                     : QStringLiteral(", %1").arg(QString::fromStdString(info->date)));
+    if (confirm(this, tr("Delete Game"), tr("Delete %1 from this profile?").arg(what), tr("Delete"),
+                MessageDialog::Action::Destructive,
+                tr("It's taken out of the profile's PGN files. If the game is in there twice, "
+                   "the other copy stays."))) {
+        m_store.deleteGame(m_current, m_part, *game);
+    }
+}
 
 void ProfilesView::showFideCard() {
     const Profile* profile = m_store.profile(m_current);
@@ -830,7 +1424,8 @@ void ProfilesView::showFideCard() {
         status = tr("No player called %1 in FIDE's rating list.").arg(profile->name);
         retry = true;
     }
-    auto* card = new FideCard(profile->fide, profile->fideCandidates, status, retry, m_style, this);
+    auto* card = new FideCard(profile->fide, profile->fideCandidates, status, retry,
+                              profile->fideChosen, profile->main, m_style, this);
     connect(card, &FideCard::retryRequested, this,
             [this, id = m_current] { m_store.lookUpFide(id); });
     connect(card, &FideCard::chosen, this,
@@ -851,11 +1446,40 @@ void ProfilesView::newProfile() {
 
 void ProfilesView::addAccount() {
     AddAccountDialog dialog(this);
-    if (dialog.exec() == QDialog::Accepted &&
-        m_store.addAccount(m_current, dialog.site(), dialog.username()).isEmpty()) {
-        QMessageBox::information(this, tr("Add Account"),
-                                 tr("%1 is already in this profile.").arg(dialog.username()));
+    if (dialog.exec() != QDialog::Accepted) {
+        return;
     }
+    // Only an account the site has: looked up first, then added under the site's spelling.
+    const AccountSite site = dialog.site();
+    const QString typed = dialog.username();
+    const QString siteName =
+        site == AccountSite::Lichess ? QStringLiteral("Lichess") : QStringLiteral("chess.com");
+    m_status->setText(tr("Looking up %1 on %2…").arg(typed, siteName));
+    m_status->show();
+    m_store.checkAccount(
+        site, typed,
+        [this, site, typed, siteName, profileId = m_current](const QString& name,
+                                                             const QString& error) {
+            m_status->setText(m_store.status(m_current));
+            m_status->setVisible(!m_status->text().isEmpty());
+            if (!error.isEmpty()) {
+                notice(this, tr("Add Account"), error);
+                return;
+            }
+            if (name.isEmpty()) {
+                notice(this, tr("Add Account"),
+                       tr("There's no %1 account called “%2”.").arg(siteName, typed),
+                       site == AccountSite::Lichess
+                           ? tr("Check the spelling: it's the name in the "
+                                "account's address, lichess.org/@/name.")
+                           : tr("Check the spelling: it's the name in the "
+                                "account's address, chess.com/member/name."));
+                return;
+            }
+            if (m_store.addAccount(profileId, site, name).isEmpty()) {
+                notice(this, tr("Add Account"), tr("%1 is already in this profile.").arg(name));
+            }
+        });
 }
 
 void ProfilesView::addOtbGames() {

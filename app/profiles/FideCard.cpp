@@ -45,7 +45,7 @@ QString describe(const FidePlayer& player) {
 
 FideCard::FideCard(const std::optional<FidePlayer>& player,
                    const std::vector<FidePlayer>& candidates, const QString& status, bool retry,
-                   const AppStyle& /*style*/, QWidget* parent)
+                   bool confirmed, bool you, const AppStyle& /*style*/, QWidget* parent)
     : QFrame(parent, Qt::Popup) {
     setObjectName(QStringLiteral("fideCard"));
     setAttribute(Qt::WA_TranslucentBackground); // its own rounded card shows
@@ -59,11 +59,17 @@ FideCard::FideCard(const std::optional<FidePlayer>& player,
     box->setContentsMargins(16, 14, 16, 14);
     box->setSpacing(6);
     setFixedWidth(340);
-
     box->addWidget(label(tr("FIDE"), "cardTitle"));
+
+    // The player found: name, ratings, the page on Lichess.
+    auto* found = new QWidget;
+    found->setObjectName(QStringLiteral("fidePlayer"));
+    auto* foundBox = new QVBoxLayout(found);
+    foundBox->setContentsMargins(0, 0, 0, 0);
+    foundBox->setSpacing(6);
     if (player) {
-        box->addWidget(label(player->name, "sectionTitle"));
-        box->addWidget(label(describe(*player), "emptyHint"));
+        foundBox->addWidget(label(player->name, "sectionTitle"));
+        foundBox->addWidget(label(describe(*player), "emptyHint"));
         auto* tiles = new QHBoxLayout;
         tiles->setSpacing(8);
         for (const auto& [caption, value] :
@@ -78,20 +84,21 @@ FideCard::FideCard(const std::optional<FidePlayer>& player,
             tileBox->addWidget(label(rating(value), "statValue"));
             tiles->addWidget(tile, 1);
         }
-        box->addSpacing(4);
-        box->addLayout(tiles);
-        box->addSpacing(4);
+        foundBox->addSpacing(4);
+        foundBox->addLayout(tiles);
+        foundBox->addSpacing(4);
         auto* buttons = new QHBoxLayout;
+        buttons->setSpacing(6);
         auto* open = new QPushButton(tr("Open FIDE Profile"));
         open->setObjectName(QStringLiteral("fideOpen"));
-        open->setProperty("role", "primary");
+        open->setProperty("role", confirmed ? "primary" : "secondary");
         connect(open, &QPushButton::clicked, this,
                 [url = player->profileUrl()] { QDesktopServices::openUrl(QUrl(url)); });
         buttons->addWidget(open);
         buttons->addStretch();
-        box->addLayout(buttons);
+        foundBox->addLayout(buttons);
     } else {
-        box->addWidget(label(status, "emptyHint"));
+        foundBox->addWidget(label(status, "emptyHint"));
         if (retry) {
             auto* again = new QPushButton(tr("Try Again"));
             again->setObjectName(QStringLiteral("fideRetry"));
@@ -103,44 +110,83 @@ FideCard::FideCard(const std::optional<FidePlayer>& player,
             auto* row = new QHBoxLayout;
             row->addWidget(again);
             row->addStretch();
-            box->addLayout(row);
+            foundBox->addLayout(row);
         }
     }
+    box->addWidget(found);
 
-    // Not them? Everyone else who fits the name, and "none of these".
-    if (!candidates.empty()) {
-        box->addSpacing(6);
-        box->addWidget(label(player ? tr("NOT THEM?") : tr("PLAYERS WITH THIS NAME"), "cardTitle"));
-        auto* list = new QListWidget;
-        list->setObjectName(QStringLiteral("fideCandidates"));
-        list->setFrameShape(QFrame::NoFrame);
-        list->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
-        list->setTextElideMode(Qt::ElideRight);
-        for (const FidePlayer& candidate : candidates) {
-            if (player && candidate.id == player->id) {
-                continue;
-            }
-            // Short: the name, federation and best rating; the rest in the tooltip.
-            QStringList brief{candidate.name};
-            if (!candidate.federation.isEmpty()) {
-                brief << candidate.federation;
-            }
-            if (const int best = std::max({candidate.standard, candidate.rapid, candidate.blitz});
-                best > 0) {
-                brief << QString::number(best);
-            }
-            auto* item = new QListWidgetItem(brief.join(QStringLiteral("  ·  ")), list);
-            item->setToolTip(describe(candidate));
-            item->setData(Qt::UserRole, candidate.id);
+    // Who it is, among everyone with this name (and "none of these").
+    auto* others = new QWidget;
+    others->setObjectName(QStringLiteral("fideOthers"));
+    auto* othersBox = new QVBoxLayout(others);
+    othersBox->setContentsMargins(0, 6, 0, 0);
+    othersBox->setSpacing(6);
+    QString title = tr("PLAYERS WITH THIS NAME");
+    if (player) {
+        title = you ? tr("WHICH ONE IS YOU?") : tr("WHICH ONE IS IT?");
+    }
+    othersBox->addWidget(label(title, "cardTitle"));
+    auto* list = new QListWidget;
+    list->setObjectName(QStringLiteral("fideCandidates"));
+    list->setFrameShape(QFrame::NoFrame);
+    list->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    list->setTextElideMode(Qt::ElideRight);
+    for (const FidePlayer& candidate : candidates) {
+        if (player && candidate.id == player->id) {
+            continue; // not them, as just said
         }
-        auto* none = new QListWidgetItem(tr("None of these"), list);
-        none->setData(Qt::UserRole, 0);
-        list->setFixedHeight((std::min(list->count(), 5) * 28) + 4);
-        connect(list, &QListWidget::itemClicked, this, [this](QListWidgetItem* item) {
-            emit chosen(item->data(Qt::UserRole).toInt());
+        // Short: the name, federation and best rating; the rest in the tooltip.
+        QStringList brief{candidate.name};
+        if (!candidate.federation.isEmpty()) {
+            brief << candidate.federation;
+        }
+        if (const int best = std::max({candidate.standard, candidate.rapid, candidate.blitz});
+            best > 0) {
+            brief << QString::number(best);
+        }
+        auto* item = new QListWidgetItem(brief.join(QStringLiteral("  ·  ")), list);
+        item->setToolTip(describe(candidate));
+        item->setData(Qt::UserRole, candidate.id);
+    }
+    auto* none = new QListWidgetItem(tr("None of these"), list);
+    none->setData(Qt::UserRole, 0);
+    list->setFixedHeight((std::min(list->count(), 6) * 28) + 4);
+    connect(list, &QListWidget::itemClicked, this, [this](QListWidgetItem* item) {
+        emit chosen(item->data(Qt::UserRole).toInt());
+        close();
+    });
+    othersBox->addWidget(list);
+    box->addWidget(others);
+    // Without a player found, the list is the choice; with one, only after a "No".
+    others->setVisible(!player && !candidates.empty());
+
+    // Found but not confirmed: asked once. Yes keeps them; No takes them away for the list.
+    if (player && !confirmed) {
+        auto* question = new QWidget;
+        question->setObjectName(QStringLiteral("fideQuestion"));
+        auto* row = new QHBoxLayout(question);
+        row->setContentsMargins(0, 6, 0, 0);
+        row->setSpacing(6);
+        row->addWidget(label(you ? tr("Is this you?") : tr("Is this them?"), "checkHeadline"), 1);
+        auto* yes = new QPushButton(tr("Yes"));
+        yes->setObjectName(QStringLiteral("fideYes"));
+        yes->setProperty("role", "primary");
+        connect(yes, &QPushButton::clicked, this, [this, id = player->id] {
+            emit chosen(id);
             close();
         });
-        box->addWidget(list);
+        auto* no = new QPushButton(tr("No"));
+        no->setObjectName(QStringLiteral("fideNo"));
+        no->setProperty("role", "secondary");
+        connect(no, &QPushButton::clicked, this, [this, found, others, question] {
+            found->hide();
+            question->hide();
+            others->show();
+            adjustSize();
+        });
+        row->addWidget(yes);
+        row->addWidget(no);
+        box->addWidget(question);
     }
 }
 

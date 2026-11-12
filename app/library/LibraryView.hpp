@@ -19,7 +19,6 @@ class QFrame;
 class QLabel;
 class QLineEdit;
 class QPushButton;
-class QSortFilterProxyModel;
 class QStackedWidget;
 class QTableView;
 class QTreeWidget;
@@ -31,6 +30,8 @@ class AppStyle;
 class BoardView;
 class ElidedLabel;
 class EmptyState;
+class DateRange;
+class GameFilter;
 class GameListModel;
 class PageHeader;
 class RepertoireStore;
@@ -173,7 +174,8 @@ private:
     QLineEdit* m_search = nullptr;
     QTableView* m_games = nullptr;
     GameListModel* m_model = nullptr;
-    QSortFilterProxyModel* m_filter = nullptr;
+    GameFilter* m_filter = nullptr; ///< search, dates and order
+    DateRange* m_dates = nullptr;
 
     // Preview, under the games
     QStackedWidget* m_preview = nullptr; ///< a hint to pick a game, or the game

@@ -129,9 +129,9 @@ private:
     void updatePage();
     void updateSidebarIcons();
     void closeTab(int tab);
-    /// Before a game closes: a game from a file is saved right away (it autosaves anyway); a
-    /// new one asks whether and where to save it. False if the user cancelled.
-    bool maybeSave(GameDocument& document);
+    /// Before a game from a file closes: saves it right away (it autosaves anyway) and waits.
+    /// False if it couldn't be written (it says why). Games not in a file: nothing to do.
+    bool saveNow(GameDocument& document);
     /// Writes every changed game that lives in a file (autosave; ⌘S does it at once). Games of
     /// the same file go into its text one after another, then the file is written once.
     void autosave();

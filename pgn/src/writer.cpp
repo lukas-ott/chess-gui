@@ -206,4 +206,37 @@ std::string writeGame(const Game& game) {
     return out;
 }
 
+std::string gameKey(const Game& game) {
+    // A header as compared: trimmed, lower case, inner spaces as one.
+    const auto plain = [](std::string_view value) {
+        std::string result;
+        bool space = false;
+        for (const char c : value) {
+            if (c == ' ' || c == '\t') {
+                space = !result.empty();
+                continue;
+            }
+            if (space) {
+                result += ' ';
+                space = false;
+            }
+            result += static_cast<char>(c >= 'A' && c <= 'Z' ? c - 'A' + 'a' : c);
+        }
+        return result;
+    };
+    std::string key;
+    for (const char* name : {"White", "Black", "Date", "Result"}) {
+        key += plain(game.header(name));
+        key += '|';
+    }
+    key += game.startPosition().fen();
+    for (const core::NodeId node : game.mainLine()) {
+        if (node != Game::root()) {
+            key += ' ';
+            key += game.node(node).move.uci();
+        }
+    }
+    return key;
+}
+
 } // namespace kiebitz::pgn

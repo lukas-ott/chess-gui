@@ -1,17 +1,14 @@
 #include "Fide.hpp"
 
-#include <QRegularExpression>
+#include <QJsonArray>
+#include <QJsonDocument>
+#include <QJsonObject>
 #include <QSet>
 
 #include <algorithm>
-#include <array>
 
 namespace kiebitz::app {
 namespace {
-
-int number(const QString& text) {
-    return text.trimmed().toInt();
-}
 
 /// The parts of a name, without case, accents or punctuation: "Ott, Lukas" → {"ott", "lukas"}.
 QSet<QString> parts(const QString& name) {
@@ -29,37 +26,51 @@ QSet<QString> parts(const QString& name) {
 
 } // namespace
 
-std::vector<FidePlayer> parseFideSearch(const QString& html) {
+QString FidePlayer::profileUrl() const {
+    // As Lichess makes the name part ("Carlsen, Magnus" → "Carlsen_Magnus"): accents off,
+    // spaces as "_", anything but ASCII letters, digits, "_" and "-" left out (Lichess's regex
+    // has only those as word characters, so "ø" goes). Another name part would only redirect.
+    QString slug;
+    bool space = false;
+    for (const QChar c : name.normalized(QString::NormalizationForm_D)) {
+        if (c.isSpace()) {
+            space = !slug.isEmpty();
+            continue;
+        }
+        if (c.category() == QChar::Mark_NonSpacing) {
+            continue; // an accent, split off its letter
+        }
+        const char16_t code = c.unicode();
+        const bool ascii = (code >= u'a' && code <= u'z') || (code >= u'A' && code <= u'Z') ||
+                           (code >= u'0' && code <= u'9') || code == u'_' || code == u'-';
+        if (!ascii) {
+            continue;
+        }
+        if (space) {
+            slug += u'_';
+            space = false;
+        }
+        slug += c;
+    }
+    return QStringLiteral("https://lichess.org/fide/%1/%2").arg(id).arg(slug);
+}
+
+std::vector<FidePlayer> parseFideSearch(const QByteArray& json) {
     std::vector<FidePlayer> players;
-    static const QRegularExpression row(QStringLiteral("<tr>(.*?)</tr>"),
-                                        QRegularExpression::DotMatchesEverythingOption);
-    static const QRegularExpression id(QStringLiteral(R"(class="box-div">\s*(\d+)\s*<)"));
-    static const QRegularExpression name(QStringLiteral(R"(class="found_name">([^<]*)<)"));
-    static const QRegularExpression title(QStringLiteral(R"(data-label="title">([^<]*)<)"));
-    static const QRegularExpression federation(QStringLiteral(R"re(alt="([A-Z]{3})")re"));
-    static const QRegularExpression rating(QStringLiteral(R"(data-label="Rtg">\s*(\d*)\s*<)"));
-    static const QRegularExpression born(QStringLiteral(R"(data-label="B-Year">\s*(\d*)\s*<)"));
-    auto rows = row.globalMatch(html);
-    while (rows.hasNext()) {
-        const QString cells = rows.next().captured(1);
-        const auto idMatch = id.match(cells);
-        const auto nameMatch = name.match(cells);
-        if (!idMatch.hasMatch() || !nameMatch.hasMatch()) {
-            continue; // the header row
-        }
+    for (const auto& value : QJsonDocument::fromJson(json).array()) {
+        const QJsonObject object = value.toObject();
         FidePlayer player;
-        player.id = number(idMatch.captured(1));
-        player.name = nameMatch.captured(1).trimmed();
-        player.title = title.match(cells).captured(1).trimmed();
-        player.federation = federation.match(cells).captured(1);
-        auto ratings = rating.globalMatch(cells);
-        const std::array<int*, 3> fields{&player.standard, &player.rapid, &player.blitz};
-        for (int* field : fields) {
-            if (ratings.hasNext()) {
-                *field = number(ratings.next().captured(1));
-            }
+        player.id = object.value(QStringLiteral("id")).toInt();
+        player.name = object.value(QStringLiteral("name")).toString();
+        if (player.id <= 0 || player.name.isEmpty()) {
+            continue;
         }
-        player.born = number(born.match(cells).captured(1));
+        player.title = object.value(QStringLiteral("title")).toString();
+        player.federation = object.value(QStringLiteral("federation")).toString();
+        player.standard = object.value(QStringLiteral("standard")).toInt();
+        player.rapid = object.value(QStringLiteral("rapid")).toInt();
+        player.blitz = object.value(QStringLiteral("blitz")).toInt();
+        player.born = object.value(QStringLiteral("year")).toInt();
         players.push_back(player);
     }
     return players;

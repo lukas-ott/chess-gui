@@ -112,18 +112,28 @@ void DatabaseManager::refresh() {
         // The watchers are owned by the manager and deleted when done (deleteLater).
         // NOLINTBEGIN(clang-analyzer-cplusplus.NewDeleteLeaks)
         for (const InstalledDatabase& database : m_databases) {
-            if ((database.db->hasRatings() && database.db->hasAttributes()) ||
-                m_upgrading.contains(database.folder)) {
+            const bool ratings = database.db->hasRatings() && database.db->hasAttributes();
+            const bool sorting = database.db->hasSortIndexes();
+            if ((ratings && sorting) || m_upgrading.contains(database.folder)) {
                 continue;
             }
+            // Ratings for the explorer, and indexes for sorting the games list (databases
+            // from before them): once, in the background.
             m_upgrading.insert(database.folder);
             auto* upgrade = new QFutureWatcher<std::string_view>(this);
             connect(upgrade, &QFutureWatcher<std::string_view>::finished, this, [this, upgrade] {
                 upgrade->deleteLater();
                 refresh();
             });
-            upgrade->setFuture(QtConcurrent::run(
-                [folder = database.folder.toStdString()] { return gamedb::upgrade(folder); }));
+            upgrade->setFuture(QtConcurrent::run([folder = database.folder.toStdString(), ratings,
+                                                  sorting]() -> std::string_view {
+                if (!ratings) {
+                    if (const std::string_view error = gamedb::upgrade(folder); !error.empty()) {
+                        return error;
+                    }
+                }
+                return sorting ? std::string_view() : gamedb::addSortIndexes(folder);
+            }));
         }
         // NOLINTEND(clang-analyzer-cplusplus.NewDeleteLeaks)
     });

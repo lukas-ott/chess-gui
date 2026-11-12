@@ -6,6 +6,8 @@
 #include "style/AppStyle.hpp"
 #include "style/Layout.hpp"
 #include "style/PageHeader.hpp"
+#include "widgets/DateRange.hpp"
+#include "widgets/Message.hpp"
 
 #include <QAbstractTableModel>
 #include <QFileInfo>
@@ -17,7 +19,6 @@
 #include <QListWidget>
 #include <QLocale>
 #include <QMenu>
-#include <QMessageBox>
 #include <QProgressBar>
 #include <QPushButton>
 #include <QSignalBlocker>
@@ -86,17 +87,17 @@ DatabasesView::DatabasesView(DatabaseManager& manager, const AppStyle& style, QW
             return;
         }
         QMenu menu(this);
-        menu.addAction(
-            tr("Move to Trash"), this, [this, folder, name = item->data(kNameRole).toString()] {
-                if (QMessageBox::question(this, tr("Move to Trash"),
-                                          tr("Move the database “%1” to the Trash?").arg(name)) !=
-                    QMessageBox::Yes) {
-                    return;
-                }
-                if (const QString error = m_manager.remove(folder); !error.isEmpty()) {
-                    QMessageBox::warning(this, tr("Move to Trash"), error);
-                }
-            });
+        menu.addAction(tr("Move to Trash"), this,
+                       [this, folder, name = item->data(kNameRole).toString()] {
+                           if (!confirm(this, tr("Move to Trash"),
+                                        tr("Move the database “%1” to the Trash?").arg(name),
+                                        tr("Move to Trash"), MessageDialog::Action::Destructive)) {
+                               return;
+                           }
+                           if (const QString error = m_manager.remove(folder); !error.isEmpty()) {
+                               notice(this, tr("Move to Trash"), error);
+                           }
+                       });
         menu.exec(m_list->viewport()->mapToGlobal(at));
     });
     auto* listCard = card();
@@ -119,7 +120,14 @@ DatabasesView::DatabasesView(DatabaseManager& manager, const AppStyle& style, QW
     searchDelay->setSingleShot(true);
     searchDelay->setInterval(250);
     connect(m_search, &QLineEdit::textChanged, searchDelay, qOverload<>(&QTimer::start));
-    connect(searchDelay, &QTimer::timeout, this, &DatabasesView::search);
+    connect(searchDelay, &QTimer::timeout, this, [this] { m_model->setText(m_search->text()); });
+    m_dates = new DateRange(QStringLiteral("databaseDate"), m_style);
+    connect(m_dates, &DateRange::changed, this,
+            [this] { m_model->setDates(m_dates->from(), m_dates->to()); });
+    m_gamesStatus = label(QString(), "emptyHint");
+    m_gamesStatus->setObjectName(QStringLiteral("databaseGamesStatus"));
+    connect(m_model, &GamesModel::statusChanged, this,
+            [this] { m_gamesStatus->setText(m_model->status()); });
     m_games = new QTableView;
     m_games->setObjectName(QStringLiteral("databaseGames"));
     m_games->setModel(m_model);
@@ -136,7 +144,10 @@ DatabasesView::DatabasesView(DatabaseManager& manager, const AppStyle& style, QW
     titles->addWidget(m_title);
     titles->addWidget(m_subtitle);
     top->addLayout(titles, 1);
+    top->addWidget(m_gamesStatus);
+    top->addSpacing(6);
     top->addWidget(m_search);
+    top->addWidget(m_dates);
     gamesBox->addLayout(top);
     gamesBox->addWidget(m_games, 1);
 
@@ -183,7 +194,7 @@ DatabasesView::DatabasesView(DatabaseManager& manager, const AppStyle& style, QW
     connect(&m_manager, &DatabaseManager::jobChanged, this, &DatabasesView::refreshList);
     connect(&m_manager, &DatabaseManager::jobFinished, this, [this](int, const QString& error) {
         if (!error.isEmpty() && error != u"cancelled") {
-            QMessageBox::warning(this, tr("Import"), error);
+            notice(this, tr("Import"), error);
         }
         refreshList();
     });
@@ -202,11 +213,10 @@ void DatabasesView::importFile(const QString& path, const QString& name, const Q
     const qint64 free = m_manager.spaceFree();
     if (free >= 0 && needed > free) {
         const QLocale locale;
-        QMessageBox::warning(
-            this, tr("Not enough space"),
-            tr("Importing this needs about %1 of disk space, and %2 is free.")
-                .arg(locale.formattedDataSize(needed, 1, QLocale::DataSizeSIFormat),
-                     locale.formattedDataSize(free, 1, QLocale::DataSizeSIFormat)));
+        notice(this, tr("Not enough space"),
+               tr("Importing this needs about %1 of disk space, and %2 is free.")
+                   .arg(locale.formattedDataSize(needed, 1, QLocale::DataSizeSIFormat),
+                        locale.formattedDataSize(free, 1, QLocale::DataSizeSIFormat)));
         return;
     }
     m_manager.importFile(path, name.isEmpty() ? QFileInfo(path).completeBaseName() : name, source);
@@ -313,6 +323,7 @@ void DatabasesView::showSelected() {
         }
     }
     m_search->clear();
+    m_model->setText({});
     m_model->setDatabase(m_db);
     if (!m_db) {
         m_title->clear();
@@ -324,30 +335,6 @@ void DatabasesView::showSelected() {
     m_subtitle->setText(tr("%1 games  ·  from %2")
                             .arg(number(m_db->gameCount()), QString::fromStdString(info.source)));
 }
-
-void DatabasesView::search() {
-    if (!m_db) {
-        return;
-    }
-    const QString text = m_search->text().trimmed();
-    const int request = ++m_searchRequest;
-    if (text.isEmpty()) {
-        m_model->setDatabase(m_db);
-        return;
-    }
-    using Found = std::vector<gamedb::GameInfo>;
-    // Owned by the view and deleted when done (deleteLater); the analyzer can't see that.
-    auto* watcher =
-        new QFutureWatcher<Found>(this); // NOLINT(clang-analyzer-cplusplus.NewDeleteLeaks)
-    connect(watcher, &QFutureWatcher<Found>::finished, this, [this, watcher, request] {
-        watcher->deleteLater();
-        if (request == m_searchRequest) {
-            m_model->setResults(watcher->result());
-        }
-    });
-    watcher->setFuture(QtConcurrent::run(
-        [db = m_db, words = text.toStdString()] { return db->search(words, 1000); }));
-} // NOLINT(clang-analyzer-cplusplus.NewDeleteLeaks)
 
 void DatabasesView::openRow(int row) {
     const gamedb::GameInfo* info = m_model->at(row);

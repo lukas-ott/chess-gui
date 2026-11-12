@@ -21,6 +21,7 @@ namespace kiebitz::app {
 
 class AppStyle;
 class DatabaseManager;
+class DateRange;
 class GamesModel;
 class ElidedText;
 class EmptyState;
@@ -46,7 +47,6 @@ signals:
 private:
     void refreshList();
     void showSelected();
-    void search();
     void openRow(int row);
 
     DatabaseManager& m_manager;
@@ -57,11 +57,12 @@ private:
     QLabel* m_title = nullptr;
     QLabel* m_subtitle = nullptr;
     QLineEdit* m_search = nullptr;
+    DateRange* m_dates = nullptr;
+    QLabel* m_gamesStatus = nullptr; ///< "Searching…", "The first 10,000 are shown"
     QTableView* m_games = nullptr;
     GamesModel* m_model = nullptr;
     QString m_shown; ///< the folder of the database shown
     std::shared_ptr<const gamedb::Database> m_db;
-    int m_searchRequest = 0;
 };
 
 } // namespace kiebitz::app

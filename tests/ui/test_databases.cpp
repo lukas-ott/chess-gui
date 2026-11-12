@@ -10,10 +10,14 @@
 #include "profiles/ProfileStore.hpp"
 #include "repertoire/RepertoireStore.hpp"
 #include "style/AppStyle.hpp"
+#include "widgets/DateRange.hpp"
 
 #include <QApplication>
+#include <QCalendarWidget>
+#include <QDate>
 #include <QDir>
 #include <QFile>
+#include <QHeaderView>
 #include <QLabel>
 #include <QLineEdit>
 #include <QListWidget>
@@ -177,6 +181,83 @@ TEST_F(DatabasesTest, ThePageListsSearchesAndOpensGames) {
     ASSERT_EQ(opened.size(), 1);
     const auto game = opened.front().at(0).value<kiebitz::core::Game>();
     EXPECT_FALSE(std::string(game.header("White")).empty());
+}
+
+TEST_F(DatabasesTest, ColumnsSortAndDatesFilter) {
+    const kiebitz::app::AppStyle style(*qApp);
+    DatabaseManager manager(path("dbs"));
+    DatabasesView view(manager, style);
+    view.resize(1100, 700);
+    view.show();
+    write(path("dated.pgn"), "[White \"Carol\"]\n[Black \"x\"]\n[Date \"2021.03.01\"]\n"
+                             "[Result \"1-0\"]\n\n1. e4 e5 1-0\n\n"
+                             "[White \"alice\"]\n[Black \"x\"]\n[Date \"2023.07.15\"]\n"
+                             "[Result \"0-1\"]\n\n1. d4 d5 0-1\n\n"
+                             "[White \"Bob\"]\n[Black \"x\"]\n[Date \"2023.01.02\"]\n"
+                             "[Result \"1-0\"]\n\n1. c4 c5 1-0\n");
+    ASSERT_EQ(importAndWait(manager, path("dated.pgn"), QStringLiteral("Dated")), QString());
+    QApplication::processEvents();
+    auto* games = view.findChild<QTableView*>(QStringLiteral("databaseGames"));
+    ASSERT_NE(games, nullptr);
+    const auto whites = [&] {
+        QStringList names;
+        for (int row = 0; row < games->model()->rowCount(); ++row) {
+            names << games->model()->index(row, 0).data().toString();
+        }
+        return names;
+    };
+    ASSERT_EQ(whites(), (QStringList{"Carol", "alice", "Bob"})); // as stored
+    // A click on WHITE's title: by name; again: the other way round.
+    const auto* header = games->horizontalHeader();
+    const QPoint white(header->sectionViewportPosition(0) + 10, header->height() / 2);
+    QTest::mouseClick(header->viewport(), Qt::LeftButton, {}, white);
+    ASSERT_TRUE(
+        QTest::qWaitFor([&] { return whites() == QStringList{"alice", "Bob", "Carol"}; }, 5000))
+        << whites().join(u',').toStdString();
+    QTest::mouseClick(header->viewport(), Qt::LeftButton, {}, white);
+    ASSERT_TRUE(
+        QTest::qWaitFor([&] { return whites() == QStringList{"Carol", "Bob", "alice"}; }, 5000));
+    // A third click: as stored again, without an arrow.
+    QTest::mouseClick(header->viewport(), Qt::LeftButton, {}, white);
+    ASSERT_TRUE(
+        QTest::qWaitFor([&] { return whites() == QStringList{"Carol", "alice", "Bob"}; }, 5000));
+    EXPECT_EQ(header->sortIndicatorSection(), -1);
+    // Since 2023: Carol's 2021 game goes; up to June 2023: alice's July game too.
+    auto* dates = view.findChild<kiebitz::app::DateRange*>();
+    ASSERT_NE(dates, nullptr);
+    EXPECT_EQ(dates->text(), QStringLiteral("Any date"));
+    dates->setRange(QDate(2023, 1, 1), std::nullopt);
+    ASSERT_TRUE(QTest::qWaitFor([&] { return whites() == QStringList{"alice", "Bob"}; }, 5000));
+    dates->setRange(QDate(2023, 1, 1), QDate(2023, 6, 30));
+    ASSERT_TRUE(QTest::qWaitFor([&] { return whites() == QStringList{"Bob"}; }, 5000));
+    // The picker: a calendar for each end, and shortcuts; "Any time" takes the range away.
+    QTest::mouseClick(view.findChild<QPushButton*>(QStringLiteral("databaseDateButton")),
+                      Qt::LeftButton);
+    QWidget* picker = nullptr;
+    for (QWidget* top : QApplication::topLevelWidgets()) {
+        if (top->objectName() == u"dateRangePicker" && top->isVisible()) {
+            picker = top;
+        }
+    }
+    ASSERT_NE(picker, nullptr);
+    EXPECT_NE(picker->findChild<QCalendarWidget*>(QStringLiteral("dateRangeFrom")), nullptr);
+    EXPECT_NE(picker->findChild<QCalendarWidget*>(QStringLiteral("dateRangeTo")), nullptr);
+    if (const QString dir = qEnvironmentVariable("KIEBITZ_SNAPSHOT_DIR"); !dir.isEmpty()) {
+        QTest::qWait(100);
+        picker->grab().save(QDir(dir).filePath(QStringLiteral("date-picker.png")));
+    }
+    // A day picked in the To calendar: the range ends there.
+    auto* toCalendar = picker->findChild<QCalendarWidget*>(QStringLiteral("dateRangeTo"));
+    emit toCalendar->clicked(QDate(2023, 12, 31));
+    ASSERT_TRUE(QTest::qWaitFor([&] { return whites() == QStringList{"alice", "Bob"}; }, 5000));
+    EXPECT_EQ(dates->text(), QStringLiteral("2023")); // a whole year reads as the year
+    for (auto* chip : picker->findChildren<QPushButton*>()) {
+        if (chip->text() == u"Any time") {
+            chip->click();
+        }
+    }
+    ASSERT_TRUE(QTest::qWaitFor([&] { return whites().size() == 3; }, 5000));
+    EXPECT_EQ(dates->text(), QStringLiteral("Any date"));
 }
 
 TEST(AddDatabase, AChosenFileNamesTheDatabase) {

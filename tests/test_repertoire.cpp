@@ -3,6 +3,7 @@
 #include "kiebitz/repertoire/gaps.hpp"
 #include "kiebitz/repertoire/openings.hpp"
 #include "kiebitz/repertoire/summary.hpp"
+#include "kiebitz/repertoire/theory.hpp"
 #include "kiebitz/repertoire/tree.hpp"
 
 #include <gtest/gtest.h>
@@ -380,4 +381,59 @@ TEST(RepertoireGaps, TooFewGamesOrTooManyPositionsStopIt) {
     ASSERT_EQ(report.gaps.size(), 1U);
     EXPECT_EQ(report.gaps[0].san, "d4"); // Black has nothing against 1. d4
     EXPECT_TRUE(report.stopped);         // 2. Nf3 wasn't looked at
+}
+
+TEST(RepertoireTheory, GroupsWhereGamesLeftTheBookAndWhoLeftIt) {
+    // White: 1. e4 e5 2. Nf3 Nc6 3. Bb5; against 1... c5: 2. Nf3. Black: 1. d4 Nf6 2. c4 e6.
+    repertoire::Tree white(core::Color::White);
+    white.add(game("1. e4 e5 (1... c5 2. Nf3) 2. Nf3 Nc6 3. Bb5 *"), 0, 0);
+    repertoire::Tree black(core::Color::Black);
+    black.add(game("1. d4 Nf6 2. c4 e6 *"), 0, 0);
+    const std::vector<repertoire::CheckedGame> games{
+        {line({"e4", "e5", "Bc4", "Nf6"}), core::Color::White}, // you: 2. Bc4, not 2. Nf3
+        {line({"e4", "e5", "Bc4", "Bc5"}), core::Color::White}, // the same, again
+        {line({"e4", "e6", "d4"}), core::Color::White},         // they: 1... e6, not covered
+        {line({"e4", "e5", "Nf3", "Nc6", "Bb5", "a6"}), core::Color::White}, // the book ended
+        {line({"d4", "Nf6", "c4", "e6", "Nc3", "Bb4"}), core::Color::Black}, // ended, Black
+        {line({"d4", "d5"}), core::Color::Black},                            // you: 1... d5
+        {line({"d4", "Nf6", "Nf3", "e6"}), core::Color::Black}, // they: 2. Nf3 not covered
+        {line({"c4", "e5"}), core::Color::White}, // you: 1. c4, on your very first move
+        {line({"e4", "c5"}), core::Color::White}, // ended in the book: stayed
+    };
+    const auto report = repertoire::checkTheory(white, black, games);
+    EXPECT_EQ(report.checked, 9U);
+    EXPECT_EQ(report.stayed, 1U);
+    ASSERT_EQ(report.groups.size(), 7U);
+    // 2. Bc4 twice: the biggest group, first.
+    const auto& bc4 = report.groups[0];
+    EXPECT_EQ(bc4.kind, repertoire::Departure::You);
+    EXPECT_EQ(bc4.san, "Bc4");
+    EXPECT_EQ(bc4.expected, std::vector<std::string>{"Nf3"});
+    EXPECT_EQ(bc4.games, (std::vector<std::size_t>{0, 1}));
+    EXPECT_TRUE(bc4.line == line({"e4", "e5"}));
+    const auto find = [&](const std::string& san) {
+        return std::find_if(report.groups.begin(), report.groups.end(),
+                            [&](const auto& group) { return group.san == san; });
+    };
+    ASSERT_NE(find("e6"), report.groups.end());
+    EXPECT_EQ(find("e6")->kind, repertoire::Departure::Opponent);
+    EXPECT_EQ(find("e6")->expected, (std::vector<std::string>{"e5", "c5"}));
+    ASSERT_NE(find("a6"), report.groups.end());
+    EXPECT_EQ(find("a6")->kind, repertoire::Departure::End);
+    ASSERT_NE(find("d5"), report.groups.end());
+    EXPECT_EQ(find("d5")->kind, repertoire::Departure::You);
+    EXPECT_EQ(find("d5")->side, core::Color::Black);
+    EXPECT_EQ(find("d5")->expected, std::vector<std::string>{"Nf6"});
+    ASSERT_NE(find("c4"), report.groups.end()); // your first move counts too
+    EXPECT_EQ(find("c4")->expected, std::vector<std::string>{"e4"});
+    ASSERT_NE(find("Nf3"), report.groups.end());
+    EXPECT_EQ(find("Nf3")->kind, repertoire::Departure::Opponent);
+    EXPECT_EQ(find("Nf3")->side, core::Color::Black);
+    EXPECT_EQ(find("Nf3")->expected, std::vector<std::string>{"c4"});
+    ASSERT_NE(find("Nc3"), report.groups.end());
+    EXPECT_EQ(find("Nc3")->kind, repertoire::Departure::End);
+    // Without a Black repertoire, the Black games aren't checked.
+    const auto whiteOnly =
+        repertoire::checkTheory(white, repertoire::Tree(core::Color::Black), games);
+    EXPECT_EQ(whiteOnly.checked, 6U);
 }

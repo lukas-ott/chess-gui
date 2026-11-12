@@ -12,6 +12,7 @@
 #include <fcntl.h>
 #include <filesystem>
 #include <functional>
+#include <memory>
 #include <sqlite3.h>
 #include <sys/mman.h>
 #include <sys/stat.h>
@@ -156,6 +157,13 @@ constexpr const char* kGameColumns =
 constexpr const char* kGameTables =
     " FROM games g LEFT JOIN names w ON w.id = g.white LEFT JOIN names b ON b.id = g.black "
     "LEFT JOIN names e ON e.id = g.event LEFT JOIN names s ON s.id = g.site";
+
+/// The indexes that make sorting the games list fast: ratings, results, names in order.
+constexpr std::array kSortIndexes{
+    "CREATE INDEX IF NOT EXISTS games_white_elo ON games (white_elo)",
+    "CREATE INDEX IF NOT EXISTS games_black_elo ON games (black_elo)",
+    "CREATE INDEX IF NOT EXISTS games_result ON games (result)",
+    "CREATE INDEX IF NOT EXISTS names_by_name ON names (name COLLATE NOCASE)"};
 
 GameInfo readGame(sqlite3_stmt* statement) {
     GameInfo info;
@@ -464,10 +472,16 @@ std::string DatabaseWriter::finish(const std::function<void(double)>& progress) 
     if (!exec(d.db, "COMMIT")) {
         return "Couldn't write the database: " + std::string(sqlite3_errmsg(d.db));
     }
-    const std::array indexes{
-        "CREATE INDEX games_white ON games (white)", "CREATE INDEX games_black ON games (black)",
-        "CREATE INDEX games_event ON games (event)", "CREATE INDEX games_site ON games (site)",
-        "CREATE INDEX games_eco ON games (eco)",     "CREATE INDEX games_date ON games (date)"};
+    const std::array indexes{"CREATE INDEX games_white ON games (white)",
+                             "CREATE INDEX games_black ON games (black)",
+                             "CREATE INDEX games_event ON games (event)",
+                             "CREATE INDEX games_site ON games (site)",
+                             "CREATE INDEX games_eco ON games (eco)",
+                             "CREATE INDEX games_date ON games (date)",
+                             kSortIndexes[0],
+                             kSortIndexes[1],
+                             kSortIndexes[2],
+                             kSortIndexes[3]};
     double done = 0.6;
     for (const char* index : indexes) {
         if (!exec(d.db, index)) {
@@ -484,6 +498,8 @@ std::string DatabaseWriter::finish(const std::function<void(double)>& progress) 
 struct Database::Impl {
     DatabaseInfo info;
     sqlite3* db = nullptr;
+    std::string path;         ///< games.sqlite, for connections of their own
+    bool sortIndexes = false; ///< it has kSortIndexes
     MappedFile moves;
     MappedFile offsets;
     MappedFile order;
@@ -768,6 +784,15 @@ core::Result<std::unique_ptr<Database>> Database::open(const std::string& folder
         impl->info.players = std::stoull("0" + values["players"]);
         impl->info.online = values["online"] == "1"; // older databases: over the board
     }
+    impl->path = path;
+    {
+        const Statement indexes(
+            impl->db, "SELECT COUNT(*) FROM sqlite_master WHERE type = 'index' AND name IN "
+                      "('games_white_elo', 'games_black_elo', 'games_result', 'names_by_name')");
+        impl->sortIndexes = indexes.handle != nullptr &&
+                            sqlite3_step(indexes.handle) == SQLITE_ROW &&
+                            sqlite3_column_int(indexes.handle, 0) == 4;
+    }
     for (auto [file, name] :
          {std::pair{&impl->moves, "moves.bin"}, std::pair{&impl->offsets, "offsets.bin"},
           std::pair{&impl->order, "order.bin"}, std::pair{&impl->sums, "sums.bin"},
@@ -790,9 +815,31 @@ bool Database::hasRatings() const {
            m_impl->order.count<std::uint32_t>() > 0;
 }
 
+bool Database::hasSortIndexes() const {
+    return m_impl->sortIndexes;
+}
+
 bool Database::hasAttributes() const {
     return m_impl->attributes.count<Attributes>() == m_impl->order.count<std::uint32_t>() &&
            m_impl->order.count<std::uint32_t>() > 0;
+}
+
+std::string_view addSortIndexes(const std::string& folder) {
+    sqlite3* db = nullptr;
+    const std::string path = pathIn(folder, "games.sqlite");
+    if (sqlite3_open_v2(path.c_str(), &db, SQLITE_OPEN_READWRITE, nullptr) != SQLITE_OK) {
+        sqlite3_close(db);
+        return "Couldn't open the database to prepare it.";
+    }
+    sqlite3_busy_timeout(db, 30000); // others reading it: wait for them
+    for (const char* index : kSortIndexes) {
+        if (!exec(db, index)) {
+            sqlite3_close(db);
+            return "Couldn't prepare the database for sorting.";
+        }
+    }
+    sqlite3_close(db);
+    return {};
 }
 
 std::string_view upgrade(const std::string& folder) {
@@ -875,26 +922,163 @@ std::vector<GameInfo> Database::search(std::string_view text, std::size_t limit)
     if (text.empty()) {
         return games(1, limit);
     }
+    GameQuery query;
+    query.text = text;
+    return find(query, limit);
+}
+
+std::vector<GameInfo> Database::find(const GameQuery& query, std::size_t limit,
+                                     const std::atomic<bool>* cancelled) const {
+    // A connection of its own: a long query (sorting millions of games) doesn't hold up the
+    // pages of the list, which read on the shared one.
+    sqlite3* db = nullptr;
+    if (sqlite3_open_v2(m_impl->path.c_str(), &db, SQLITE_OPEN_READONLY | SQLITE_OPEN_NOMUTEX,
+                        nullptr) != SQLITE_OK) {
+        sqlite3_close(db);
+        return {};
+    }
+    const std::unique_ptr<sqlite3, int (*)(sqlite3*)> closer(db, &sqlite3_close);
+    if (cancelled != nullptr) { // asked again meanwhile: stop
+        sqlite3_progress_handler(
+            db, 10000,
+            [](void* flag) { return static_cast<const std::atomic<bool>*>(flag)->load() ? 1 : 0; },
+            const_cast<std::atomic<bool>*>(cancelled)); // NOLINT(*-const-cast): read only
+    }
     // LIKE with % and _ taken literally.
     std::string pattern = "%";
-    for (const char c : text) {
+    for (const char c : query.text) {
         if (c == '%' || c == '_' || c == '\\') {
             pattern += '\\';
         }
         pattern += c;
     }
     pattern += '%';
-    const Statement query(
-        m_impl->db, (std::string("WITH hit AS (SELECT id FROM names WHERE name LIKE ?1 ESCAPE "
-                                 "'\\') SELECT ") +
-                     kGameColumns + kGameTables +
-                     " WHERE g.white IN hit OR g.black IN hit OR g.event IN hit OR g.site IN hit "
-                     "OR g.eco = ?2 ORDER BY g.date DESC LIMIT ?3")
-                        .c_str());
-    bindText(query.handle, 1, pattern);
-    bindText(query.handle, 2, text);
-    sqlite3_bind_int64(query.handle, 3, static_cast<sqlite3_int64>(limit));
-    return readGames(query.handle);
+    using Order = GameQuery::Order;
+    // Sorted by a name and nothing searched: the names walked in order (their index), each
+    // one's games after it, so the first rows come at once whatever the size.
+    const char* byName = nullptr;
+    if (query.text.empty()) {
+        if (query.order == Order::White) {
+            byName = "w";
+        } else if (query.order == Order::Black) {
+            byName = "b";
+        } else if (query.order == Order::Event) {
+            byName = "e";
+        }
+    }
+    // What is searched for, and the dates: the same whichever way the games are walked.
+    std::string with;
+    if (!query.text.empty()) {
+        with = "WITH hit AS (SELECT id FROM names WHERE name LIKE ?1 ESCAPE '\\') ";
+    }
+    std::string filters;
+    if (!query.text.empty()) {
+        filters += " AND (g.white IN hit OR g.black IN hit OR g.event IN hit OR g.site IN hit OR "
+                   "g.eco = ?2)";
+    }
+    if (!query.fromDate.empty() || !query.toDate.empty()) {
+        filters += " AND g.date GLOB '[0-9][0-9][0-9][0-9]*'"; // the year known
+    }
+    if (!query.fromDate.empty()) {
+        filters += " AND g.date >= ?3";
+    }
+    if (!query.toDate.empty()) {
+        filters += " AND g.date <= ?4"; // the prefix and anything after it: "2024" … "2024~"
+    }
+    const std::string games = std::string("SELECT ") + kGameColumns + kGameTables + " WHERE 1";
+    std::string walked; // by a name: its index, each one's games after it
+    const char* nameColumn = nullptr;
+    if (byName != nullptr) {
+        const std::string first = byName;
+        nameColumn = "event";
+        if (first == "w") {
+            nameColumn = "white";
+        } else if (first == "b") {
+            nameColumn = "black";
+        }
+        walked = std::string("SELECT ") + kGameColumns + " FROM names " + first +
+                 " CROSS JOIN games g ON g." + nameColumn + " = " + first + ".id";
+        for (const auto& [alias, joined] : {std::pair{"w", "white"}, std::pair{"b", "black"},
+                                            std::pair{"e", "event"}, std::pair{"s", "site"}}) {
+            if (first != alias) {
+                walked +=
+                    std::string(" LEFT JOIN names ") + alias + " ON " + alias + ".id = g." + joined;
+            }
+        }
+        walked += " WHERE 1";
+    }
+    const char* column = nullptr;
+    switch (query.order) {
+    case Order::Id:
+        column = query.text.empty() ? "g.id" : "g.date"; // a search: newest first
+        break;
+    case Order::White:
+        column = "w.name COLLATE NOCASE";
+        break;
+    case Order::WhiteElo:
+        column = "g.white_elo";
+        break;
+    case Order::Black:
+        column = "b.name COLLATE NOCASE";
+        break;
+    case Order::BlackElo:
+        column = "g.black_elo";
+        break;
+    case Order::Result:
+        column = "g.result";
+        break;
+    case Order::Date:
+        column = "g.date";
+        break;
+    case Order::Event:
+        column = "e.name COLLATE NOCASE";
+        break;
+    case Order::Eco:
+        column = "g.eco";
+        break;
+    }
+    const bool descending =
+        query.order == Order::Id && !query.text.empty() ? !query.descending : query.descending;
+    // Runs a query: games from `from`, with one more condition, in `order`.
+    const auto run = [&](const std::string& from, const std::string& extra,
+                         const std::string& order, std::size_t count) {
+        const std::string text = with + from + filters + extra + " ORDER BY " + order + " LIMIT ?5";
+        const Statement statement(db, text.c_str());
+        if (!query.text.empty()) {
+            bindText(statement.handle, 1, pattern);
+            bindText(statement.handle, 2, query.text);
+        }
+        if (!query.fromDate.empty()) {
+            bindText(statement.handle, 3, query.fromDate);
+        }
+        if (!query.toDate.empty()) {
+            bindText(statement.handle, 4, query.toDate + "~");
+        }
+        sqlite3_bind_int64(statement.handle, 5, static_cast<sqlite3_int64>(count));
+        return readGames(statement.handle);
+    };
+    // Ties in the same direction: an index then answers it as it is, without a sort.
+    const std::string order = std::string(column) + (descending ? " DESC, g.id DESC" : ", g.id");
+    // Then, for what is walked by a name or by date: the games without one (no event, an
+    // unknown date), after the others, as stored.
+    const auto rest = [&](std::vector<GameInfo> found, const std::string& without) {
+        if (found.size() < limit && (cancelled == nullptr || !cancelled->load())) {
+            std::vector<GameInfo> more = run(games, without, "g.id", limit - found.size());
+            found.insert(found.end(), std::make_move_iterator(more.begin()),
+                         std::make_move_iterator(more.end()));
+        }
+        return found;
+    };
+    if (nameColumn != nullptr) {
+        return rest(run(walked, "", order, limit),
+                    std::string(" AND g.") + nameColumn + " IS NULL");
+    }
+    if (std::string_view(column) == "g.date" && descending) {
+        // Newest first, and unknown dates ("????.??.??") last, not first.
+        return rest(run(games, " AND g.date GLOB '[0-9][0-9][0-9][0-9]*'", order, limit),
+                    " AND (g.date IS NULL OR NOT g.date GLOB '[0-9][0-9][0-9][0-9]*')");
+    }
+    return run(games, "", order, limit); // ascending dates put "????" last by themselves
 }
 
 std::optional<core::Game> Database::game(GameId id) const {
@@ -1129,6 +1313,65 @@ std::vector<GameInfo> Database::gamesAt(std::span<const core::Move> line, std::s
     }
     std::reverse(ids.begin(), ids.end());
     return m_impl->byIds(ids);
+}
+
+std::optional<std::string> pgnDatePrefix(std::string_view typed) {
+    // The numbers in it, in order; a four-digit one is the year.
+    std::vector<std::string> numbers;
+    std::string current;
+    for (const char c : typed) {
+        if (c >= '0' && c <= '9') {
+            current += c;
+        } else if (c == '.' || c == '-' || c == '/' || c == ' ') {
+            if (!current.empty()) {
+                numbers.push_back(current);
+                current.clear();
+            }
+        } else {
+            return std::nullopt;
+        }
+    }
+    if (!current.empty()) {
+        numbers.push_back(current);
+    }
+    if (numbers.empty() || numbers.size() > 3) {
+        return std::nullopt;
+    }
+    if (numbers.size() == 3 && numbers.back().size() == 4 && numbers.front().size() <= 2) {
+        std::swap(numbers.front(), numbers.back()); // 12.05.2024: day first
+    }
+    if (numbers.front().size() != 4) {
+        return std::nullopt;
+    }
+    std::string result = numbers.front();
+    for (std::size_t k = 1; k < numbers.size(); ++k) {
+        if (numbers[k].size() > 2) {
+            return std::nullopt;
+        }
+        const int value = std::stoi(numbers[k]);
+        if (value < 1 || value > (k == 1 ? 12 : 31)) {
+            return std::nullopt;
+        }
+        result += (value < 10 ? ".0" : ".") + std::to_string(value);
+    }
+    return result;
+}
+
+bool dateInRange(std::string_view date, std::string_view from, std::string_view to) {
+    if (from.empty() && to.empty()) {
+        return true;
+    }
+    const bool yearKnown =
+        date.size() >= 4 &&
+        std::all_of(date.begin(), date.begin() + 4, [](char c) { return c >= '0' && c <= '9'; });
+    if (!yearKnown) {
+        return false;
+    }
+    if (!from.empty() && date < from) {
+        return false;
+    }
+    // The prefix and anything that starts with it: "2024" takes "2024.12.31" and "2024.??.??".
+    return to.empty() || date <= to || date.starts_with(to);
 }
 
 } // namespace kiebitz::gamedb

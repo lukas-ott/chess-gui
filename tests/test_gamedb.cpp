@@ -406,3 +406,87 @@ TEST(GameDatabase, APlayersStatsByYearAndSpeed) {
     EXPECT_EQ(rapid.total.games(), 1U); // the 600-second loss with Black
     EXPECT_EQ(rapid.total.asBlack[2], 1U);
 }
+
+TEST(GameDatabase, DatesAsTypedBecomePgnDatePrefixes) {
+    EXPECT_EQ(gamedb::pgnDatePrefix("2024"), "2024");
+    EXPECT_EQ(gamedb::pgnDatePrefix("2024-5"), "2024.05");
+    EXPECT_EQ(gamedb::pgnDatePrefix("2024.05.12"), "2024.05.12");
+    EXPECT_EQ(gamedb::pgnDatePrefix("12.05.2024"), "2024.05.12"); // day first
+    EXPECT_EQ(gamedb::pgnDatePrefix(" 2024 / 11 "), "2024.11");
+    EXPECT_FALSE(gamedb::pgnDatePrefix("24").has_value());
+    EXPECT_FALSE(gamedb::pgnDatePrefix("2024.13").has_value());
+    EXPECT_FALSE(gamedb::pgnDatePrefix("May 2024").has_value());
+    EXPECT_FALSE(gamedb::pgnDatePrefix("").has_value());
+    // A range takes whole years, months and days; unknown dates only without limits.
+    EXPECT_TRUE(gamedb::dateInRange("2024.12.31", "2024", "2024"));
+    EXPECT_TRUE(gamedb::dateInRange("2024.??.??", "2023", "2024"));
+    EXPECT_FALSE(gamedb::dateInRange("2025.01.01", "2024", "2024"));
+    EXPECT_FALSE(gamedb::dateInRange("2024.04.30", "2024.05", ""));
+    EXPECT_TRUE(gamedb::dateInRange("2024.05.01", "2024.05", ""));
+    EXPECT_FALSE(gamedb::dateInRange("????.??.??", "", "2024"));
+    EXPECT_TRUE(gamedb::dateInRange("????.??.??", "", ""));
+}
+
+TEST(GameDatabase, GamesCanBeFoundByTextAndDatesInAnyOrder) {
+    const std::string games =
+        "[White \"Carol\"]\n[Black \"Bob\"]\n[Date \"2021.03.01\"]\n[WhiteElo \"2100\"]\n"
+        "[Result \"1-0\"]\n\n1. e4 e5 1-0\n\n"
+        "[White \"alice\"]\n[Black \"Carol\"]\n[Date \"2023.07.15\"]\n[WhiteElo \"1900\"]\n"
+        "[Result \"0-1\"]\n\n1. d4 d5 0-1\n\n"
+        "[White \"Bob\"]\n[Black \"Dave\"]\n[Date \"2023.01.02\"]\n[WhiteElo \"2300\"]\n"
+        "[Result \"1/2-1/2\"]\n\n1. c4 c5 1/2-1/2\n\n"
+        "[White \"Eve\"]\n[Black \"Carol\"]\n[Date \"????.??.??\"]\n"
+        "[Result \"1-0\"]\n\n1. Nf3 Nf6 1-0\n";
+    const TempFolder folder;
+    {
+        auto writer = gamedb::DatabaseWriter::create(folder.path(), {"Test", "", 0, 0});
+        ASSERT_TRUE(writer.ok());
+        gamedb::GameSplitter splitter;
+        const auto add = [&](std::string_view game) {
+            (*writer)->add(gamedb::scanGame(game));
+        };
+        splitter.feed(games, add);
+        splitter.finish(add);
+        EXPECT_EQ((*writer)->finish(), "");
+    }
+    auto db = gamedb::Database::open(folder.path());
+    ASSERT_TRUE(db.ok());
+    const auto whites = [&](const gamedb::GameQuery& query) {
+        std::vector<std::string> names;
+        for (const auto& game : (*db)->find(query, 10)) {
+            names.push_back(game.white);
+        }
+        return names;
+    };
+    gamedb::GameQuery query;
+    EXPECT_EQ(whites(query), (std::vector<std::string>{"Carol", "alice", "Bob", "Eve"}));
+    query.order = gamedb::GameQuery::Order::White; // names in any case
+    EXPECT_EQ(whites(query), (std::vector<std::string>{"alice", "Bob", "Carol", "Eve"}));
+    query.descending = true;
+    EXPECT_EQ(whites(query), (std::vector<std::string>{"Eve", "Carol", "Bob", "alice"}));
+    query.order = gamedb::GameQuery::Order::WhiteElo;
+    EXPECT_EQ(whites(query).front(), "Bob");
+    // 2023 only; the unknown date never fits a range.
+    query = {};
+    query.fromDate = "2023";
+    query.toDate = "2023";
+    query.order = gamedb::GameQuery::Order::Date;
+    EXPECT_EQ(whites(query), (std::vector<std::string>{"Bob", "alice"}));
+    // Carol's games, newest first (an unknown date last); then only up to 2022.
+    query = {};
+    query.text = "carol";
+    EXPECT_EQ(whites(query), (std::vector<std::string>{"alice", "Carol", "Eve"}));
+    query.toDate = "2022";
+    EXPECT_EQ(whites(query), (std::vector<std::string>{"Carol"}));
+
+    // Made with the indexes for sorting; preparing it again is harmless.
+    EXPECT_TRUE((*db)->hasSortIndexes());
+    EXPECT_EQ(gamedb::addSortIndexes(folder.path()), "");
+    // A query cancelled before it runs: stopped, nothing (to keep) comes back.
+    const std::atomic<bool> stop{true};
+    query = {};
+    query.order = gamedb::GameQuery::Order::Event;
+    EXPECT_TRUE((*db)->find(query, 10, &stop).empty());
+    const std::atomic<bool> go{false};
+    EXPECT_EQ((*db)->find(query, 10, &go).size(), 4U);
+}

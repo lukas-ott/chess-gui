@@ -6,6 +6,7 @@ add_library(kiebitz_repertoire
     src/gaps.cpp
     src/openings.cpp
     src/summary.cpp
+    src/theory.cpp
     src/tree.cpp)
 add_library(kiebitz::repertoire ALIAS kiebitz_repertoire)
 

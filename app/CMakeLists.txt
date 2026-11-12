@@ -68,8 +68,6 @@ qt_add_library(kiebitz_ui STATIC
     profiles/Fide.hpp
     profiles/FideCard.cpp
     profiles/FideCard.hpp
-    profiles/Keychain.cpp
-    profiles/Keychain.hpp
     profiles/LichessLogin.cpp
     profiles/LichessLogin.hpp
     profiles/ProfileStore.cpp
@@ -90,19 +88,24 @@ qt_add_library(kiebitz_ui STATIC
     style/PageHeader.hpp
     widgets/ActivityChart.cpp
     widgets/ActivityChart.hpp
+    widgets/DateRange.cpp
+    widgets/DateRange.hpp
     widgets/ElidedLabel.hpp
     widgets/EmptyState.cpp
     widgets/EmptyState.hpp
+    widgets/Message.cpp
+    widgets/Message.hpp
     widgets/NameDialog.cpp
     widgets/NameDialog.hpp
     widgets/ResultBar.cpp
     widgets/ResultBar.hpp
+    widgets/SortCycle.hpp
+    widgets/SortableItem.hpp
     widgets/Stepper.cpp
     widgets/Stepper.hpp)
 target_include_directories(kiebitz_ui PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")
 target_link_libraries(kiebitz_ui PUBLIC Qt6::Widgets Qt6::Svg Qt6::Concurrent Qt6::Network
-    kiebitz::pgn kiebitz::engine kiebitz::gamedb kiebitz::library kiebitz::repertoire
-    "-framework Security" "-framework CoreFoundation")
+    kiebitz::pgn kiebitz::engine kiebitz::gamedb kiebitz::library kiebitz::repertoire)
 kiebitz_set_warnings(kiebitz_ui)
 
 # Piece SVGs are compiled into the binary (":/pieces/<set>/wK.svg"), so the app has no loose

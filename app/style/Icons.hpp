@@ -27,6 +27,7 @@ enum class IconKind : std::uint8_t {
     Person,    ///< a head and shoulders: profiles (sidebar)
     Info,      ///< an "i" in a circle
     Refresh,   ///< a circular arrow: sync
+    Calendar,  ///< a page of a calendar: dates
     Trash,     ///< a bin: remove
     Board,     ///< a pawn: the board and its games (sidebar)
     Library,   ///< two stacked pages: the files (sidebar)

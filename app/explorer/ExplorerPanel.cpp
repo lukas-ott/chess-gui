@@ -7,6 +7,8 @@
 #include "repertoire/RepertoireStore.hpp"
 #include "style/AppStyle.hpp"
 #include "widgets/ResultBar.hpp"
+#include "widgets/SortCycle.hpp"
+#include "widgets/SortableItem.hpp"
 
 #include <QComboBox>
 #include <QFutureWatcher>
@@ -179,7 +181,7 @@ ExplorerPanel::ExplorerPanel(DatabaseManager& databases, ProfileStore& profiles,
     auto* signIn = new QPushButton(tr("Sign In with Lichess"));
     signIn->setObjectName(QStringLiteral("explorerSignInButton"));
     signIn->setProperty("role", "primary");
-    connect(signIn, &QPushButton::clicked, &m_lichess, &LichessLogin::signIn);
+    connect(signIn, &QPushButton::clicked, &m_lichess, [this] { m_lichess.signIn({}); });
     auto* signInRow = new QHBoxLayout;
     signInRow->addWidget(signIn);
     signInRow->addStretch();
@@ -206,6 +208,10 @@ ExplorerPanel::ExplorerPanel(DatabaseManager& databases, ProfileStore& profiles,
     m_moves->header()->setDefaultAlignment(Qt::AlignLeft | Qt::AlignVCenter);
     m_moves->headerItem()->setTextAlignment(1, Qt::AlignRight | Qt::AlignVCenter);
     m_moves->headerItem()->setTextAlignment(2, Qt::AlignRight | Qt::AlignVCenter);
+    // Sortable by any column (a click on its title); most played first to begin with.
+    m_moves->setSortingEnabled(true);
+    m_moves->sortByColumn(1, Qt::DescendingOrder);
+    sortOnClicksThenReset(m_moves->header(), 1, Qt::DescendingOrder);
     connect(m_moves, &QTreeWidget::itemClicked, this, [this](QTreeWidgetItem* item) {
         if (const auto move =
                 core::Move::fromUci(item->data(0, kMoveRole).toString().toStdString())) {
@@ -531,8 +537,18 @@ void ExplorerPanel::showAnswer(const gamedb::Explored& explored,
     m_total->setResults(explored.white, explored.draws, explored.black);
     m_moves->clear();
     const auto& c = m_style.colors();
+    m_moves->setSortingEnabled(false); // filled first, then sorted once
     for (const gamedb::MoveStats& stats : explored.moves) {
-        auto* item = new QTreeWidgetItem(m_moves);
+        auto* item = new SortableItem(m_moves);
+        // What each column sorts by: games, share, White's score, rating.
+        const auto played = static_cast<double>(stats.games);
+        item->setSortValue(1, played);
+        item->setSortValue(2, played);
+        item->setSortValue(3, stats.games > 0 ? (static_cast<double>(stats.white) +
+                                                 (0.5 * static_cast<double>(stats.draws))) /
+                                                    played
+                                              : 0.0);
+        item->setSortValue(4, (stats.whiteElo + stats.blackElo) / 2.0);
         item->setData(0, kMoveRole, QString::fromStdString(stats.move.uci()));
         item->setText(0, QString::fromStdString(stats.san));
         item->setText(1, number(stats.games));
@@ -564,6 +580,7 @@ void ExplorerPanel::showAnswer(const gamedb::Explored& explored,
         cellBox->addWidget(bar, 0, Qt::AlignVCenter);
         m_moves->setItemWidget(item, 3, cell);
     }
+    m_moves->setSortingEnabled(true); // sorts by the column chosen
     m_games->clear();
     for (const gamedb::GameInfo& game : games) {
         auto* item = new QTreeWidgetItem(m_games);

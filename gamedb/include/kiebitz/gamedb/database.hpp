@@ -5,6 +5,7 @@
 #include "kiebitz/gamedb/scan.hpp"
 
 #include <array>
+#include <atomic>
 #include <cstdint>
 #include <functional>
 #include <map>
@@ -97,6 +98,38 @@ struct Record {
     }
 };
 
+/// A date as typed ("2024", "2024-5", "2024.05.12", "12.05.2024") as the start of a PGN date
+/// ("2024", "2024.05", "2024.05.12"), or nothing if it isn't one.
+[[nodiscard]] std::optional<std::string> pgnDatePrefix(std::string_view typed);
+/// Whether a PGN date ("2024.05.12", "2024.??.??") lies in a range of such prefixes (either may
+/// be empty: no limit). A date not known that far (the year missing) is outside any limit.
+[[nodiscard]] bool dateInRange(std::string_view date, std::string_view from, std::string_view to);
+
+/// Which games a games table shows, in which order.
+struct GameQuery {
+    std::string text;     ///< in a player's name, the event or site (any case), or the ECO
+    std::string fromDate; ///< a pgnDatePrefix(); empty: no limit
+    std::string toDate;
+    enum class Order : std::uint8_t {
+        Id,
+        White,
+        WhiteElo,
+        Black,
+        BlackElo,
+        Result,
+        Date,
+        Event,
+        Eco
+    };
+    Order order = Order::Id; ///< Id: as stored (with text: newest first)
+    bool descending = false;
+    /// All games as stored: nothing to search, filter or sort.
+    [[nodiscard]] bool plain() const {
+        return text.empty() && fromDate.empty() && toDate.empty() && order == Order::Id &&
+               !descending;
+    }
+};
+
 /// Which games the explorer counts. Empty fields don't filter.
 struct ExploreFilter {
     int minRating = 0; ///< the players' average rating at least this
@@ -155,6 +188,11 @@ private:
 /// stay unknown.)
 std::string_view upgrade(const std::string& folder);
 
+/// Adds the indexes that make sorting the games list fast (by rating, result, a player's or an
+/// event's name) to a database made before them. Empty on success, else the error. Takes a
+/// while on millions of games: for a background thread.
+std::string_view addSortIndexes(const std::string& folder);
+
 /// Reads a finished database. Safe to use from several threads at once.
 class Database {
 public:
@@ -169,12 +207,19 @@ public:
     /// Whether it has ratings.bin and attrs.bin (older databases get them from upgrade()).
     [[nodiscard]] bool hasRatings() const;
     [[nodiscard]] bool hasAttributes() const;
+    /// Whether it has the indexes for sorting (older databases get them from addSortIndexes()).
+    [[nodiscard]] bool hasSortIndexes() const;
     [[nodiscard]] std::uint64_t gameCount() const;
 
     /// Games by id, `count` of them from `first` (for scrolling through all of them).
     [[nodiscard]] std::vector<GameInfo> games(GameId first, std::size_t count) const;
     /// Games whose players, event, site or ECO contain `text` (any case), newest first.
     [[nodiscard]] std::vector<GameInfo> search(std::string_view text, std::size_t limit) const;
+    /// The games a query asks for, at most `limit` of them. On a connection of its own, so a
+    /// slow one (sorting millions of games) holds up nothing else; `cancelled`, when set, stops
+    /// it (and it returns what it has, which is to be thrown away).
+    [[nodiscard]] std::vector<GameInfo> find(const GameQuery& query, std::size_t limit,
+                                             const std::atomic<bool>* cancelled = nullptr) const;
     /// A whole game: headers and moves.
     [[nodiscard]] std::optional<core::Game> game(GameId id) const;
 

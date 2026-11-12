@@ -28,6 +28,7 @@
 #include "style/Icons.hpp"
 #include "style/Layout.hpp"
 #include "widgets/EmptyState.hpp"
+#include "widgets/Message.hpp"
 
 #include <QActionGroup>
 #include <QApplication>
@@ -51,7 +52,6 @@
 #include <QLabel>
 #include <QLineEdit>
 #include <QMenuBar>
-#include <QMessageBox>
 #include <QMimeData>
 #include <QPlainTextEdit>
 #include <QProgressBar>
@@ -200,9 +200,8 @@ MainWindow::MainWindow(AppStyle& style, QWidget* parent)
         return nullptr;
     });
     connect(m_repertoires, &RepertoireStore::fileEdited, this, &MainWindow::reloadGamesOf);
-    connect(m_repertoires, &RepertoireStore::failed, this, [this](const QString& message) {
-        QMessageBox::warning(this, tr("Repertoire"), message);
-    });
+    connect(m_repertoires, &RepertoireStore::failed, this,
+            [this](const QString& message) { notice(this, tr("Repertoire"), message); });
     connect(m_repertoires, &RepertoireStore::openingsReady, this, &MainWindow::updateMovesTitle);
     connect(m_repertoires, &RepertoireStore::changed, this, [this] {
         if (const GameDocument* d = doc()) {
@@ -586,13 +585,41 @@ void MainWindow::buildLayout() {
     m_databasesView = new DatabasesView(*m_databases, m_style);
     connect(m_databasesView, &DatabasesView::openGameRequested, this, &MainWindow::openGameCopy);
     // Profiles: you and the people whose games you follow.
-    m_lichess = new LichessLogin(LichessLogin::keychain(), this);
+    m_lichess = new LichessLogin(LichessLogin::privateFile(), this);
     connect(m_lichess, &LichessLogin::failed, this,
-            [this](const QString& message) { QMessageBox::warning(this, tr("Lichess"), message); });
+            [this](const QString& message) { notice(this, tr("Lichess"), message); });
+    // Signed in in the browser: back to Kiebitz.
+    connect(m_lichess, &LichessLogin::signedInNow, this, [this] {
+        raise();
+        activateWindow();
+    });
     m_profiles = new ProfileStore({}, this);
-    m_profiles->setLichessToken([this] { return m_lichess->token(); });
-    m_profilesView = new ProfilesView(*m_profiles, *m_lichess, m_style);
+    m_profiles->setLichessToken([this](const QString& username) {
+        const QByteArray own = m_lichess->token(username);
+        return own.isEmpty() ? m_lichess->token() : own; // any login makes it faster
+    });
+    m_profilesView = new ProfilesView(*m_profiles, *m_lichess, *m_repertoires, m_style);
     connect(m_profilesView, &ProfilesView::openGameRequested, this, &MainWindow::openGameCopy);
+    // The theory check: a game at the move that left the book, or the repertoire there.
+    connect(m_profilesView, &ProfilesView::openGameAtRequested, this,
+            [this](const core::Game& game, int ply) {
+                openGameCopy(game);
+                const std::vector<NodeId> line = game.mainLine();
+                if (ply >= 0 && std::cmp_less(ply, line.size())) {
+                    showNode(line[static_cast<std::size_t>(ply)], false);
+                }
+            });
+    connect(m_profilesView, &ProfilesView::repertoireRequested, this,
+            [this](core::Color side, const std::vector<core::Move>& line) {
+                core::Position position;
+                for (const core::Move& move : line) {
+                    position.play(move);
+                }
+                const QStringList files = m_repertoires->filesWith(side, position.hash());
+                if (!files.isEmpty()) {
+                    jumpToLine(files.front(), position.hash());
+                }
+            });
 
     m_enginesView = new EnginesView(*m_engineRegistry, m_style);
     m_enginesView->setObjectName(QStringLiteral("enginesView"));
@@ -1017,9 +1044,11 @@ void MainWindow::fitBoardColumn() {
 }
 
 void MainWindow::closeEvent(QCloseEvent* event) {
+    // No questions when quitting either: games from files are saved (as autosave would), new
+    // games that aren't in a file just go.
     for (const auto& document : m_documents) {
-        if (!maybeSave(*document)) {
-            event->ignore();
+        if (inFile(*document) && !saveNow(*document)) {
+            event->ignore(); // couldn't be saved: stay open (saveNow said why)
             return;
         }
     }
@@ -1031,11 +1060,11 @@ void MainWindow::closeEvent(QCloseEvent* event) {
 }
 
 void MainWindow::showAbout() {
-    QMessageBox::about(this, tr("About Kiebitz"),
-                       tr("<b>Kiebitz %1</b><p>A fast native chess GUI for opening preparation."
-                          "<p>Licensed under the GNU GPL v3. Piece sets: cburnett and merida "
-                          "(GPLv2+), chessnut (Apache 2.0), fantasy (MIT), via Lichess.")
-                           .arg(QApplication::applicationVersion()));
+    notice(this, tr("About Kiebitz"),
+           tr("Kiebitz %1: a fast native chess app for opening preparation.")
+               .arg(QApplication::applicationVersion()),
+           tr("Licensed under the GNU GPL v3. Piece sets: cburnett and merida (GPLv2+), "
+              "chessnut (Apache 2.0), fantasy (MIT), via Lichess."));
 }
 
 // ---- Documents and tabs ------------------------------------------------------------------------
@@ -1163,9 +1192,9 @@ void MainWindow::closeTab(int tab) {
         return;
     }
     // No question when a tab closes: a game from a file is saved (as autosave would), any other
-    // game (a new one, one opened from a database) just goes. Quitting still asks.
-    if (inFile(*d) && !maybeSave(*d)) {
-        return; // couldn't be saved: keep it open (maybeSave said why)
+    // game (a new one, one opened from a database) just goes. Quitting does the same.
+    if (inFile(*d) && !saveNow(*d)) {
+        return; // couldn't be saved: keep it open (saveNow said why)
     }
     m_tabs->removeTab(tab); // switches tabs first, so nothing shows the game being removed
     std::erase_if(m_documents, [d](const auto& document) { return document.get() == d; });
@@ -1210,7 +1239,7 @@ void MainWindow::autosave() {
         whenReady(this, pgnio::write(path, file->text), [this, path](const QString& error) {
             m_writing.removeOne(path);
             if (!error.isEmpty()) {
-                QMessageBox::warning(this, tr("Couldn't save"), error);
+                notice(this, tr("Couldn't save"), error);
                 emit fileError(error);
                 return;
             }
@@ -1220,7 +1249,7 @@ void MainWindow::autosave() {
     updateTitles();
 }
 
-bool MainWindow::maybeSave(GameDocument& document) {
+bool MainWindow::saveNow(GameDocument& document) {
     if (!document.modified) {
         return true;
     }
@@ -1241,54 +1270,11 @@ bool MainWindow::maybeSave(GameDocument& document) {
                 document.modified = false;
                 return true;
             }
-            QMessageBox::warning(this, tr("Couldn't save"), error);
+            notice(this, tr("Couldn't save"), error);
         }
         return false;
     }
-    for (int tab = 0; tab < m_tabs->count(); ++tab) {
-        if (docAt(tab) == &document) {
-            m_tabs->setCurrentIndex(tab); // show which game the question is about
-            showSection(Section::Board);
-        }
-    }
-    const auto answer = QMessageBox::question(
-        this, tr("Save changes?"),
-        tr("Do you want to save the changes to “%1”?").arg(document.title().mid(2)),
-        QMessageBox::Save | QMessageBox::Discard | QMessageBox::Cancel, QMessageBox::Save);
-    if (answer == QMessageBox::Discard) {
-        return true;
-    }
-    if (answer == QMessageBox::Cancel) {
-        return false;
-    }
-    // Save now and wait: the window is about to close the game.
-    const bool inFile = document.file && !document.file->path.isEmpty() && document.gameIndex >= 0;
-    QString path = inFile ? document.file->path : QString();
-    if (path.isEmpty()) {
-        path = QFileDialog::getSaveFileName(
-            this, tr("Save Game"),
-            QDir(m_library->folder()).filePath(document.title().mid(2) + u".pgn"),
-            tr("PGN files (*.pgn)"));
-        if (path.isEmpty()) {
-            return false;
-        }
-    }
-    const std::string gameText = pgn::writeGame(document.game);
-    std::optional<std::string> text = gameText;
-    if (inFile && path == document.file->path) {
-        text = pgnio::replaceGame(*document.file, document.gameIndex, gameText);
-    }
-    if (!text) {
-        QMessageBox::warning(this, tr("Couldn't save"), tr("The file couldn't be read again."));
-        return false;
-    }
-    const QString error = pgnio::write(path, *text).result();
-    if (!error.isEmpty()) {
-        QMessageBox::warning(this, tr("Couldn't save"), error);
-        return false;
-    }
-    document.modified = false;
-    return true;
+    return true; // not in a file: nothing to save it to
 }
 
 void MainWindow::save() {
@@ -1343,7 +1329,7 @@ void MainWindow::writeDocument(GameDocument& document, const QString& path, std:
             const bool alive = std::any_of(m_documents.begin(), m_documents.end(),
                                            [target](const auto& d) { return d.get() == target; });
             if (!error.isEmpty()) {
-                QMessageBox::warning(this, tr("Couldn't save"), error);
+                notice(this, tr("Couldn't save"), error);
                 emit fileError(error);
                 return;
             }
@@ -1413,13 +1399,13 @@ void MainWindow::openFile(const QString& path) {
     whenReady(this, pgnio::load(path), [this, path](const pgnio::Loaded& loaded) {
         statusBar()->clearMessage();
         if (!loaded.file) {
-            QMessageBox::warning(this, tr("Couldn't open"), loaded.error);
+            notice(this, tr("Couldn't open"), loaded.error);
             emit fileError(loaded.error);
             return;
         }
         if (loaded.file->games.empty()) {
             const QString message = tr("%1 contains no games.").arg(QFileInfo(path).fileName());
-            QMessageBox::information(this, tr("No games"), message);
+            notice(this, tr("No games"), message);
             emit fileError(message);
             return;
         }
@@ -1445,7 +1431,7 @@ void MainWindow::openFile(const QString& path) {
             index = static_cast<int>(items.indexOf(choice));
         }
         if (index == 0 && !loaded.first) {
-            QMessageBox::warning(this, tr("Couldn't read the game"), loaded.error);
+            notice(this, tr("Couldn't read the game"), loaded.error);
             emit fileError(loaded.error);
             return;
         }
@@ -1507,7 +1493,7 @@ void MainWindow::openGame(const std::shared_ptr<PgnFile>& file, int index) {
                           return;
                       }
                       if (!loaded.file) {
-                          QMessageBox::warning(this, tr("Couldn't read the game"), loaded.error);
+                          notice(this, tr("Couldn't read the game"), loaded.error);
                           emit fileError(loaded.error);
                           return;
                       }
@@ -1517,7 +1503,7 @@ void MainWindow::openGame(const std::shared_ptr<PgnFile>& file, int index) {
     }
     whenReady(this, pgnio::parse(file, index), [this, file, index](const pgnio::Parsed& parsed) {
         if (!parsed.game) {
-            QMessageBox::warning(this, tr("Couldn't read the game"), parsed.error);
+            notice(this, tr("Couldn't read the game"), parsed.error);
             emit fileError(parsed.error);
             return;
         }
@@ -1644,8 +1630,7 @@ void MainWindow::setUpPosition() {
     }
     auto position = core::Position::fromFen(fen.trimmed().toStdString());
     if (!position) {
-        QMessageBox::warning(this, tr("Invalid FEN"),
-                             QString::fromStdString(position.error().message));
+        notice(this, tr("Invalid FEN"), QString::fromStdString(position.error().message));
         return;
     }
     auto document = std::make_unique<GameDocument>();
@@ -1785,13 +1770,11 @@ bool MainWindow::addLineAsking(core::Color side, const std::vector<core::Move>& 
         }
         const QString played =
             QString::fromStdString(position.san(line[static_cast<std::size_t>(added.ply)]));
-        const auto answer = QMessageBox::question(
-            this, tr("A second answer?"),
-            tr("Your repertoire already answers this position with %1. Add %2 as another "
-               "answer?")
-                .arg(answers.join(tr(" and ")), played),
-            QMessageBox::Yes | QMessageBox::Cancel, QMessageBox::Cancel);
-        if (answer != QMessageBox::Yes) {
+        if (!confirm(this, tr("A second answer?"),
+                     tr("Your repertoire already answers this position with %1. Add %2 as "
+                        "another answer?")
+                         .arg(answers.join(tr(" and ")), played),
+                     tr("Add %1").arg(played))) {
             return false;
         }
         added = m_repertoires->addLine(side, line, true);
@@ -1815,7 +1798,7 @@ void MainWindow::newFile(const QString& folder) {
         dialog.name(),
         NewFileDialog::fileText(dialog.name(), dialog.kind(), dialog.side(), dialog.pgn()), folder);
     if (!error.isEmpty()) {
-        QMessageBox::warning(this, tr("New File"), error);
+        notice(this, tr("New File"), error);
     }
 }
 

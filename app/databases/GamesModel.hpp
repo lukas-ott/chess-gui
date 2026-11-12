@@ -4,6 +4,7 @@
 
 #include <QAbstractTableModel>
 
+#include <atomic>
 #include <memory>
 #include <unordered_map>
 #include <vector>
@@ -15,123 +16,54 @@ namespace kiebitz::app {
 /// "1-0", "0-1", "½-½" or "*".
 [[nodiscard]] QString resultText(gamedb::GameResult result);
 
-/// A database's games as a table. All of them (millions: read a page at a time as they are
-/// scrolled to), or the results of a search.
+/// A database's games as a table. All of them as stored (millions: read a page at a time as they
+/// are scrolled to); or, with a search, a date range or a column to sort by, the first
+/// kLimit games that fit, asked for in the background.
 class GamesModel : public QAbstractTableModel {
-public:
-    using QAbstractTableModel::QAbstractTableModel;
+    Q_OBJECT
 
-    /// The look every games table shares: the columns' widths, rows, no grid.
+public:
+    static constexpr std::size_t kLimit = 10000;
+
+    explicit GamesModel(QObject* parent = nullptr);
+
+    /// The look every games table shares: the columns' widths, rows, no grid; a click on a
+    /// column's title sorts by it (again: the other way round).
     static void setUpTable(QTableView& table);
 
-    void setDatabase(std::shared_ptr<const gamedb::Database> db) {
-        beginResetModel();
-        m_db = std::move(db);
-        m_searching = false;
-        m_results.clear();
-        m_pages.clear();
-        endResetModel();
-    }
-    void setResults(std::vector<gamedb::GameInfo> results) {
-        beginResetModel();
-        m_searching = true;
-        m_results = std::move(results);
-        endResetModel();
-    }
-    [[nodiscard]] const gamedb::GameInfo* at(int row) const {
-        if (row < 0) {
-            return nullptr;
-        }
-        if (m_searching) {
-            return static_cast<std::size_t>(row) < m_results.size()
-                       ? &m_results[static_cast<std::size_t>(row)]
-                       : nullptr;
-        }
-        if (!m_db) {
-            return nullptr;
-        }
-        const int page = row / kPage;
-        auto found = m_pages.find(page);
-        if (found == m_pages.end()) {
-            if (m_pages.size() > 256) {
-                m_pages.clear(); // a few MB at most
-            }
-            found = m_pages
-                        .emplace(page, m_db->games((static_cast<gamedb::GameId>(page) * kPage) + 1,
-                                                   kPage))
-                        .first;
-        }
-        const auto index = static_cast<std::size_t>(row % kPage);
-        return index < found->second.size() ? &found->second[index] : nullptr;
-    }
+    /// The games of this database (null: none), with the search, dates and order kept.
+    void setDatabase(std::shared_ptr<const gamedb::Database> db);
+    void setText(const QString& text);
+    void setDates(const std::string& from, const std::string& to);
+    [[nodiscard]] const gamedb::GameInfo* at(int row) const;
+    /// "Searching…", "The first 10,000 are shown", or empty.
+    [[nodiscard]] QString status() const { return m_status; }
 
-    [[nodiscard]] int rowCount(const QModelIndex& parent = {}) const override {
-        if (parent.isValid()) {
-            return 0;
-        }
-        if (m_searching) {
-            return static_cast<int>(m_results.size());
-        }
-        return m_db ? static_cast<int>(m_db->gameCount()) : 0;
-    }
-    [[nodiscard]] int columnCount(const QModelIndex& parent = {}) const override {
-        return parent.isValid() ? 0 : 8;
-    }
-    [[nodiscard]] QVariant data(const QModelIndex& index, int role) const override {
-        if (role == Qt::TextAlignmentRole &&
-            (index.column() == 1 || index.column() == 3 || index.column() == 4)) {
-            return QVariant::fromValue(Qt::AlignCenter);
-        }
-        if (role != Qt::DisplayRole && role != Qt::ToolTipRole) {
-            return {};
-        }
-        const gamedb::GameInfo* game = at(index.row());
-        if (game == nullptr) {
-            return {};
-        }
-        const auto text = [](const std::string& value) {
-            return QString::fromStdString(value);
-        };
-        const auto elo = [](int value) {
-            return value > 0 ? QString::number(value) : QString();
-        };
-        switch (index.column()) {
-        case 0:
-            return text(game->white);
-        case 1:
-            return elo(game->whiteElo);
-        case 2:
-            return text(game->black);
-        case 3:
-            return elo(game->blackElo);
-        case 4:
-            return resultText(game->result);
-        case 5:
-            return text(game->date);
-        case 6:
-            return text(game->event);
-        case 7:
-            return text(game->eco);
-        default:
-            return {};
-        }
-    }
+    [[nodiscard]] int rowCount(const QModelIndex& parent = {}) const override;
+    [[nodiscard]] int columnCount(const QModelIndex& parent = {}) const override;
+    [[nodiscard]] QVariant data(const QModelIndex& index, int role) const override;
     [[nodiscard]] QVariant headerData(int section, Qt::Orientation orientation,
-                                      int role) const override {
-        if (orientation != Qt::Horizontal || role != Qt::DisplayRole) {
-            return {};
-        }
-        static const std::array<const char*, 8> kTitles{"WHITE",  "ELO",  "BLACK", "ELO",
-                                                        "RESULT", "DATE", "EVENT", "ECO"};
-        return QObject::tr(kTitles[static_cast<std::size_t>(section)]);
-    }
+                                      int role) const override;
+    void sort(int column, Qt::SortOrder order) override;
+
+signals:
+    void statusChanged();
+    /// The games shown are there (after a search, a sort, new dates).
+    void loaded();
 
 private:
+    void refresh();
+    void setStatus(const QString& status);
+
     static constexpr int kPage = 256;
     std::shared_ptr<const gamedb::Database> m_db;
-    bool m_searching = false;
+    gamedb::GameQuery m_query;
+    bool m_found = false; ///< showing the answer to m_query, not all games as stored
     std::vector<gamedb::GameInfo> m_results;
     mutable std::unordered_map<int, std::vector<gamedb::GameInfo>> m_pages;
+    int m_request = 0;
+    std::shared_ptr<std::atomic<bool>> m_cancel; ///< the query under way: set to stop it
+    QString m_status;
 };
 
 } // namespace kiebitz::app

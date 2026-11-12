@@ -23,7 +23,9 @@ and training opening repertoires.
 > their FIDE player (looked up by name). The Explorer can be filtered by rating, years, time
 > control and, for a profile, the colour it played; signed in to Lichess, it also shows Lichess's
 > and the masters' games. The gap check finds the common opponent moves a repertoire file
-> doesn't answer yet, judged by the Explorer's games. The Engine tab
+> doesn't answer yet, judged by the Explorer's games, and a profile's Repertoire tab shows where
+> its games left your repertoire, grouped by opening. Every games list sorts by any column and
+> filters by date. The Engine tab
 > analyses with Stockfish (one-click download) or the Lichess cloud.
 
 ## Requirements (macOS)

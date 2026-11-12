@@ -4,6 +4,7 @@
 #include "NewFileDialog.hpp"
 #include "board/BoardView.hpp"
 #include "document/PgnIo.hpp"
+#include "kiebitz/gamedb/database.hpp"
 #include "kiebitz/repertoire/gaps.hpp"
 #include "kiebitz/repertoire/summary.hpp"
 #include "repertoire/RepertoireStore.hpp"
@@ -11,8 +12,11 @@
 #include "style/Icons.hpp"
 #include "style/Layout.hpp"
 #include "style/PageHeader.hpp"
+#include "widgets/DateRange.hpp"
 #include "widgets/ElidedLabel.hpp"
 #include "widgets/EmptyState.hpp"
+#include "widgets/Message.hpp"
+#include "widgets/SortCycle.hpp"
 
 #include <QAbstractTableModel>
 #include <QApplication>
@@ -30,7 +34,6 @@
 #include <QLineEdit>
 #include <QLocale>
 #include <QMenu>
-#include <QMessageBox>
 #include <QPainter>
 #include <QPainterPath>
 #include <QProcess>
@@ -237,6 +240,8 @@ protected:
 ///   a tournament: #, Round, White, Black, Result, Date, Opening;
 ///   puzzles: #, Puzzle, To move, Date.
 /// Reads straight from the file's index, so thousands of games show at once.
+constexpr int kDateRole = Qt::UserRole + 10; ///< a game row: its PGN date, any column
+
 class GameListModel : public QAbstractTableModel {
 public:
     enum class Column : std::uint8_t {
@@ -299,6 +304,9 @@ public:
         if (role == Qt::TextAlignmentRole &&
             (c == Column::Number || c == Column::Result || c == Column::Round)) {
             return QVariant::fromValue(Qt::AlignCenter);
+        }
+        if (role == kDateRole) { // for the date range, whichever the column
+            return toQString(m_file->games[static_cast<std::size_t>(index.row())].header("Date"));
         }
         if (role != Qt::DisplayRole && role != Qt::ToolTipRole) {
             return {};
@@ -388,10 +396,40 @@ private:
     std::vector<Column> m_columns;
 };
 
+/// The games shown: those with the search text in any column, in the date range, in the order
+/// of the column clicked.
+class GameFilter : public QSortFilterProxyModel {
+public:
+    using QSortFilterProxyModel::QSortFilterProxyModel;
+
+    void setDates(std::string from, std::string to) {
+        beginFilterChange();
+        m_from = std::move(from);
+        m_to = std::move(to);
+        endFilterChange(QSortFilterProxyModel::Direction::Rows);
+    }
+
+protected:
+    [[nodiscard]] bool filterAcceptsRow(int row, const QModelIndex& parent) const override {
+        if (!QSortFilterProxyModel::filterAcceptsRow(row, parent)) {
+            return false;
+        }
+        if (m_from.empty() && m_to.empty()) {
+            return true;
+        }
+        const QString date = sourceModel()->index(row, 0, parent).data(kDateRole).toString();
+        return gamedb::dateInRange(date.toStdString(), m_from, m_to);
+    }
+
+private:
+    std::string m_from;
+    std::string m_to;
+};
+
 LibraryView::LibraryView(Library& library, RepertoireStore& store, const AppStyle& style,
                          QWidget* parent)
     : QWidget(parent), m_library(library), m_store(store), m_style(style),
-      m_model(new GameListModel(this)), m_filter(new QSortFilterProxyModel(this)) {
+      m_model(new GameListModel(this)), m_filter(new GameFilter(this)) {
     auto* layout = new QVBoxLayout(this);
     layout->setContentsMargins(layout::kPage);
     layout->setSpacing(layout::kPageSpacing);
@@ -417,7 +455,7 @@ LibraryView::LibraryView(Library& library, RepertoireStore& store, const AppStyl
         const QString error =
             moveToFolder({path}, folder != nullptr ? folder->data(0, kKeyRole).toString() : "");
         if (!error.isEmpty()) {
-            QMessageBox::warning(this, tr("Couldn't move"), error);
+            notice(this, tr("Couldn't move"), error);
         }
     };
     m_files = tree;
@@ -443,7 +481,7 @@ LibraryView::LibraryView(Library& library, RepertoireStore& store, const AppStyl
         if (const QString error = rename(path, name); !error.isEmpty()) {
             const QSignalBlocker block(m_files);
             item->setText(0, before);
-            QMessageBox::warning(this, tr("Couldn't rename"), error);
+            notice(this, tr("Couldn't rename"), error);
         }
     });
     m_files->setColumnCount(1);
@@ -603,6 +641,9 @@ LibraryView::LibraryView(Library& library, RepertoireStore& store, const AppStyl
     m_filter->setFilterKeyColumn(-1); // any column
     connect(m_search, &QLineEdit::textChanged, m_filter,
             &QSortFilterProxyModel::setFilterFixedString);
+    m_dates = new DateRange(QStringLiteral("libraryDate"), m_style);
+    connect(m_dates, &DateRange::changed, this,
+            [this] { m_filter->setDates(m_dates->from(), m_dates->to()); });
 
     m_games = new QTableView;
     m_games->setObjectName(QStringLiteral("libraryGames"));
@@ -621,6 +662,11 @@ LibraryView::LibraryView(Library& library, RepertoireStore& store, const AppStyl
     // The columns share the width (no sideways scrolling).
     m_games->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
     m_games->setTextElideMode(Qt::ElideRight);
+    // Sortable by any column (as Finder's lists); in the file's order to begin with.
+    m_games->horizontalHeader()->setSortIndicator(0, Qt::AscendingOrder);
+    m_games->horizontalHeader()->setSortIndicatorShown(true);
+    m_games->setSortingEnabled(true);
+    sortOnClicksThenReset(m_games->horizontalHeader(), 0); // a third click: the file's order
     m_games->installEventFilter(this);
     connect(m_games, &QTableView::doubleClicked, this, &LibraryView::openSelectedGame);
     connect(m_games->selectionModel(), &QItemSelectionModel::currentRowChanged, this,
@@ -700,6 +746,7 @@ LibraryView::LibraryView(Library& library, RepertoireStore& store, const AppStyl
     titles->addWidget(m_listCount);
     gamesHeader->addLayout(titles, 1);
     gamesHeader->addWidget(m_search);
+    gamesHeader->addWidget(m_dates);
     gamesBox->addLayout(gamesHeader);
     gamesBox->addWidget(m_games, 1);
     gamesBox->addSpacing(4);
@@ -1485,7 +1532,7 @@ void LibraryView::askNewFolder() {
         return;
     }
     if (const QString error = createFolder(targetFolder(), dialog.name()); !error.isEmpty()) {
-        QMessageBox::warning(this, tr("New Folder"), error);
+        notice(this, tr("New Folder"), error);
     }
 }
 
@@ -1555,20 +1602,16 @@ QString LibraryView::rename(const QString& path, const QString& name) {
 }
 
 void LibraryView::askTrash(const QString& path) {
-    QMessageBox box(QMessageBox::Question, tr("Move to Trash"),
-                    tr("Move “%1” to the Trash?").arg(QFileInfo(path).fileName()),
-                    QMessageBox::Cancel, this);
-    box.setInformativeText(QFileInfo(path).isDir()
-                               ? tr("Everything in it goes too. Open games from it are closed.")
-                               : tr("Open games from it are closed."));
-    box.addButton(tr("Move to Trash"), QMessageBox::DestructiveRole);
-    box.setDefaultButton(QMessageBox::Cancel);
-    box.exec();
-    if (box.buttonRole(box.clickedButton()) != QMessageBox::DestructiveRole) {
+    if (!confirm(this, tr("Move to Trash"),
+                 tr("Move “%1” to the Trash?").arg(QFileInfo(path).fileName()), tr("Move to Trash"),
+                 MessageDialog::Action::Destructive,
+                 QFileInfo(path).isDir()
+                     ? tr("Everything in it goes too. Open games from it are closed.")
+                     : tr("Open games from it are closed."))) {
         return;
     }
     if (const QString error = moveToTrash(path); !error.isEmpty()) {
-        QMessageBox::warning(this, tr("Couldn't move to the Trash"), error);
+        notice(this, tr("Couldn't move to the Trash"), error);
     }
 }
 
