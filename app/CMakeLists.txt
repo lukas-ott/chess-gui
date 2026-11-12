@@ -23,6 +23,8 @@ qt_add_library(kiebitz_ui STATIC
     databases/DatabaseManager.hpp
     databases/DatabasesView.cpp
     databases/DatabasesView.hpp
+    databases/GamesModel.cpp
+    databases/GamesModel.hpp
     document/GameDocument.cpp
     explorer/ExplorerPanel.cpp
     explorer/ExplorerPanel.hpp
@@ -58,6 +60,16 @@ qt_add_library(kiebitz_ui STATIC
     panels/GameInfoPanel.hpp
     repertoire/RepertoireStore.cpp
     repertoire/RepertoireStore.hpp
+    profiles/AddAccountDialog.cpp
+    profiles/AddAccountDialog.hpp
+    profiles/Fide.cpp
+    profiles/Fide.hpp
+    profiles/FideCard.cpp
+    profiles/FideCard.hpp
+    profiles/ProfileStore.cpp
+    profiles/ProfileStore.hpp
+    profiles/ProfilesView.cpp
+    profiles/ProfilesView.hpp
     repertoire/PracticeStats.cpp
     repertoire/PracticeStats.hpp
     repertoire/RepertoirePanel.cpp
@@ -69,8 +81,15 @@ qt_add_library(kiebitz_ui STATIC
     style/Layout.hpp
     style/PageHeader.cpp
     style/PageHeader.hpp
+    widgets/ActivityChart.cpp
+    widgets/ActivityChart.hpp
+    widgets/ElidedLabel.hpp
     widgets/EmptyState.cpp
     widgets/EmptyState.hpp
+    widgets/NameDialog.cpp
+    widgets/NameDialog.hpp
+    widgets/ResultBar.cpp
+    widgets/ResultBar.hpp
     widgets/Stepper.cpp
     widgets/Stepper.hpp)
 target_include_directories(kiebitz_ui PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")

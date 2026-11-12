@@ -5,6 +5,7 @@
 #include <QMainWindow>
 #include <QTimer>
 
+#include <array>
 #include <cstdint>
 #include <memory>
 #include <vector>
@@ -39,6 +40,8 @@ class EnginesView;
 class DatabaseManager;
 class DatabasesView;
 class EvalBar;
+class ProfileStore;
+class ProfilesView;
 class ExplorerPanel;
 class GameInfoPanel;
 class Library;
@@ -59,7 +62,7 @@ class MainWindow : public QMainWindow {
 
 public:
     /// The sidebar's sections: the board with its game tabs, the Library, the Engines page.
-    enum class Section : std::uint8_t { Board, Library, Databases, Engines };
+    enum class Section : std::uint8_t { Board, Library, Databases, Profiles, Engines };
 
     explicit MainWindow(AppStyle& style, QWidget* parent = nullptr);
     ~MainWindow() override;
@@ -110,6 +113,9 @@ private:
     void fitBoardColumn();
     /// Puts the eval bar beside the board: as tall as its squares, centred in the gap.
     void placeEvalBar();
+    /// The players' clocks above and below the board, from the [%clk] comments up to the
+    /// current move; hidden for games without clocks.
+    void refreshClocks();
     void showAbout();
     void chooseCustomColors();
     void chooseLibraryFolder();
@@ -223,12 +229,15 @@ private:
     DatabaseManager* m_databases = nullptr;
     DatabasesView* m_databasesView = nullptr;
     ExplorerPanel* m_explorer = nullptr;
+    ProfileStore* m_profiles = nullptr;
+    ProfilesView* m_profilesView = nullptr;
     Section m_section = Section::Board;
     QButtonGroup* m_sidebar = nullptr; ///< one button per section, ids = Section
     EngineRegistry* m_engineRegistry = nullptr;
     EnginesView* m_enginesView = nullptr;
     BoardView* m_board = nullptr;
-    EvalBar* m_evalBar = nullptr; ///< beside the board while the engine runs
+    EvalBar* m_evalBar = nullptr;      ///< beside the board while the engine runs
+    std::array<QLabel*, 2> m_clocks{}; ///< above and below the board (float like the eval bar)
     EnginePanel* m_enginePanel = nullptr;
     NotationView* m_notation = nullptr;
     RepertoireStore* m_repertoires = nullptr;

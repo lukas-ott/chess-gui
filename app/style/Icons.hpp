@@ -24,6 +24,10 @@ enum class IconKind : std::uint8_t {
     NewFile,   ///< a page with a plus
     NewFolder, ///< a folder with a plus
     Database,  ///< a stack of discs: game databases (sidebar)
+    Person,    ///< a head and shoulders: profiles (sidebar)
+    Info,      ///< an "i" in a circle
+    Refresh,   ///< a circular arrow: sync
+    Trash,     ///< a bin: remove
     Board,     ///< a pawn: the board and its games (sidebar)
     Library,   ///< two stacked pages: the files (sidebar)
     Engine,    ///< a chip (sidebar, engine cards)

@@ -1,20 +1,30 @@
 #pragma once
 
 #include "kiebitz/core/game.hpp"
+#include "kiebitz/gamedb/database.hpp"
 
 #include <QWidget>
 
 #include <cstdint>
+#include <functional>
+#include <memory>
 
 class QComboBox;
+class QHBoxLayout;
 class QLabel;
+class QPushButton;
 class QStackedWidget;
 class QTreeWidget;
+
+namespace kiebitz::gamedb {
+class Database;
+}
 
 namespace kiebitz::app {
 
 class AppStyle;
 class DatabaseManager;
+class ProfileStore;
 class RepertoireStore;
 class ResultBar;
 
@@ -27,8 +37,8 @@ class ExplorerPanel : public QWidget {
     Q_OBJECT
 
 public:
-    ExplorerPanel(DatabaseManager& databases, RepertoireStore& repertoires, const AppStyle& style,
-                  QWidget* parent = nullptr);
+    ExplorerPanel(DatabaseManager& databases, ProfileStore& profiles, RepertoireStore& repertoires,
+                  const AppStyle& style, QWidget* parent = nullptr);
 
     /// The game and move shown (null: none). The game must outlive the panel or the next call.
     void setPosition(const core::Game* game, core::NodeId current, core::Color viewSide);
@@ -45,9 +55,16 @@ signals:
 
 private:
     void refreshSources();
+    QWidget* buildFilter();
+    void filterChanged();
+    /// The "Games from" choices for the profile chosen (none for a database).
+    void refreshParts();
+    /// The database of the chosen source (a database, a profile, or a part of one), or null.
+    [[nodiscard]] std::shared_ptr<const gamedb::Database> sourceDatabase() const;
     void refresh();
 
     DatabaseManager& m_databases;
+    ProfileStore& m_profiles;
     RepertoireStore& m_repertoires;
     const AppStyle& m_style;
     const core::Game* m_game = nullptr;
@@ -61,6 +78,15 @@ private:
     ResultBar* m_total = nullptr;
     QTreeWidget* m_moves = nullptr;
     QTreeWidget* m_games = nullptr;
+    gamedb::ExploreFilter m_filter;
+    QPushButton* m_filterTab = nullptr; ///< "Filter", with a dot while one is set
+    QWidget* m_sideRow = nullptr;       ///< "Played as": only for profiles
+    QWidget* m_partRow = nullptr;       ///< "Games from": a profile's accounts, OTB
+    QWidget* m_sideTitle = nullptr;     ///< the captions of those two rows
+    QWidget* m_partTitle = nullptr;
+    QComboBox* m_partBox = nullptr; ///< in m_partRow
+    QString m_part;                 ///< a profile's part shown: "" (all), an account's id, or "otb"
+    std::function<void()> m_resetFilter; ///< puts the filter's controls back
 };
 
 } // namespace kiebitz::app

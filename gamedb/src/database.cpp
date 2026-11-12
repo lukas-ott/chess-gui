@@ -6,9 +6,12 @@
 
 #include <algorithm>
 #include <array>
+#include <cctype>
+#include <charconv>
 #include <cstdio>
 #include <fcntl.h>
 #include <filesystem>
+#include <functional>
 #include <sqlite3.h>
 #include <sys/mman.h>
 #include <sys/stat.h>
@@ -22,6 +25,24 @@ namespace kiebitz::gamedb {
 namespace {
 
 constexpr const char* kFormat = "kiebitz-gamedb-1";
+
+/// What attrs.bin holds for each game, in explorer order.
+struct Attributes {
+    std::uint16_t year = 0;
+    std::uint8_t speed = 0; ///< a Speed
+    std::uint8_t unused = 0;
+    std::uint32_t white = 0; ///< name ids (0: none)
+    std::uint32_t black = 0;
+};
+static_assert(sizeof(Attributes) == 12);
+
+int yearOf(std::string_view date) {
+    int year = 0;
+    for (std::size_t i = 0; i < 4 && i < date.size() && date[i] >= '0' && date[i] <= '9'; ++i) {
+        year = (year * 10) + (date[i] - '0');
+    }
+    return year;
+}
 
 // ---- Files -------------------------------------------------------------------------------------
 
@@ -203,6 +224,7 @@ struct DatabaseWriter::Impl {
     std::vector<std::uint64_t> offsets{0};
     std::vector<std::uint16_t> elo;
     std::vector<std::uint16_t> whiteElo;
+    std::vector<Attributes> attributes; ///< by game, in the order added
     std::vector<std::uint16_t> blackElo;
     std::vector<std::uint8_t> results;
     std::vector<std::uint8_t> standard; ///< 1: from the usual start position
@@ -323,6 +345,9 @@ void DatabaseWriter::add(const ScannedGame& game) {
     d.elo.push_back(
         static_cast<std::uint16_t>(rated == 0 ? 0 : (game.whiteElo + game.blackElo) / rated));
     d.whiteElo.push_back(static_cast<std::uint16_t>(std::clamp(game.whiteElo, 0, 65535)));
+    d.attributes.push_back({static_cast<std::uint16_t>(std::clamp(yearOf(game.date), 0, 65535)),
+                            static_cast<std::uint8_t>(game.speed), 0,
+                            static_cast<std::uint32_t>(white), static_cast<std::uint32_t>(black)});
     d.blackElo.push_back(static_cast<std::uint16_t>(std::clamp(game.blackElo, 0, 65535)));
     d.results.push_back(static_cast<std::uint8_t>(game.result));
     d.standard.push_back(game.fen.empty() ? 1 : 0);
@@ -405,9 +430,15 @@ std::string DatabaseWriter::finish(const std::function<void(double)>& progress) 
             ratings.push_back(d.whiteElo[game]);
             ratings.push_back(d.blackElo[game]);
         }
+        std::vector<Attributes> attributes;
+        attributes.reserve(order.size());
+        for (const std::uint32_t game : order) {
+            attributes.push_back(d.attributes[game]);
+        }
         if (!writeFile(pathIn(d.folder, "order.bin"), order) ||
             !writeFile(pathIn(d.folder, "sums.bin"), sums) ||
-            !writeFile(pathIn(d.folder, "ratings.bin"), ratings)) {
+            !writeFile(pathIn(d.folder, "ratings.bin"), ratings) ||
+            !writeFile(pathIn(d.folder, "attrs.bin"), attributes)) {
             return "Couldn't write the database (is the disk full?).";
         }
     }
@@ -458,7 +489,8 @@ struct Database::Impl {
     MappedFile order;
     MappedFile sums;
     MappedFile elo;
-    MappedFile ratings; ///< optional: databases made before it don't have it
+    MappedFile ratings;    ///< optional: databases made before it don't have it
+    MappedFile attributes; ///< optional too
 
     Impl() = default;
     Impl(const Impl&) = delete;
@@ -510,6 +542,159 @@ struct Database::Impl {
         return {whiteCount > 0 ? static_cast<int>(whiteSum / whiteCount) : 0,
                 blackCount > 0 ? static_cast<int>(blackSum / blackCount) : 0};
     }
+    /// The result of the game at position `i` of order.bin (from the running totals).
+    [[nodiscard]] GameResult resultAt(std::size_t i) const {
+        const auto* at = sums.as<std::uint32_t>();
+        if (at[(3 * (i + 1)) + 0] != at[(3 * i) + 0]) {
+            return GameResult::WhiteWins;
+        }
+        if (at[(3 * (i + 1)) + 1] != at[(3 * i) + 1]) {
+            return GameResult::Draw;
+        }
+        if (at[(3 * (i + 1)) + 2] != at[(3 * i) + 2]) {
+            return GameResult::BlackWins;
+        }
+        return GameResult::Unknown;
+    }
+
+    /// A filter, ready to test games by their position in order.bin.
+    struct Matcher {
+        const Impl* impl = nullptr;
+        ExploreFilter filter;
+        std::unordered_set<std::uint32_t> players; ///< name ids
+        std::unordered_set<std::uint32_t> whites;  ///< names that fit `filter.white`
+        std::unordered_set<std::uint32_t> blacks;
+        [[nodiscard]] bool operator()(std::size_t i) const {
+            const auto* sorted = impl->order.as<std::uint32_t>();
+            if (filter.minRating > 0 || filter.maxRating > 0) {
+                const int rating = impl->elo.as<std::uint16_t>()[sorted[i]];
+                if (rating == 0 || (filter.minRating > 0 && rating < filter.minRating) ||
+                    (filter.maxRating > 0 && rating > filter.maxRating)) {
+                    return false;
+                }
+            }
+            if (impl->attributes.count<Attributes>() <= i) {
+                return true; // an older database: only ratings can be filtered
+            }
+            const Attributes& a = impl->attributes.as<Attributes>()[i];
+            if ((filter.fromYear > 0 && std::cmp_less(a.year, filter.fromYear)) ||
+                (filter.toYear > 0 && (a.year == 0 || std::cmp_greater(a.year, filter.toYear)))) {
+                return false;
+            }
+            if (filter.speeds != 0 && (filter.speeds & (1U << a.speed)) == 0) {
+                return false;
+            }
+            if (!filter.white.empty() && !whites.contains(a.white)) {
+                return false;
+            }
+            if (!filter.black.empty() && !blacks.contains(a.black)) {
+                return false;
+            }
+            if (!filter.players.empty()) {
+                const bool white = players.contains(a.white);
+                const bool black = players.contains(a.black);
+                switch (filter.side) {
+                case ExploreFilter::Side::White:
+                    return white;
+                case ExploreFilter::Side::Black:
+                    return black;
+                case ExploreFilter::Side::Any:
+                    return white || black;
+                }
+            }
+            return true;
+        }
+    };
+    [[nodiscard]] Matcher matcher(const ExploreFilter& filter) const {
+        Matcher match{this, filter, {}, {}, {}};
+        // Names containing the text (any case): their ids.
+        const auto like = [this](const std::string& text, std::unordered_set<std::uint32_t>& ids) {
+            std::string pattern = "%";
+            for (const char c : text) {
+                if (c == '%' || c == '_' || c == '\\') {
+                    pattern += '\\';
+                }
+                pattern += c;
+            }
+            pattern += '%';
+            const Statement query(db, "SELECT id FROM names WHERE name LIKE ? ESCAPE '\\'");
+            sqlite3_bind_text(query.handle, 1, pattern.c_str(), -1, SQLITE_TRANSIENT);
+            while (query.handle != nullptr && sqlite3_step(query.handle) == SQLITE_ROW) {
+                ids.insert(static_cast<std::uint32_t>(sqlite3_column_int64(query.handle, 0)));
+            }
+        };
+        if (!filter.white.empty()) {
+            like(filter.white, match.whites);
+        }
+        if (!filter.black.empty()) {
+            like(filter.black, match.blacks);
+        }
+        if (!filter.players.empty()) {
+            std::string list;
+            for (std::size_t i = 0; i < filter.players.size(); ++i) {
+                list += i == 0 ? "?" : ",?";
+            }
+            const Statement query(
+                db, ("SELECT id FROM names WHERE lower(name) IN (" + list + ")").c_str());
+            for (std::size_t i = 0; i < filter.players.size(); ++i) {
+                std::string lower = filter.players[i];
+                std::transform(lower.begin(), lower.end(), lower.begin(),
+                               [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+                sqlite3_bind_text(query.handle, static_cast<int>(i) + 1, lower.c_str(), -1,
+                                  SQLITE_TRANSIENT);
+            }
+            while (query.handle != nullptr && sqlite3_step(query.handle) == SQLITE_ROW) {
+                match.players.insert(
+                    static_cast<std::uint32_t>(sqlite3_column_int64(query.handle, 0)));
+            }
+        }
+        return match;
+    }
+
+    /// What a filtered range holds: its games, results and both sides' rating sums.
+    struct Tally {
+        std::uint64_t games = 0;
+        std::array<std::uint64_t, 3> results{};
+        std::array<std::uint64_t, 4> ratings{}; ///< White's sum, count; Black's sum, count
+        [[nodiscard]] std::pair<int, int> averages() const {
+            return {ratings[1] > 0 ? static_cast<int>(ratings[0] / ratings[1]) : 0,
+                    ratings[3] > 0 ? static_cast<int>(ratings[2] / ratings[3]) : 0};
+        }
+    };
+    [[nodiscard]] Tally tally(std::size_t lo, std::size_t hi, const Matcher& match) const {
+        Tally t;
+        const bool rated = ratings.count<std::uint16_t>() >= 2 * hi;
+        for (std::size_t i = lo; i < hi; ++i) {
+            if (!match(i)) {
+                continue;
+            }
+            ++t.games;
+            switch (resultAt(i)) {
+            case GameResult::WhiteWins:
+                ++t.results[0];
+                break;
+            case GameResult::Draw:
+                ++t.results[1];
+                break;
+            case GameResult::BlackWins:
+                ++t.results[2];
+                break;
+            case GameResult::Unknown:
+                break;
+            }
+            if (rated) {
+                const auto* at = ratings.as<std::uint16_t>();
+                for (std::size_t side = 0; side < 2; ++side) {
+                    if (const std::uint16_t value = at[(2 * i) + side]; value > 0) {
+                        t.ratings[2 * side] += value;
+                        ++t.ratings[(2 * side) + 1];
+                    }
+                }
+            }
+        }
+        return t;
+    }
+
     /// White wins, draws and Black wins in [lo, hi) of order.bin.
     [[nodiscard]] std::array<std::uint64_t, 3> results(std::size_t lo, std::size_t hi) const {
         const auto* at = sums.as<std::uint32_t>();
@@ -591,7 +776,8 @@ core::Result<std::unique_ptr<Database>> Database::open(const std::string& folder
             return core::Error{std::string("The database is missing ") + name + "."};
         }
     }
-    impl->ratings.open(pathIn(folder, "ratings.bin")); // optional
+    impl->ratings.open(pathIn(folder, "ratings.bin"));  // optional
+    impl->attributes.open(pathIn(folder, "attrs.bin")); // optional
     return std::unique_ptr<Database>(new Database(std::move(impl)));
 }
 
@@ -604,7 +790,12 @@ bool Database::hasRatings() const {
            m_impl->order.count<std::uint32_t>() > 0;
 }
 
-std::string_view addRatings(const std::string& folder) {
+bool Database::hasAttributes() const {
+    return m_impl->attributes.count<Attributes>() == m_impl->order.count<std::uint32_t>() &&
+           m_impl->order.count<std::uint32_t>() > 0;
+}
+
+std::string_view upgrade(const std::string& folder) {
     MappedFile offsets;
     MappedFile order;
     if (!offsets.open(pathIn(folder, "offsets.bin")) || !order.open(pathIn(folder, "order.bin"))) {
@@ -614,6 +805,7 @@ std::string_view addRatings(const std::string& folder) {
         offsets.count<std::uint64_t>() > 0 ? offsets.count<std::uint64_t>() - 1 : 0;
     std::vector<std::uint16_t> white(games, 0);
     std::vector<std::uint16_t> black(games, 0);
+    std::vector<Attributes> byGame(games);
     sqlite3* db = nullptr;
     const std::string path = pathIn(folder, "games.sqlite");
     if (sqlite3_open_v2(path.c_str(), &db, SQLITE_OPEN_READONLY, nullptr) != SQLITE_OK) {
@@ -621,32 +813,47 @@ std::string_view addRatings(const std::string& folder) {
         return "Couldn't read the database.";
     }
     {
-        const Statement query(db, "SELECT id, white_elo, black_elo FROM games");
+        const Statement query(db, "SELECT id, white_elo, black_elo, date, white, black FROM games");
         while (query.handle != nullptr && sqlite3_step(query.handle) == SQLITE_ROW) {
             const auto id = sqlite3_column_int64(query.handle, 0);
-            if (id >= 1 && std::cmp_less_equal(id, games)) {
-                const auto index = static_cast<std::size_t>(id - 1);
-                white[index] = static_cast<std::uint16_t>(
-                    std::clamp(sqlite3_column_int(query.handle, 1), 0, 65535));
-                black[index] = static_cast<std::uint16_t>(
-                    std::clamp(sqlite3_column_int(query.handle, 2), 0, 65535));
+            if (id < 1 || std::cmp_greater(id, games)) {
+                continue;
             }
+            const auto index = static_cast<std::size_t>(id - 1);
+            white[index] = static_cast<std::uint16_t>(
+                std::clamp(sqlite3_column_int(query.handle, 1), 0, 65535));
+            black[index] = static_cast<std::uint16_t>(
+                std::clamp(sqlite3_column_int(query.handle, 2), 0, 65535));
+            byGame[index].year = static_cast<std::uint16_t>(
+                std::clamp(yearOf(columnText(query.handle, 3)), 0, 65535));
+            byGame[index].white = static_cast<std::uint32_t>(sqlite3_column_int64(query.handle, 4));
+            byGame[index].black = static_cast<std::uint32_t>(sqlite3_column_int64(query.handle, 5));
         }
     }
     sqlite3_close(db);
     std::vector<std::uint16_t> ratings;
+    std::vector<Attributes> attributes;
     ratings.reserve(2 * order.count<std::uint32_t>());
+    attributes.reserve(order.count<std::uint32_t>());
     const auto* sorted = order.as<std::uint32_t>();
     for (std::size_t i = 0; i < order.count<std::uint32_t>(); ++i) {
-        ratings.push_back(sorted[i] < games ? white[sorted[i]] : 0);
-        ratings.push_back(sorted[i] < games ? black[sorted[i]] : 0);
+        const bool known = sorted[i] < games;
+        ratings.push_back(known ? white[sorted[i]] : 0);
+        ratings.push_back(known ? black[sorted[i]] : 0);
+        attributes.push_back(known ? byGame[sorted[i]] : Attributes{});
     }
-    // Written under another name and renamed, so a reader never sees half a file.
-    const std::string part = pathIn(folder, "ratings.bin.part");
-    if (!writeFile(part, ratings) ||
-        std::rename(part.c_str(), pathIn(folder, "ratings.bin").c_str()) != 0) {
-        std::remove(part.c_str());
-        return "Couldn't write the ratings (is the disk full?).";
+    // Written under other names and renamed, so a reader never sees half a file.
+    for (const auto& [name, write] :
+         {std::pair<const char*, std::function<bool(const std::string&)>>{
+              "ratings.bin", [&](const std::string& to) { return writeFile(to, ratings); }},
+          std::pair<const char*, std::function<bool(const std::string&)>>{
+              "attrs.bin", [&](const std::string& to) { return writeFile(to, attributes); }}}) {
+        const std::string target = pathIn(folder, name);
+        const std::string part = target + ".part";
+        if (!write(part) || std::rename(part.c_str(), target.c_str()) != 0) {
+            std::remove(part.c_str());
+            return "Couldn't upgrade the database (is the disk full?).";
+        }
     }
     return {};
 }
@@ -744,7 +951,85 @@ std::optional<core::Game> Database::game(GameId id) const {
     return game;
 }
 
-Explored Database::explore(std::span<const core::Move> line) const {
+Record Database::record(std::span<const std::string> names) const {
+    Record record;
+    if (names.empty()) {
+        return record;
+    }
+    // The players' ids (names are compared without case), then their results by colour.
+    std::string list;
+    for (std::size_t i = 0; i < names.size(); ++i) {
+        list += i == 0 ? "?" : ",?";
+    }
+    for (const bool white : {true, false}) {
+        const std::string sql =
+            std::string("SELECT result, COUNT(*) FROM games WHERE ") + (white ? "white" : "black") +
+            " IN (SELECT id FROM names WHERE lower(name) IN (" + list + ")) GROUP BY result";
+        const Statement query(m_impl->db, sql.c_str());
+        for (std::size_t i = 0; i < names.size(); ++i) {
+            std::string lower = names[i];
+            std::transform(lower.begin(), lower.end(), lower.begin(),
+                           [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+            sqlite3_bind_text(query.handle, static_cast<int>(i) + 1, lower.c_str(), -1,
+                              SQLITE_TRANSIENT);
+        }
+        auto& counts = white ? record.asWhite : record.asBlack;
+        while (query.handle != nullptr && sqlite3_step(query.handle) == SQLITE_ROW) {
+            const auto result = static_cast<GameResult>(sqlite3_column_int(query.handle, 0));
+            const auto count = static_cast<std::uint64_t>(sqlite3_column_int64(query.handle, 1));
+            if (result == GameResult::Draw) {
+                counts[1] += count;
+            } else if (result == GameResult::WhiteWins) {
+                counts[white ? 0 : 2] += count;
+            } else if (result == GameResult::BlackWins) {
+                counts[white ? 2 : 0] += count;
+            }
+        }
+    }
+    return record;
+}
+
+PlayerStats Database::playerStats(std::span<const std::string> names, std::uint8_t speeds) const {
+    PlayerStats stats;
+    if (names.empty() || !hasAttributes()) {
+        stats.total = speeds == 0 ? record(names) : Record{};
+        return stats;
+    }
+    ExploreFilter filter;
+    filter.players.assign(names.begin(), names.end());
+    const Impl::Matcher match = m_impl->matcher(filter);
+    const auto* attributes = m_impl->attributes.as<Attributes>();
+    for (std::size_t i = 0; i < m_impl->order.count<std::uint32_t>(); ++i) {
+        const Attributes& a = attributes[i];
+        if (speeds != 0 && (speeds & (1U << a.speed)) == 0) {
+            continue;
+        }
+        const bool white = match.players.contains(a.white);
+        const bool black = match.players.contains(a.black);
+        if (!white && !black) {
+            continue;
+        }
+        const GameResult result = m_impl->resultAt(i);
+        if (result == GameResult::Unknown) {
+            continue;
+        }
+        // From the player's side: 0 won, 1 drawn, 2 lost (a game against oneself counts once).
+        std::size_t outcome = 1;
+        if (result == GameResult::WhiteWins) {
+            outcome = white ? 0 : 2;
+        } else if (result == GameResult::BlackWins) {
+            outcome = white ? 2 : 0;
+        }
+        Record& year = stats.years[a.year];
+        auto& total = white ? stats.total.asWhite : stats.total.asBlack;
+        auto& inYear = white ? year.asWhite : year.asBlack;
+        ++total[outcome];
+        ++inYear[outcome];
+    }
+    return stats;
+}
+
+Explored Database::explore(std::span<const core::Move> line, const ExploreFilter& filter) const {
     Explored explored;
     chess::Board board;
     const auto prefix = Impl::prefixOf(line, board);
@@ -752,12 +1037,24 @@ Explored Database::explore(std::span<const core::Move> line) const {
         return explored;
     }
     const auto [lo, hi] = m_impl->range(*prefix);
-    const auto total = m_impl->results(lo, hi);
-    explored.games = hi - lo;
-    explored.white = total[0];
-    explored.draws = total[1];
-    explored.black = total[2];
-    std::tie(explored.whiteElo, explored.blackElo) = m_impl->averages(lo, hi);
+    // Filtered: the games are counted one by one; otherwise the running totals do it.
+    const bool filtered = filter.active();
+    const Impl::Matcher match = filtered ? m_impl->matcher(filter) : Impl::Matcher{};
+    if (filtered) {
+        const Impl::Tally t = m_impl->tally(lo, hi, match);
+        explored.games = t.games;
+        explored.white = t.results[0];
+        explored.draws = t.results[1];
+        explored.black = t.results[2];
+        std::tie(explored.whiteElo, explored.blackElo) = t.averages();
+    } else {
+        const auto total = m_impl->results(lo, hi);
+        explored.games = hi - lo;
+        explored.white = total[0];
+        explored.draws = total[1];
+        explored.black = total[2];
+        std::tie(explored.whiteElo, explored.blackElo) = m_impl->averages(lo, hi);
+    }
     // The next moves: games that go on are sorted by their next byte, so each move is a run.
     const auto* order = m_impl->order.as<std::uint32_t>();
     const std::size_t at = prefix->size();
@@ -772,7 +1069,15 @@ Explored Database::explore(std::span<const core::Move> line) const {
         });
         const auto next = static_cast<std::size_t>(end - order);
         const auto move = detail::decode(board, static_cast<std::uint8_t>(byte));
-        if (move) {
+        if (move && filtered) {
+            const Impl::Tally t = m_impl->tally(i, next, match);
+            const auto [whiteElo, blackElo] = t.averages();
+            if (t.games > 0) {
+                explored.moves.push_back(
+                    {detail::toCore(*move), chess::uci::moveToSan(board, *move), t.games,
+                     t.results[0], t.results[1], t.results[2], whiteElo, blackElo});
+            }
+        } else if (move) {
             const auto results = m_impl->results(i, next);
             const auto [whiteElo, blackElo] = m_impl->averages(i, next);
             explored.moves.push_back({detail::toCore(*move), chess::uci::moveToSan(board, *move),
@@ -786,7 +1091,8 @@ Explored Database::explore(std::span<const core::Move> line) const {
     return explored;
 }
 
-std::vector<GameInfo> Database::gamesAt(std::span<const core::Move> line, std::size_t limit) const {
+std::vector<GameInfo> Database::gamesAt(std::span<const core::Move> line, std::size_t limit,
+                                        const ExploreFilter& filter) const {
     chess::Board board;
     const auto prefix = Impl::prefixOf(line, board);
     if (!prefix || limit == 0) {
@@ -799,10 +1105,15 @@ std::vector<GameInfo> Database::gamesAt(std::span<const core::Move> line, std::s
     using Entry = std::pair<std::uint16_t, std::uint32_t>; // rating, game
     std::priority_queue<Entry, std::vector<Entry>, std::greater<>> best;
     const int human = highestHumanRating(m_impl->info);
+    const bool filtered = filter.active();
+    const Impl::Matcher match = filtered ? m_impl->matcher(filter) : Impl::Matcher{};
     for (std::size_t i = lo; i < hi; ++i) {
         const Entry entry{elo[order[i]], order[i]};
         if (std::cmp_greater(entry.first, human)) {
             continue; // engine games would fill the list
+        }
+        if (filtered && !match(i)) {
+            continue;
         }
         if (best.size() < limit) {
             best.push(entry);

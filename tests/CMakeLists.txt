@@ -33,7 +33,8 @@ if(KIEBITZ_BUILD_APP)
         ui/test_engine.cpp
         ui/test_main_window.cpp
         ui/test_migration.cpp
-        ui/test_piece_set.cpp)
+        ui/test_piece_set.cpp
+        ui/test_profiles.cpp)
     find_package(Qt6 REQUIRED COMPONENTS Test)
     target_link_libraries(kiebitz_ui_tests PRIVATE kiebitz_ui Qt6::Test GTest::gtest)
     kiebitz_set_warnings(kiebitz_ui_tests)

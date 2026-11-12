@@ -2,6 +2,7 @@
 
 #include "AddDatabaseDialog.hpp"
 #include "DatabaseManager.hpp"
+#include "GamesModel.hpp"
 #include "style/AppStyle.hpp"
 #include "style/Layout.hpp"
 #include "style/PageHeader.hpp"
@@ -52,140 +53,10 @@ QString number(quint64 value) {
     return QLocale().toString(static_cast<qulonglong>(value));
 }
 
-QString resultText(gamedb::GameResult result) {
-    switch (result) {
-    case gamedb::GameResult::WhiteWins:
-        return QStringLiteral("1-0");
-    case gamedb::GameResult::BlackWins:
-        return QStringLiteral("0-1");
-    case gamedb::GameResult::Draw:
-        return QStringLiteral("½-½");
-    case gamedb::GameResult::Unknown:
-        break;
-    }
-    return QStringLiteral("*");
-}
-
 } // namespace
 
-/// A database's games as a table. All of them (millions: read a page at a time as they are
-/// scrolled to), or the results of a search.
-class DatabaseGamesModel : public QAbstractTableModel {
-public:
-    using QAbstractTableModel::QAbstractTableModel;
-
-    void setDatabase(std::shared_ptr<const gamedb::Database> db) {
-        beginResetModel();
-        m_db = std::move(db);
-        m_searching = false;
-        m_results.clear();
-        m_pages.clear();
-        endResetModel();
-    }
-    void setResults(std::vector<gamedb::GameInfo> results) {
-        beginResetModel();
-        m_searching = true;
-        m_results = std::move(results);
-        endResetModel();
-    }
-    [[nodiscard]] const gamedb::GameInfo* at(int row) const {
-        if (row < 0) {
-            return nullptr;
-        }
-        if (m_searching) {
-            return static_cast<std::size_t>(row) < m_results.size()
-                       ? &m_results[static_cast<std::size_t>(row)]
-                       : nullptr;
-        }
-        if (!m_db) {
-            return nullptr;
-        }
-        const int page = row / kPage;
-        auto found = m_pages.find(page);
-        if (found == m_pages.end()) {
-            if (m_pages.size() > 256) {
-                m_pages.clear(); // a few MB at most
-            }
-            found = m_pages
-                        .emplace(page, m_db->games((static_cast<gamedb::GameId>(page) * kPage) + 1,
-                                                   kPage))
-                        .first;
-        }
-        const auto index = static_cast<std::size_t>(row % kPage);
-        return index < found->second.size() ? &found->second[index] : nullptr;
-    }
-
-    [[nodiscard]] int rowCount(const QModelIndex& parent = {}) const override {
-        if (parent.isValid()) {
-            return 0;
-        }
-        if (m_searching) {
-            return static_cast<int>(m_results.size());
-        }
-        return m_db ? static_cast<int>(m_db->gameCount()) : 0;
-    }
-    [[nodiscard]] int columnCount(const QModelIndex& parent = {}) const override {
-        return parent.isValid() ? 0 : 8;
-    }
-    [[nodiscard]] QVariant data(const QModelIndex& index, int role) const override {
-        if (role == Qt::TextAlignmentRole &&
-            (index.column() == 1 || index.column() == 3 || index.column() == 4)) {
-            return QVariant::fromValue(Qt::AlignCenter);
-        }
-        if (role != Qt::DisplayRole && role != Qt::ToolTipRole) {
-            return {};
-        }
-        const gamedb::GameInfo* game = at(index.row());
-        if (game == nullptr) {
-            return {};
-        }
-        const auto text = [](const std::string& value) {
-            return QString::fromStdString(value);
-        };
-        const auto elo = [](int value) {
-            return value > 0 ? QString::number(value) : QString();
-        };
-        switch (index.column()) {
-        case 0:
-            return text(game->white);
-        case 1:
-            return elo(game->whiteElo);
-        case 2:
-            return text(game->black);
-        case 3:
-            return elo(game->blackElo);
-        case 4:
-            return resultText(game->result);
-        case 5:
-            return text(game->date);
-        case 6:
-            return text(game->event);
-        case 7:
-            return text(game->eco);
-        default:
-            return {};
-        }
-    }
-    [[nodiscard]] QVariant headerData(int section, Qt::Orientation orientation,
-                                      int role) const override {
-        if (orientation != Qt::Horizontal || role != Qt::DisplayRole) {
-            return {};
-        }
-        static const std::array<const char*, 8> kTitles{"WHITE",  "ELO",  "BLACK", "ELO",
-                                                        "RESULT", "DATE", "EVENT", "ECO"};
-        return QObject::tr(kTitles[static_cast<std::size_t>(section)]);
-    }
-
-private:
-    static constexpr int kPage = 256;
-    std::shared_ptr<const gamedb::Database> m_db;
-    bool m_searching = false;
-    std::vector<gamedb::GameInfo> m_results;
-    mutable std::unordered_map<int, std::vector<gamedb::GameInfo>> m_pages;
-};
-
 DatabasesView::DatabasesView(DatabaseManager& manager, const AppStyle& style, QWidget* parent)
-    : QWidget(parent), m_manager(manager), m_style(style), m_model(new DatabaseGamesModel(this)) {
+    : QWidget(parent), m_manager(manager), m_style(style), m_model(new GamesModel(this)) {
     setObjectName(QStringLiteral("databasesView"));
     auto* layout = new QVBoxLayout(this);
     layout->setContentsMargins(layout::kPage);
@@ -252,27 +123,7 @@ DatabasesView::DatabasesView(DatabaseManager& manager, const AppStyle& style, QW
     m_games = new QTableView;
     m_games->setObjectName(QStringLiteral("databaseGames"));
     m_games->setModel(m_model);
-    m_games->setFrameShape(QFrame::NoFrame);
-    m_games->setSelectionBehavior(QAbstractItemView::SelectRows);
-    m_games->setSelectionMode(QAbstractItemView::SingleSelection);
-    m_games->setEditTriggers(QAbstractItemView::NoEditTriggers);
-    m_games->setShowGrid(false);
-    m_games->setAlternatingRowColors(true);
-    m_games->setWordWrap(false);
-    m_games->verticalHeader()->hide();
-    m_games->verticalHeader()->setDefaultSectionSize(30);
-    m_games->verticalHeader()->setSectionResizeMode(QHeaderView::Fixed);
-    m_games->horizontalHeader()->setHighlightSections(false);
-    m_games->horizontalHeader()->setDefaultAlignment(Qt::AlignLeft | Qt::AlignVCenter);
-    m_games->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
-    m_games->setTextElideMode(Qt::ElideRight);
-    for (const int column : {0, 2, 6}) {
-        m_games->horizontalHeader()->setSectionResizeMode(column, QHeaderView::Stretch);
-    }
-    for (const int column : {1, 3, 4, 5, 7}) {
-        m_games->horizontalHeader()->setSectionResizeMode(column, QHeaderView::Fixed);
-        m_games->horizontalHeader()->resizeSection(column, column == 5 ? 96 : 64);
-    }
+    GamesModel::setUpTable(*m_games);
     connect(m_games, &QTableView::doubleClicked, this,
             [this](const QModelIndex& index) { openRow(index.row()); });
     auto* gamesCard = card();

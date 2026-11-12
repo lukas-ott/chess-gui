@@ -212,6 +212,7 @@ TEST(GameDatabase, RatingsAreAddedToOlderDatabases) {
     }
     // As made before ratings.bin existed.
     std::filesystem::remove(std::filesystem::path(folder.path()) / "ratings.bin");
+    std::filesystem::remove(std::filesystem::path(folder.path()) / "attrs.bin");
     {
         auto db = gamedb::Database::open(folder.path());
         ASSERT_TRUE(db.ok());
@@ -219,7 +220,7 @@ TEST(GameDatabase, RatingsAreAddedToOlderDatabases) {
         EXPECT_EQ((*db)->explore({}).whiteElo, 0);
         EXPECT_EQ((*db)->explore({}).games, 4U); // everything else works
     }
-    EXPECT_EQ(gamedb::addRatings(folder.path()), "");
+    EXPECT_EQ(gamedb::upgrade(folder.path()), "");
     auto db = gamedb::Database::open(folder.path());
     ASSERT_TRUE(db.ok());
     EXPECT_TRUE((*db)->hasRatings());
@@ -272,4 +273,136 @@ TEST(GameDatabase, OnlineDatabasesKeepHigherRatedHumans) {
     const auto top = (*onlineDb)->gamesAt({}, 10);
     ASSERT_EQ(top.size(), 2U); // the 3100 game and the unrated one
     EXPECT_EQ(top[0].white, "Fast");
+}
+
+TEST(GameDatabase, APlayersRecordByColour) {
+    const TempFolder folder;
+    {
+        auto writer = gamedb::DatabaseWriter::create(folder.path(), {"Record", "", 0, 0});
+        ASSERT_TRUE(writer.ok());
+        gamedb::GameSplitter splitter;
+        const auto add = [&](std::string_view game) {
+            (*writer)->add(gamedb::scanGame(game));
+        };
+        splitter.feed(kGames, add);
+        splitter.finish(add);
+        EXPECT_EQ((*writer)->finish(), "");
+    }
+    auto db = gamedb::Database::open(folder.path());
+    ASSERT_TRUE(db.ok());
+    // Carlsen: won with White (vs Caruana), won with Black (vs Smith). Any case.
+    const std::vector<std::string> carlsen{"CARLSEN, magnus"};
+    const auto record = (*db)->record(carlsen);
+    EXPECT_EQ(record.asWhite, (std::array<std::uint64_t, 3>{1, 0, 0}));
+    EXPECT_EQ(record.asBlack, (std::array<std::uint64_t, 3>{1, 0, 0}));
+    EXPECT_EQ(record.games(), 2U);
+    const std::vector<std::string> both{"Jones", "Brown"}; // their draw counts once for each
+    EXPECT_EQ((*db)->record(both).asWhite[1] + (*db)->record(both).asBlack[1], 2U);
+}
+
+TEST(GameScan, SpeedFromTimeControlOrEvent) {
+    using gamedb::Speed;
+    EXPECT_EQ(gamedb::speedOf("60", ""), Speed::Bullet);
+    EXPECT_EQ(gamedb::speedOf("180+2", ""), Speed::Blitz); // 180 + 80
+    EXPECT_EQ(gamedb::speedOf("600+5", ""), Speed::Rapid); // 600 + 200
+    EXPECT_EQ(gamedb::speedOf("5400+30", ""), Speed::Classical);
+    EXPECT_EQ(gamedb::speedOf("40/7200:3600", ""), Speed::Classical);
+    EXPECT_EQ(gamedb::speedOf("1/86400", ""), Speed::Correspondence);
+    EXPECT_EQ(gamedb::speedOf("-", "Rated Blitz game"), Speed::Blitz);
+    EXPECT_EQ(gamedb::speedOf("", "Club championship"), Speed::Unknown);
+}
+
+TEST(GameDatabase, TheExplorerFiltersBySpeedYearPlayerAndRating) {
+    const std::string games =
+        "[White \"me\"]\n[Black \"x\"]\n[Date \"2020.01.01\"]\n[TimeControl \"180+2\"]\n"
+        "[WhiteElo \"2000\"]\n[BlackElo \"2000\"]\n[Result \"1-0\"]\n\n1. e4 e5 1-0\n\n"
+        "[White \"x\"]\n[Black \"Me\"]\n[Date \"2023.05.01\"]\n[TimeControl \"600\"]\n"
+        "[Result \"0-1\"]\n\n1. e4 c5 0-1\n\n"
+        "[White \"me\"]\n[Black \"y\"]\n[Date \"2024.02.02\"]\n[TimeControl \"60\"]\n"
+        "[Result \"1/2-1/2\"]\n\n1. d4 d5 1/2-1/2\n";
+    const TempFolder folder;
+    {
+        auto writer = gamedb::DatabaseWriter::create(folder.path(), {"Mine", "", 0, 0});
+        ASSERT_TRUE(writer.ok());
+        gamedb::GameSplitter splitter;
+        const auto add = [&](std::string_view game) {
+            (*writer)->add(gamedb::scanGame(game));
+        };
+        splitter.feed(games, add);
+        splitter.finish(add);
+        EXPECT_EQ((*writer)->finish(), "");
+    }
+    auto opened = gamedb::Database::open(folder.path());
+    ASSERT_TRUE(opened.ok());
+    const gamedb::Database& db = **opened;
+    EXPECT_TRUE(db.hasAttributes());
+    EXPECT_EQ(db.explore({}).games, 3U);
+
+    gamedb::ExploreFilter blitz;
+    blitz.speeds = 1U << static_cast<unsigned>(gamedb::Speed::Blitz);
+    const auto onlyBlitz = db.explore({}, blitz);
+    EXPECT_EQ(onlyBlitz.games, 1U);
+    ASSERT_EQ(onlyBlitz.moves.size(), 1U);
+    EXPECT_EQ(onlyBlitz.moves[0].san, "e4");
+    EXPECT_EQ(onlyBlitz.whiteElo, 2000);
+
+    gamedb::ExploreFilter recent;
+    recent.fromYear = 2023;
+    EXPECT_EQ(db.explore({}, recent).games, 2U);
+
+    gamedb::ExploreFilter asWhite;
+    asWhite.players = {"ME"}; // any case
+    asWhite.side = gamedb::ExploreFilter::Side::White;
+    const auto white = db.explore({}, asWhite);
+    EXPECT_EQ(white.games, 2U); // e4 and d4
+    EXPECT_EQ(white.moves.size(), 2U);
+    asWhite.side = gamedb::ExploreFilter::Side::Black;
+    EXPECT_EQ(db.explore({}, asWhite).games, 1U);
+
+    gamedb::ExploreFilter names; // part of a name, any case, per colour
+    names.white = "ME";
+    EXPECT_EQ(db.explore({}, names).games, 2U);
+    names.black = "y";
+    EXPECT_EQ(db.explore({}, names).games, 1U); // me – y
+    names.white.clear();
+    names.black = "nobody";
+    EXPECT_EQ(db.explore({}, names).games, 0U);
+
+    gamedb::ExploreFilter rated;
+    rated.minRating = 1900;
+    EXPECT_EQ(db.explore({}, rated).games, 1U); // the others have no ratings
+    EXPECT_EQ(db.gamesAt({}, 10, recent).size(), 2U);
+}
+
+TEST(GameDatabase, APlayersStatsByYearAndSpeed) {
+    const std::string games =
+        "[White \"me\"]\n[Black \"x\"]\n[Date \"2020.01.01\"]\n[TimeControl \"180+2\"]\n"
+        "[Result \"1-0\"]\n\n1. e4 e5 1-0\n\n"
+        "[White \"x\"]\n[Black \"me\"]\n[Date \"2023.05.01\"]\n[TimeControl \"600\"]\n"
+        "[Result \"1-0\"]\n\n1. e4 c5 1-0\n\n"
+        "[White \"me\"]\n[Black \"y\"]\n[Date \"2023.02.02\"]\n[TimeControl \"60\"]\n"
+        "[Result \"1/2-1/2\"]\n\n1. d4 d5 1/2-1/2\n";
+    const TempFolder folder;
+    {
+        auto writer = gamedb::DatabaseWriter::create(folder.path(), {"Me", "", 0, 0});
+        ASSERT_TRUE(writer.ok());
+        gamedb::GameSplitter splitter;
+        const auto add = [&](std::string_view game) {
+            (*writer)->add(gamedb::scanGame(game));
+        };
+        splitter.feed(games, add);
+        splitter.finish(add);
+        EXPECT_EQ((*writer)->finish(), "");
+    }
+    auto db = gamedb::Database::open(folder.path());
+    ASSERT_TRUE(db.ok());
+    const std::vector<std::string> me{"Me"};
+    const auto all = (*db)->playerStats(me);
+    EXPECT_EQ(all.total.asWhite, (std::array<std::uint64_t, 3>{1, 1, 0}));
+    EXPECT_EQ(all.total.asBlack, (std::array<std::uint64_t, 3>{0, 0, 1}));
+    ASSERT_EQ(all.years.size(), 2U);
+    EXPECT_EQ(all.years.at(2023).games(), 2U);
+    const auto rapid = (*db)->playerStats(me, 1U << static_cast<unsigned>(gamedb::Speed::Rapid));
+    EXPECT_EQ(rapid.total.games(), 1U); // the 600-second loss with Black
+    EXPECT_EQ(rapid.total.asBlack[2], 1U);
 }

@@ -4,8 +4,10 @@
 #include "kiebitz/core/result.hpp"
 #include "kiebitz/gamedb/scan.hpp"
 
+#include <array>
 #include <cstdint>
 #include <functional>
+#include <map>
 #include <memory>
 #include <optional>
 #include <span>
@@ -22,7 +24,8 @@
 ///   order.bin     the games from the usual start position, sorted by their moves;
 ///   sums.bin      running totals of their results in that order;
 ///   elo.bin       each game's average rating;
-///   ratings.bin   White's and Black's rating of each game, in the order of order.bin.
+///   ratings.bin   White's and Black's rating of each game, in the order of order.bin;
+///   attrs.bin     each game's year, speed and players, in the same order (for filters).
 /// Games with the same opening sit next to each other in order.bin, so a line's games are one
 /// range found by binary search, and its statistics are two lookups in sums.bin: the explorer
 /// answers in well under a millisecond for any number of games. (A position reached by another
@@ -78,6 +81,49 @@ struct Explored {
     std::vector<MoveStats> moves; ///< most played first
 };
 
+/// A player's results, from the player's side: wins, draws, losses with each colour.
+struct Record {
+    std::array<std::uint64_t, 3> asWhite{}; ///< won, drawn, lost
+    std::array<std::uint64_t, 3> asBlack{};
+    [[nodiscard]] std::uint64_t games() const {
+        return asWhite[0] + asWhite[1] + asWhite[2] + asBlack[0] + asBlack[1] + asBlack[2];
+    }
+    Record& operator+=(const Record& other) {
+        for (std::size_t k = 0; k < 3; ++k) {
+            asWhite[k] += other.asWhite[k];
+            asBlack[k] += other.asBlack[k];
+        }
+        return *this;
+    }
+};
+
+/// Which games the explorer counts. Empty fields don't filter.
+struct ExploreFilter {
+    int minRating = 0; ///< the players' average rating at least this
+    int maxRating = 0; ///< ... and at most this
+    int fromYear = 0;
+    int toYear = 0;
+    std::uint8_t speeds = 0; ///< bits: 1 << Speed (Unknown included when any bit is set: never)
+    /// Only the games of these players (any case)...
+    std::vector<std::string> players;
+    /// ... with this colour.
+    enum class Side : std::uint8_t { Any, White, Black } side = Side::Any;
+    /// Only games whose White (Black) player's name contains this (any case): "carlsen".
+    std::string white;
+    std::string black;
+
+    [[nodiscard]] bool active() const {
+        return minRating > 0 || maxRating > 0 || fromYear > 0 || toYear > 0 || speeds != 0 ||
+               !players.empty() || !white.empty() || !black.empty();
+    }
+};
+
+/// A player's results in total and by year (0: no date), for the profile's overview.
+struct PlayerStats {
+    Record total;
+    std::map<int, Record> years;
+};
+
 /// Writes a new database: add() every game, then finish().
 class DatabaseWriter {
 public:
@@ -103,10 +149,11 @@ private:
     std::unique_ptr<Impl> m_impl;
 };
 
-/// Adds ratings.bin to a database made before it existed (from the headers it has). Empty on
-/// success, else the error. A Database opened before keeps working without it; one opened
-/// afterwards has it.
-std::string_view addRatings(const std::string& folder);
+/// Adds what a database made by an older Kiebitz lacks (ratings.bin, attrs.bin) from the
+/// headers it has. Empty on success, else the error. A Database opened before keeps working
+/// without them; one opened afterwards has them. (Speeds aren't in the headers kept: those
+/// stay unknown.)
+std::string_view upgrade(const std::string& folder);
 
 /// Reads a finished database. Safe to use from several threads at once.
 class Database {
@@ -119,8 +166,9 @@ public:
     Database& operator=(Database&&) = delete;
 
     [[nodiscard]] const DatabaseInfo& info() const;
-    /// Whether it has ratings.bin (databases made before it get it from addRatings()).
+    /// Whether it has ratings.bin and attrs.bin (older databases get them from upgrade()).
     [[nodiscard]] bool hasRatings() const;
+    [[nodiscard]] bool hasAttributes() const;
     [[nodiscard]] std::uint64_t gameCount() const;
 
     /// Games by id, `count` of them from `first` (for scrolling through all of them).
@@ -130,12 +178,20 @@ public:
     /// A whole game: headers and moves.
     [[nodiscard]] std::optional<core::Game> game(GameId id) const;
 
+    /// The results of the player(s) called any of `names` (any case), in finished games.
+    [[nodiscard]] Record record(std::span<const std::string> names) const;
+    /// The same, by year, and only at these speeds (bits: 1 << Speed; 0: all). Counts the games
+    /// from the usual start position (all a player's games, in practice).
+    [[nodiscard]] PlayerStats playerStats(std::span<const std::string> names,
+                                          std::uint8_t speeds = 0) const;
+
     /// The explorer for a line of moves from the usual start position.
-    [[nodiscard]] Explored explore(std::span<const core::Move> line) const;
+    [[nodiscard]] Explored explore(std::span<const core::Move> line,
+                                   const ExploreFilter& filter = {}) const;
     /// The games of that line, best rated first (engine games left out: see
     /// highestHumanRating()).
-    [[nodiscard]] std::vector<GameInfo> gamesAt(std::span<const core::Move> line,
-                                                std::size_t limit) const;
+    [[nodiscard]] std::vector<GameInfo> gamesAt(std::span<const core::Move> line, std::size_t limit,
+                                                const ExploreFilter& filter = {}) const;
 
 private:
     struct Impl;

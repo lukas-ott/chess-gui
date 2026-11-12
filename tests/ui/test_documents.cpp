@@ -182,6 +182,43 @@ TEST_F(DocumentsTest, ClosingATabNeverAsks) {
     EXPECT_EQ(tabs->tabText(0), QStringLiteral("New game"));
 }
 
+TEST_F(DocumentsTest, ClocksShowAboveAndBelowTheBoardWithoutMovingIt) {
+    writeFile(path("plain.pgn"), kOneGame);
+    writeFile(path("clocks.pgn"), "[White \"Alice\"]\n[Black \"Bob\"]\n\n"
+                                  "1. e4 { [%clk 0:05:00] } e5 { [%clk 0:04:58] } "
+                                  "2. Nf3 { [%clk 0:04:51] } *\n");
+    auto* top = window.findChild<QLabel*>(QStringLiteral("clockTop"));
+    auto* bottom = window.findChild<QLabel*>(QStringLiteral("clockBottom"));
+    ASSERT_NE(top, nullptr);
+    ASSERT_NE(bottom, nullptr);
+
+    open(path("plain.pgn"));
+    action(window, QStringLiteral("Go to End"))->trigger();
+    QApplication::processEvents();
+    const QRect squares = board->squareRect(core::Square::at(0, 7));
+    EXPECT_FALSE(top->isVisible());
+    EXPECT_FALSE(bottom->isVisible());
+
+    open(path("clocks.pgn"));
+    action(window, QStringLiteral("Go to End"))->trigger();
+    QApplication::processEvents();
+    EXPECT_EQ(bottom->text(), QStringLiteral("4:51")); // White, at the bottom
+    EXPECT_EQ(top->text(), QStringLiteral("4:58"));
+    EXPECT_TRUE(top->isVisible());
+    EXPECT_TRUE(bottom->isVisible());
+    EXPECT_EQ(board->squareRect(core::Square::at(0, 7)), squares); // the board didn't move
+    if (const QString dir = qEnvironmentVariable("KIEBITZ_SNAPSHOT_DIR"); !dir.isEmpty()) {
+        window.grab().save(QDir(dir).filePath(QStringLiteral("clocks.png")));
+    }
+    // Back one move: White's clock is the one after 1. e4.
+    action(window, QStringLiteral("Back"))->trigger();
+    EXPECT_EQ(bottom->text(), QStringLiteral("5:00"));
+    // Flipped: Black at the bottom.
+    action(window, QStringLiteral("Flip Board"))->trigger();
+    EXPECT_EQ(bottom->text(), QStringLiteral("4:58"));
+    action(window, QStringLiteral("Flip Board"))->trigger();
+}
+
 TEST_F(DocumentsTest, OpenEditAndSaveAFile) {
     writeFile(path("game.pgn"), kOneGame);
     open(path("game.pgn"));
@@ -741,6 +778,20 @@ TEST_F(DocumentsTest, GamesAreCheckedAgainstEveryRepertoireFile) {
     answerNextMessageBox(QMessageBox::Cancel);
     emit panel->addLineRequested(core::Color::White);
     EXPECT_EQ(readFile(path("Open Games.pgn")), before);
+    if (const QString dir = qEnvironmentVariable("KIEBITZ_SNAPSHOT_DIR"); !dir.isEmpty()) {
+        panel->grab().save(QDir(dir).filePath(QStringLiteral("repertoire-check.png")));
+    }
+    // The repertoire's moves are chips: clicking one plays it where the game left the book.
+    QPushButton* e4 = nullptr;
+    for (auto* button : panel->findChildren<QPushButton*>()) {
+        if (button->property("role").toString() == u"moveChip" && button->text() == u"e4") {
+            e4 = button;
+        }
+    }
+    ASSERT_NE(e4, nullptr);
+    QTest::mouseClick(e4, Qt::LeftButton);
+    EXPECT_TRUE(panel->statusText(core::Color::White).startsWith(u"In book · Open Games"))
+        << panel->statusText(core::Color::White).toStdString();
 
     // Only the side the board is viewed from is checked.
     action(window, QStringLiteral("Flip Board"))->trigger();

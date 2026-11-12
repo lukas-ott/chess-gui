@@ -1,13 +1,16 @@
 #pragma once
 
 #include "kiebitz/core/game.hpp"
+#include "kiebitz/repertoire/tree.hpp"
 
 #include <QWidget>
 
 #include <array>
 #include <cstdint>
 #include <unordered_set>
+#include <vector>
 
+class QHBoxLayout;
 class QLabel;
 class QPushButton;
 class QStackedWidget;
@@ -54,6 +57,8 @@ public:
 
 signals:
     void addLineRequested(kiebitz::core::Color side);
+    /// Play these moves from the start of the game (a repertoire move, clicked).
+    void playLineRequested(const std::vector<kiebitz::core::Move>& line);
     /// Open a repertoire file at a position (its hash).
     void jumpRequested(const QString& path, quint64 position);
     /// Practise the whole file (from the start) or from the current position, up to `depth`.
@@ -78,12 +83,24 @@ private:
     struct Row {
         QWidget* widget = nullptr;
         QLabel* title = nullptr;
-        QLabel* status = nullptr;
+        QLabel* files = nullptr; ///< "3 files"
+        QLabel* dot = nullptr;   ///< coloured by how it stands: in book, left it, ...
+        QLabel* headline = nullptr;
+        QLabel* where = nullptr; ///< the file named
+        QWidget* moves = nullptr;
+        QLabel* movesCaption = nullptr;
+        QHBoxLayout* movesRow = nullptr; ///< the repertoire's moves as chips that play them
         QPushButton* add = nullptr;
         QPushButton* jump = nullptr;
+        QString text;       ///< all of it in one line (statusText)
         QString file;       ///< the file named (the longest match); kept while it fits
         quint64 jumpTo = 0; ///< where Jump to Line goes in it
     };
+    /// What a row says: a mood ("good", "bad", "open", "muted"), a headline, and the moves of
+    /// the repertoire at `ply` of `line` with a caption ("You play").
+    void setRow(Row& row, const char* mood, const QString& headline, const QString& file,
+                const QString& caption = {}, const std::vector<core::Move>& line = {},
+                std::size_t ply = 0, const std::vector<repertoire::Continuation>& moves = {});
     std::array<Row, 2> m_rows; ///< White, Black
 
     QLabel* m_practiceCount = nullptr;

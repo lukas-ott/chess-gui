@@ -109,20 +109,23 @@ void DatabaseManager::refresh() {
         m_databases = watcher->result();
         emit changed();
         // Databases from before the explorer showed ratings get them once, in the background.
+        // The watchers are owned by the manager and deleted when done (deleteLater).
+        // NOLINTBEGIN(clang-analyzer-cplusplus.NewDeleteLeaks)
         for (const InstalledDatabase& database : m_databases) {
-            if (database.db->hasRatings() || m_upgrading.contains(database.folder)) {
+            if ((database.db->hasRatings() && database.db->hasAttributes()) ||
+                m_upgrading.contains(database.folder)) {
                 continue;
             }
             m_upgrading.insert(database.folder);
-            auto* upgrade = new QFutureWatcher<std::string_view>(
-                this); // NOLINT(clang-analyzer-cplusplus.NewDeleteLeaks)
+            auto* upgrade = new QFutureWatcher<std::string_view>(this);
             connect(upgrade, &QFutureWatcher<std::string_view>::finished, this, [this, upgrade] {
                 upgrade->deleteLater();
                 refresh();
             });
             upgrade->setFuture(QtConcurrent::run(
-                [folder = database.folder.toStdString()] { return gamedb::addRatings(folder); }));
+                [folder = database.folder.toStdString()] { return gamedb::upgrade(folder); }));
         }
+        // NOLINTEND(clang-analyzer-cplusplus.NewDeleteLeaks)
     });
     watcher->setFuture(QtConcurrent::run([root = m_root] {
         Found found;

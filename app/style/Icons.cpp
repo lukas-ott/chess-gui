@@ -221,6 +221,50 @@ void draw(QPainter& painter, IconKind kind, const QColor& color, int size) {
         painter.drawPath(body);
         break;
     }
+    case IconKind::Person: { // a head and shoulders
+        painter.setPen(QPen(color, 1.3, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
+        painter.drawEllipse(QPointF(8.0, 5.2), 2.6, 2.6);
+        QPainterPath shoulders;
+        shoulders.moveTo(3.0, 13.5);
+        shoulders.cubicTo(3.0, 10.2, 5.2, 8.9, 8.0, 8.9);
+        shoulders.cubicTo(10.8, 8.9, 13.0, 10.2, 13.0, 13.5);
+        painter.drawPath(shoulders);
+        break;
+    }
+    case IconKind::Info: { // an "i" in a circle
+        painter.setPen(QPen(color, 1.3, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
+        painter.drawEllipse(QPointF(8.0, 8.0), 6.0, 6.0);
+        painter.drawLine(QPointF(8.0, 7.2), QPointF(8.0, 11.2));
+        painter.setPen(QPen(color, 1.9, Qt::SolidLine, Qt::RoundCap));
+        painter.drawPoint(QPointF(8.0, 4.9));
+        break;
+    }
+    case IconKind::Refresh: { // most of a circle, with an arrow head
+        painter.setPen(QPen(color, 1.3, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
+        painter.drawArc(QRectF(3.0, 3.0, 10.0, 10.0), 60 * 16, 290 * 16);
+        QPainterPath head;
+        head.moveTo(10.6, 2.0);
+        head.lineTo(11.0, 4.6);
+        head.lineTo(8.4, 5.0);
+        painter.drawPath(head);
+        break;
+    }
+    case IconKind::Trash: { // a lid with a handle, and a bin with two lines
+        painter.setPen(QPen(color, 1.3, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
+        painter.drawLine(QPointF(3.0, 4.5), QPointF(13.0, 4.5));
+        painter.drawLine(QPointF(6.5, 4.5), QPointF(6.5, 2.8));
+        painter.drawLine(QPointF(6.5, 2.8), QPointF(9.5, 2.8));
+        painter.drawLine(QPointF(9.5, 2.8), QPointF(9.5, 4.5));
+        QPainterPath bin;
+        bin.moveTo(4.3, 4.5);
+        bin.lineTo(5.0, 13.2);
+        bin.lineTo(11.0, 13.2);
+        bin.lineTo(11.7, 4.5);
+        painter.drawPath(bin);
+        painter.drawLine(QPointF(7.0, 7.0), QPointF(7.0, 11.0));
+        painter.drawLine(QPointF(9.0, 7.0), QPointF(9.0, 11.0));
+        break;
+    }
     case IconKind::Check:
         painter.setPen(QPen(color, 1.8, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
         painter.drawPolyline(

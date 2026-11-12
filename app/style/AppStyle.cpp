@@ -452,6 +452,54 @@ QLabel[role="quote"] {
 QProgressBar#practiceBar { background: @raised; border: none; border-radius: 2px; }
 QProgressBar#practiceBar::chunk { background: @accent; border-radius: 2px; }
 
+/* The players' clocks above and below the board */
+QLabel[role="boardClock"] {
+    background: @surface;
+    color: @text;
+    border: 1px solid @border;
+    border-radius: 6px;
+    padding: 0 8px;
+    font-size: 13px;
+    font-weight: 600;
+}
+
+/* Repertoire check: a dot for how the game stands (in book, left it, not covered, ended), the
+   headline beside it, and the repertoire's moves as chips that play them */
+QLabel[role="checkDot"] { border-radius: 4px; background: @dimmed; }
+QLabel[role="checkDot"][mood="good"] { background: @good; }
+QLabel[role="checkDot"][mood="bad"] { background: @bad; }
+QLabel[role="checkDot"][mood="open"] { background: @accent; }
+QLabel[role="checkHeadline"] { color: @text; font-size: 14px; font-weight: 600; }
+QPushButton[role="moveChip"] {
+    background: @surface;
+    color: @text;
+    border: 1px solid @border;
+    border-radius: 6px;
+    padding: 2px 9px;
+    min-height: 18px;
+    font-weight: 600;
+}
+QPushButton[role="moveChip"]:hover { border-color: @accent; color: @accent; }
+QPushButton[role="secondary"][size="small"] {
+    padding: 3px 10px;
+    min-height: 16px;
+    font-size: 12px;
+    border-radius: 6px;
+}
+
+/* Chips: small toggles (the explorer's time controls) */
+QPushButton[role="chip"] {
+    background: @raised;
+    color: @muted;
+    border: 1px solid @border;
+    border-radius: 12px;
+    padding: 3px 10px;
+    min-height: 18px;
+    font-size: 12px;
+}
+QPushButton[role="chip"]:hover { color: @text; }
+QPushButton[role="chip"]:checked { background: @accentTint; color: @accent; border-color: @accent; }
+
 /* Explorer: the moves and the top games, like the Library's lists */
 QTreeWidget#explorerMoves, QTreeWidget#explorerGames {
     background: transparent;
@@ -482,10 +530,35 @@ QTreeWidget#explorerMoves::item:selected, QTreeWidget#explorerGames::item:select
 
 /* Databases: the list of databases */
 QLabel[role="databaseName"] { color: @text; font-size: 13px; font-weight: 600; }
-QListWidget#databaseList { background: transparent; outline: none; }
-QListWidget#databaseList::item { border: none; border-radius: 6px; }
-QListWidget#databaseList::item:hover { background: @raised; }
-QListWidget#databaseList::item:selected { background: @accentTint; }
+QListWidget#databaseList, QListWidget#profileList { background: transparent; outline: none; }
+QListWidget#databaseList::item, QListWidget#profileList::item { border: none; border-radius: 6px; }
+QListWidget#databaseList::item:hover, QListWidget#profileList::item:hover { background: @raised; }
+QListWidget#databaseList::item:selected, QListWidget#profileList::item:selected {
+    background: @accentTint;
+}
+QListWidget#fideCandidates { background: transparent; color: @text; outline: none; }
+QListWidget#fideCandidates::item { padding: 4px 2px; border: none; border-radius: 6px; }
+QListWidget#fideCandidates::item:hover { background: @raised; }
+
+/* Profiles: the account cards, one above the other on the card's own background; each has a
+   site badge, ratings with how they moved, and a thin bar for the games downloaded */
+QScrollArea#profileAccounts, QWidget#profileAccountsContent { background: transparent; }
+QScrollArea#explorerFilterScroll, QWidget#explorerFilter { background: transparent; }
+QLabel[role="siteBadge"] {
+    background: @window;
+    color: @muted;
+    border-radius: 4px;
+    padding: 2px 6px;
+    font-size: 10px;
+    font-weight: 700;
+}
+QLabel[role="ratingValue"] { color: @text; font-weight: 600; }
+QLabel[role="ratingChange"] { border-radius: 4px; padding: 0 5px; font-size: 11px; font-weight: 600; }
+QLabel[role="ratingChange"][mood="good"] { background: @goodTint; color: @good; }
+QLabel[role="ratingChange"][mood="bad"] { background: @badTint; color: @bad; }
+QLabel[role="cardFoot"] { color: @dimmed; font-size: 11px; }
+QProgressBar#accountProgress { background: @window; border: none; border-radius: 2px; }
+QProgressBar#accountProgress::chunk { background: @accent; border-radius: 2px; }
 
 /* Library: a repertoire's numbers in tiles, and the openings in it */
 QFrame[statTile="true"] { background: @raised; border: none; border-radius: 8px; }
@@ -667,7 +740,9 @@ QStatusBar::item { border: none; }
     };
     const QColor tint = mix(colors.accent, colors.surface, 0.18F);
     const QColor hover = mix(colors.accent, colors.text, 0.85F);
-    const std::array<std::pair<const char*, QColor>, 13> names{{
+    const std::array<std::pair<const char*, QColor>, 15> names{{
+        {"@goodTint", mix(colors.good, colors.raised, 0.18F)}, // before @good, as below
+        {"@badTint", mix(colors.bad, colors.raised, 0.18F)},
         {"@good", colors.good},
         {"@bad", colors.bad},
         {"@window", colors.window},

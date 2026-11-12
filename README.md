@@ -17,7 +17,11 @@ and training opening repertoires.
 > ends the lines below it at move n. Other games are checked against the repertoire of the side
 > you view the board from. The Databases page holds game databases of millions of games
 > (Lumbra's Gigabase, Caissabase or your own PGN, also in .7z/.zip), and the Explorer tab shows
-> what is played in a position, how it scores and both sides' average rating. The Engine tab
+> what is played in a position, how it scores and both sides' average rating. Profiles (you,
+> friends, opponents) collect a player's Lichess and chess.com games and over-the-board PGNs
+> into a database of their own, also for the Explorer, with ratings, results by colour and
+> their FIDE player (looked up by name). The Explorer can be filtered by rating, years, time
+> control and, for a profile, the colour it played. The Engine tab
 > analyses with Stockfish (one-click download) or the Lichess cloud.
 
 ## Requirements (macOS)
@@ -88,7 +92,7 @@ gamedb/   Game databases of millions of games: a compact store (one byte per mov
           streaming parallel PGN import and an opening explorer over it. No Qt.
 app/      Qt Widgets application: main window, board/ (board widget, themes, piece sets),
           library/ (library folder scan and Library tab), databases/ (Databases page,
-          imports), explorer/ (Explorer tab), document/ (open games, background
+          imports), explorer/ (Explorer tab), profiles/ (Profiles page, game downloads), document/ (open games, background
           file loading and saving), notation/ (move list editor), panels/ (game info),
           engine/ (engine processes, Lichess cloud, Stockfish download, Engines page and
           Engine tab),

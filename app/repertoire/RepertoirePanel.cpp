@@ -12,9 +12,11 @@
 #include <QPushButton>
 #include <QSettings>
 #include <QStackedWidget>
+#include <QStyle>
 #include <QVBoxLayout>
 
 #include <algorithm>
+#include <cstring>
 #include <utility>
 
 namespace kiebitz::app {
@@ -107,16 +109,50 @@ RepertoirePanel::RepertoirePanel(RepertoireStore& store, const AppStyle& style, 
         auto* box = new QVBoxLayout(row.widget);
         box->setContentsMargins(0, 0, 0, 0);
         box->setSpacing(6);
-        row.title = label(QString(), "cardTitle");
-        box->addWidget(row.title);
-        row.status = label(QString(), "pvLine");
-        box->addWidget(row.status);
+        // "WHITE REPERTOIRE                3 files"
+        auto* head = new QHBoxLayout;
+        row.title =
+            label(side == core::Color::White ? tr("WHITE REPERTOIRE") : tr("BLACK REPERTOIRE"),
+                  "cardTitle");
+        row.files = label(QString(), "cardFoot");
+        head->addWidget(row.title);
+        head->addStretch();
+        head->addWidget(row.files);
+        box->addLayout(head);
+        // A card: "● In book", the file, the repertoire's moves here.
+        auto* status = new QFrame;
+        status->setProperty("statTile", true);
+        auto* statusBox = new QVBoxLayout(status);
+        statusBox->setContentsMargins(12, 10, 12, 10);
+        statusBox->setSpacing(6);
+        auto* headlineRow = new QHBoxLayout;
+        headlineRow->setSpacing(8);
+        row.dot = new QLabel;
+        row.dot->setProperty("role", "checkDot");
+        row.dot->setFixedSize(8, 8);
+        headlineRow->addWidget(row.dot, 0, Qt::AlignVCenter);
+        row.headline = label(QString(), "checkHeadline");
+        row.headline->setWordWrap(true);
+        headlineRow->addWidget(row.headline, 1);
+        statusBox->addLayout(headlineRow);
+        row.where = label(QString(), "emptyHint");
+        row.where->setContentsMargins(16, 0, 0, 0);
+        statusBox->addWidget(row.where);
+        row.moves = new QWidget;
+        row.movesRow = new QHBoxLayout(row.moves);
+        row.movesRow->setContentsMargins(16, 2, 0, 0);
+        row.movesRow->setSpacing(4);
+        row.movesCaption = label(QString(), "emptyHint");
+        row.movesCaption->setParent(row.moves);
+        statusBox->addWidget(row.moves);
+        box->addWidget(status);
         auto* buttons = new QHBoxLayout;
         buttons->setSpacing(6);
         row.jump = new QPushButton(tr("Jump to Line"));
         row.jump->setObjectName(side == core::Color::White ? QStringLiteral("jumpWhite")
                                                            : QStringLiteral("jumpBlack"));
         row.jump->setProperty("role", "secondary");
+        row.jump->setProperty("size", "small");
         row.jump->setFocusPolicy(Qt::NoFocus);
         row.jump->setToolTip(tr("Open the repertoire file at this position"));
         connect(row.jump, &QPushButton::clicked, this, [this, side] {
@@ -128,6 +164,7 @@ RepertoirePanel::RepertoirePanel(RepertoireStore& store, const AppStyle& style, 
         buttons->addWidget(row.jump);
         row.add = new QPushButton(tr("Add Line"));
         row.add->setProperty("role", "secondary");
+        row.add->setProperty("size", "small");
         row.add->setFocusPolicy(Qt::NoFocus);
         row.add->setToolTip(tr("Add this game's moves up to here to the repertoire"));
         connect(row.add, &QPushButton::clicked, this,
@@ -227,7 +264,7 @@ int RepertoirePanel::practiceDepth() const {
 
 QString RepertoirePanel::statusText(core::Color side) const {
     const Row& row = m_rows[side == core::Color::White ? 0 : 1];
-    return row.widget->isVisibleTo(this) ? row.status->text() : QString();
+    return row.widget->isVisibleTo(this) ? row.text : QString();
 }
 
 QString RepertoirePanel::practiceText() const {
@@ -296,20 +333,19 @@ void RepertoirePanel::refreshCheck() {
         if (!shown) {
             continue;
         }
-        row.title->setText(
-            (side == core::Color::White ? tr("WHITE REPERTOIRE") : tr("BLACK REPERTOIRE")) +
-            QStringLiteral("  ·  ") +
-            (files.size() == 1 ? tr("1 file") : tr("%1 files").arg(files.size())));
+        row.files->setText(files.size() == 1 ? tr("1 file") : tr("%1 files").arg(files.size()));
         row.add->setEnabled(false);
         row.jump->setEnabled(false);
         const BuiltRepertoire* built = m_store.get(side);
         if (built == nullptr) {
-            row.status->setText(tr("Reading the repertoire…"));
+            setRow(row, "muted", tr("Reading the repertoire…"), {});
             continue;
         }
         if (m_game == nullptr || !fromStart) {
-            row.status->setText(m_game == nullptr ? QString()
-                                                  : tr("This game starts from a set-up position."));
+            setRow(row, "muted",
+                   m_game == nullptr ? tr("No game")
+                                     : tr("This game starts from a set-up position."),
+                   {});
             continue;
         }
         // The positions along the whole line, as far as the repertoire has them.
@@ -351,23 +387,82 @@ void RepertoirePanel::refreshCheck() {
         }
         if (!book.left) {
             const repertoire::Entry* entry = built->tree.find(position.hash());
-            QString text = tr("In book · %1").arg(where);
             if (entry != nullptr && built->tree.isOurMove(*entry) && !entry->moves.empty()) {
-                text += tr(" · you play %1").arg(sans(entry->moves));
+                setRow(row, "good", tr("In book"), where, tr("You play"), line, at, entry->moves);
+            } else {
+                setRow(row, "good", tr("In book"), where);
             }
-            row.status->setText(text);
         } else if (book.byUs && !book.expected.empty()) {
-            row.status->setText(tr("Left the book with %1 · %2 plays %3")
-                                    .arg(moveAt(line, at), where, sans(book.expected)));
+            setRow(row, "bad", tr("Left the book with %1").arg(moveAt(line, at)), where,
+                   tr("The book plays"), line, at, book.expected);
         } else if (!book.expected.empty()) {
-            row.status->setText(tr("%1 isn't covered yet · %2").arg(moveAt(line, at), where));
+            setRow(row, "open", tr("%1 isn't covered yet").arg(moveAt(line, at)), where,
+                   tr("Covered"), line, at, book.expected);
         } else if (at > 0) {
-            row.status->setText(
-                tr("The repertoire ends after %1 · %2").arg(moveAt(line, at - 1), where));
+            setRow(row, "muted", tr("The repertoire ends after %1").arg(moveAt(line, at - 1)),
+                   where);
         } else {
-            row.status->setText(tr("Not in your repertoire"));
+            setRow(row, "muted", tr("Not in your repertoire"), {});
         }
     }
+}
+
+void RepertoirePanel::setRow(Row& row, const char* mood, const QString& headline,
+                             const QString& file, const QString& caption,
+                             const std::vector<core::Move>& line, std::size_t ply,
+                             const std::vector<repertoire::Continuation>& moves) {
+    row.dot->setProperty("mood", mood);
+    row.dot->style()->unpolish(row.dot);
+    row.dot->style()->polish(row.dot);
+    row.headline->setText(headline);
+    row.where->setText(file);
+    row.where->setVisible(!file.isEmpty());
+    // The moves: the main ones when there are any, as chips that play them from that position.
+    while (const QLayoutItem* item = row.movesRow->takeAt(0)) {
+        if (item->widget() != row.movesCaption) {
+            delete item->widget();
+        }
+        delete item;
+    }
+    const bool anyMain =
+        std::any_of(moves.begin(), moves.end(), [](const auto& move) { return move.main; });
+    const std::vector<core::Move> before(
+        line.begin(), line.begin() + static_cast<std::ptrdiff_t>(std::min(ply, line.size())));
+    if (!moves.empty()) {
+        row.movesCaption->setText(caption);
+        row.movesRow->addWidget(row.movesCaption);
+        row.movesRow->addSpacing(4);
+        for (const auto& move : moves) {
+            if (anyMain && !move.main) {
+                continue;
+            }
+            auto* button = new QPushButton(QString::fromStdString(move.san));
+            button->setProperty("role", "moveChip");
+            button->setFocusPolicy(Qt::NoFocus);
+            button->setCursor(Qt::PointingHandCursor);
+            button->setToolTip(tr("Play %1").arg(QString::fromStdString(move.san)));
+            std::vector<core::Move> played = before;
+            played.push_back(move.move);
+            connect(button, &QPushButton::clicked, this,
+                    [this, played = std::move(played)] { emit playLineRequested(played); });
+            row.movesRow->addWidget(button);
+        }
+        row.movesRow->addStretch();
+    }
+    row.moves->setVisible(!moves.empty());
+    // The same in one line, as it used to read: "In book · Open Games · you play e4 or d4".
+    QString text = headline;
+    if (std::strcmp(mood, "good") == 0) {
+        text += QStringLiteral(" · ") + file;
+        if (!moves.empty()) {
+            text += tr(" · you play %1").arg(sans(moves));
+        }
+    } else if (std::strcmp(mood, "bad") == 0) {
+        text += QStringLiteral(" · %1").arg(file) + tr(" plays %1").arg(sans(moves));
+    } else if (!file.isEmpty()) {
+        text += QStringLiteral(" · ") + file;
+    }
+    row.text = std::move(text);
 }
 
 } // namespace kiebitz::app

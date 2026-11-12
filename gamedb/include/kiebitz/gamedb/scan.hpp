@@ -12,6 +12,13 @@ namespace kiebitz::gamedb {
 
 enum class GameResult : std::uint8_t { Unknown, WhiteWins, Draw, BlackWins };
 
+/// How fast a game was played, as Lichess groups time controls.
+enum class Speed : std::uint8_t { Unknown, Bullet, Blitz, Rapid, Classical, Correspondence };
+
+/// The speed of a [TimeControl] ("180+2", "600", "40/7200:3600", "1/86400"), else from the
+/// event's name ("Rated Blitz game"), else Unknown.
+[[nodiscard]] Speed speedOf(std::string_view timeControl, std::string_view event);
+
 /// One game as a database stores it.
 struct ScannedGame {
     std::string white, black, event, site, date, round, eco;
@@ -19,6 +26,7 @@ struct ScannedGame {
     int whiteElo = 0;
     int blackElo = 0;
     GameResult result = GameResult::Unknown;
+    Speed speed = Speed::Unknown;
     std::string moves; ///< one byte per move (see codec)
     /// The game couldn't be read to the end (an illegal or broken move): the moves before it
     /// are kept.

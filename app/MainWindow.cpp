@@ -18,6 +18,8 @@
 #include "library/NewFileDialog.hpp"
 #include "notation/NotationView.hpp"
 #include "panels/GameInfoPanel.hpp"
+#include "profiles/ProfileStore.hpp"
+#include "profiles/ProfilesView.hpp"
 #include "repertoire/PracticeStats.hpp"
 #include "repertoire/RepertoirePanel.hpp"
 #include "repertoire/RepertoireStore.hpp"
@@ -112,6 +114,8 @@ constexpr auto kAppearanceKey = "app/appearance"_L1;
 constexpr auto kContinuationsLearnedKey = "hints/continuationsLearned"_L1;
 constexpr auto kLibraryFolderKey = "library/folder"_L1;
 constexpr int kEvalBarGap = 6; ///< between the eval bar and the board
+/// Above and below the board, for the clocks; kept when there are none, so the board never moves.
+constexpr int kClockRoom = 22;
 
 constexpr int kStatusMs = 4000;
 
@@ -268,6 +272,8 @@ void MainWindow::buildFileMenu() {
                     [this] { showSection(Section::Board); });
     menu->addAction(tr("&Databases"), QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_D), this,
                     [this] { showSection(Section::Databases); });
+    menu->addAction(tr("&Profiles"), QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_P), this,
+                    [this] { showSection(Section::Profiles); });
     menu->addAction(tr("&Engines"), QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_E), this,
                     [this] { showSection(Section::Engines); });
     menu->addSeparator();
@@ -381,6 +387,7 @@ void MainWindow::buildViewMenu(QMenu* menu) {
     connect(flipAction, &QAction::toggled, this, [this](bool on) {
         m_board->setFlipped(on);
         m_evalBar->setFlipped(on);
+        refreshClocks();
         m_repertoirePanel->setViewSide(on ? core::Color::Black : core::Color::White);
         if (const GameDocument* d = doc()) {
             m_explorer->setPosition(&d->game, d->current,
@@ -566,6 +573,10 @@ void MainWindow::buildLayout() {
     m_databases = new DatabaseManager({}, this);
     m_databasesView = new DatabasesView(*m_databases, m_style);
     connect(m_databasesView, &DatabasesView::openGameRequested, this, &MainWindow::openGameCopy);
+    // Profiles: you and the people whose games you follow.
+    m_profiles = new ProfileStore({}, this);
+    m_profilesView = new ProfilesView(*m_profiles, m_style);
+    connect(m_profilesView, &ProfilesView::openGameRequested, this, &MainWindow::openGameCopy);
 
     m_enginesView = new EnginesView(*m_engineRegistry, m_style);
     m_enginesView->setObjectName(QStringLiteral("enginesView"));
@@ -582,6 +593,7 @@ void MainWindow::buildLayout() {
     m_pages->addWidget(boardPage);
     m_pages->addWidget(m_libraryView);
     m_pages->addWidget(m_databasesView);
+    m_pages->addWidget(m_profilesView);
     m_pages->addWidget(m_enginesView);
 
     // The sidebar: one icon per section, as in En Croissant.
@@ -596,6 +608,7 @@ void MainWindow::buildLayout() {
          {std::tuple{Section::Board, "sideBoard", tr("Board (⌘1)")},
           std::tuple{Section::Library, "sideLibrary", tr("Library (⌘L)")},
           std::tuple{Section::Databases, "sideDatabases", tr("Databases (⇧⌘D)")},
+          std::tuple{Section::Profiles, "sideProfiles", tr("Profiles (⇧⌘P)")},
           std::tuple{Section::Engines, "sideEngines", tr("Engines (⇧⌘E)")}}) {
         auto* button = new QToolButton;
         button->setObjectName(QString::fromLatin1(name));
@@ -658,7 +671,7 @@ QWidget* MainWindow::buildAnalysisPage() {
     // bar is hidden, so the board never shifts when engines start or stop.
     auto* boardColumn = new QWidget;
     auto* boardLayout = new QHBoxLayout(boardColumn);
-    boardLayout->setContentsMargins(0, 0, EvalBar::kWidth + kEvalBarGap, 0);
+    boardLayout->setContentsMargins(0, kClockRoom, EvalBar::kWidth + kEvalBarGap, kClockRoom);
     boardLayout->addWidget(m_board, 1);
     m_board->installEventFilter(this);
 
@@ -678,6 +691,14 @@ QWidget* MainWindow::buildAnalysisPage() {
     layout->addWidget(m_mainSplitter);
     m_evalBar = new EvalBar(page); // floats over the page; see placeEvalBar()
     m_evalBar->hide();
+    for (QLabel*& clock : m_clocks) {
+        clock = new QLabel(page);
+        clock->setProperty("role", "boardClock");
+        clock->setAlignment(Qt::AlignCenter);
+        clock->hide();
+    }
+    m_clocks[0]->setObjectName(QStringLiteral("clockTop"));
+    m_clocks[1]->setObjectName(QStringLiteral("clockBottom"));
     connect(m_mainSplitter, &QSplitter::splitterMoved, this, &MainWindow::placeEvalBar);
     return page;
 }
@@ -803,7 +824,7 @@ QWidget* MainWindow::buildPanelsCard() {
                 m_evalBar->setVisible(running); // its space is kept: nothing else moves
             });
     panels->addTab(m_enginePanel, tr("Engine"));
-    m_explorer = new ExplorerPanel(*m_databases, *m_repertoires, m_style);
+    m_explorer = new ExplorerPanel(*m_databases, *m_profiles, *m_repertoires, m_style);
     connect(m_explorer, &ExplorerPanel::movePlayed, this, [this](core::Move move) {
         if (!m_drill) { // in practice the explorer would give the answers away
             playMoves({move});
@@ -824,6 +845,14 @@ QWidget* MainWindow::buildPanelsCard() {
         }
     });
     connect(m_repertoirePanel, &RepertoirePanel::jumpRequested, this, &MainWindow::jumpToLine);
+    // A repertoire move clicked: play the line to it from the start (existing moves are reused).
+    connect(m_repertoirePanel, &RepertoirePanel::playLineRequested, this,
+            [this](const std::vector<core::Move>& line) {
+                if (GameDocument* d = doc(); d != nullptr) {
+                    d->current = core::Game::root();
+                    playMoves(line);
+                }
+            });
     connect(m_repertoirePanel, &RepertoirePanel::practiceRequested, this,
             [this](bool fromHere, int depth) { startPractice(fromHere, depth); });
     connect(m_repertoirePanel, &RepertoirePanel::mistakesRequested, this,
@@ -905,6 +934,49 @@ void MainWindow::placeEvalBar() {
     const int panel = m_sideSplitter->mapTo(page, QPoint(0, 0)).x();
     const int x = squares.right() + 1 + ((panel - squares.right() - 1 - EvalBar::kWidth) / 2);
     m_evalBar->setGeometry(x, squares.top(), EvalBar::kWidth, squares.height());
+    // The clocks: right-aligned with the squares, just above and just below them.
+    for (std::size_t k = 0; k < m_clocks.size(); ++k) {
+        QLabel* clock = m_clocks[k];
+        const QSize size(std::max(clock->sizeHint().width(), 64), 24);
+        const int y = k == 0 ? squares.top() - size.height() - 6 : squares.bottom() + 7;
+        clock->setGeometry(squares.right() + 1 - size.width(), y, size.width(), size.height());
+    }
+}
+
+void MainWindow::refreshClocks() {
+    const GameDocument* d = doc();
+    std::array<QString, 2> times; // White, Black: the last clock of each up to here
+    bool any = false;
+    if (d != nullptr && !m_drill) {
+        const Game& game = d->game;
+        const bool whiteFirst = game.startPosition().sideToMove() == core::Color::White;
+        std::vector<NodeId> line = game.path(d->current);
+        const std::size_t here = line.size();
+        for (NodeId node = game.mainChild(d->current); node != core::kNoNode;
+             node = game.mainChild(node)) {
+            line.push_back(node); // on along the main line: does the game have clocks at all?
+        }
+        for (std::size_t k = 1; k < line.size(); ++k) { // line[0] is the start
+            const std::string clock = core::displayComment(game.node(line[k]).comment).clock;
+            if (clock.empty()) {
+                continue;
+            }
+            any = true;
+            if (k < here) {
+                const bool white = ((k % 2) == 1) == whiteFirst; // who made move k
+                times[white ? 0 : 1] = QString::fromStdString(clock);
+            }
+        }
+    }
+    // White at the bottom unless the board is flipped.
+    const bool flipped = m_board->isFlipped();
+    const std::array<QString, 2> shown{flipped ? times[0] : times[1],
+                                       flipped ? times[1] : times[0]};
+    for (std::size_t k = 0; k < 2; ++k) {
+        m_clocks[k]->setText(shown[k]);
+        m_clocks[k]->setVisible(any && !shown[k].isEmpty());
+    }
+    placeEvalBar();
 }
 
 void MainWindow::fitBoardColumn() {
@@ -916,8 +988,8 @@ void MainWindow::fitBoardColumn() {
     }
     const int total = sizes[0] + sizes[1];
     const int bar = EvalBar::kWidth + kEvalBarGap; // always reserved, shown or not
-    const int side =
-        std::max(m_sideSplitter->minimumWidth(), total - m_mainSplitter->height() - bar);
+    const int side = std::max(m_sideSplitter->minimumWidth(),
+                              total - (m_mainSplitter->height() - (2 * kClockRoom)) - bar);
     m_mainSplitter->setSizes({total - side, side});
     if (m_defaultSideSplit) {
         // The moves are what you read: they get two thirds of the height, the panels the rest.
@@ -1060,6 +1132,8 @@ void MainWindow::updateSidebarIcons() {
             kind = IconKind::Library;
         } else if (section == Section::Databases) {
             kind = IconKind::Database;
+        } else if (section == Section::Profiles) {
+            kind = IconKind::Person;
         } else if (section == Section::Engines) {
             kind = IconKind::Engine;
         }
@@ -1304,6 +1378,8 @@ void MainWindow::updateTitles() {
             page = tr("Engines");
         } else if (m_section == Section::Databases) {
             page = tr("Databases");
+        } else if (m_section == Section::Profiles) {
+            page = tr("Profiles");
         }
         setWindowTitle(page + tr(" — Kiebitz"));
         setWindowModified(false);
@@ -1607,6 +1683,7 @@ void MainWindow::showNode(NodeId id, bool animate) {
     const auto lastMove = id == Game::root() ? std::nullopt : std::optional(node.move);
     m_board->setPosition(d->game.positionAt(id), lastMove, animate);
     m_board->setDrawings(node.arrows, node.squareMarks);
+    refreshClocks();
     m_notation->setCurrent(id);
     {
         const QSignalBlocker block(m_commentBox);

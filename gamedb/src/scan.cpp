@@ -72,10 +72,68 @@ void keep(std::string& field, std::string& value) {
 
 } // namespace
 
+Speed speedOf(std::string_view timeControl, std::string_view event) {
+    // "base+increment" in seconds: Lichess's buckets by base + 40 moves of increment.
+    if (!timeControl.empty() && timeControl != "-" && timeControl != "?") {
+        if (timeControl.find('/') != std::string_view::npos) {
+            // "1/86400": a move a day; "40/7200:3600": moves per period, over the board.
+            return timeControl.starts_with("1/") ? Speed::Correspondence : Speed::Classical;
+        }
+        const auto plus = timeControl.find('+');
+        const auto digits = [](std::string_view text) {
+            int value = 0;
+            for (const char c : text) {
+                if (c < '0' || c > '9') {
+                    break;
+                }
+                value = (value * 10) + (c - '0');
+            }
+            return value;
+        };
+        const int base = digits(timeControl.substr(0, plus));
+        const int increment =
+            plus != std::string_view::npos ? digits(timeControl.substr(plus + 1)) : 0;
+        const int estimate = base + (40 * increment);
+        if (estimate > 0) {
+            if (estimate < 180) {
+                return Speed::Bullet;
+            }
+            if (estimate < 480) {
+                return Speed::Blitz;
+            }
+            if (estimate < 1500) {
+                return Speed::Rapid;
+            }
+            return Speed::Classical;
+        }
+    }
+    // Lichess and other sites name it in the event: "Rated Blitz game".
+    const auto has = [event](std::string_view word) {
+        return event.find(word) != std::string_view::npos;
+    };
+    if (has("Bullet") || has("bullet")) {
+        return Speed::Bullet;
+    }
+    if (has("Blitz") || has("blitz")) {
+        return Speed::Blitz;
+    }
+    if (has("Rapid") || has("rapid")) {
+        return Speed::Rapid;
+    }
+    if (has("Correspondence") || has("Daily")) {
+        return Speed::Correspondence;
+    }
+    if (has("Classical") || has("classical")) {
+        return Speed::Classical;
+    }
+    return Speed::Unknown;
+}
+
 ScannedGame scanGame(std::string_view text) {
     ScannedGame game;
     std::string value;
     std::string variant;
+    std::string timeControl;
     std::size_t pos = text.starts_with("\xEF\xBB\xBF") ? 3 : 0; // a byte-order mark
     // Headers: lines starting with '['.
     while (pos < text.size()) {
@@ -113,12 +171,15 @@ ScannedGame scanGame(std::string_view text) {
             game.blackElo = toInt(value);
         } else if (name == "FEN") {
             game.fen = value;
+        } else if (name == "TimeControl") {
+            timeControl = value;
         } else if (name == "Variant") {
             variant = value;
         } else if (name == "Result") {
             game.result = resultOf(value);
         }
     }
+    game.speed = speedOf(timeControl, game.event);
     if (!variant.empty() && variant != "Standard" && variant != "standard" &&
         variant != "From Position") {
         game.skipped = true; // Chess960 and others: their moves don't fit the codec

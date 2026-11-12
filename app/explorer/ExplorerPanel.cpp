@@ -1,20 +1,28 @@
 #include "ExplorerPanel.hpp"
 
 #include "databases/DatabaseManager.hpp"
+#include "profiles/ProfileStore.hpp"
 #include "repertoire/RepertoireStore.hpp"
 #include "style/AppStyle.hpp"
+#include "widgets/ResultBar.hpp"
 
 #include <QComboBox>
 #include <QFutureWatcher>
+#include <QGridLayout>
 #include <QHBoxLayout>
 #include <QHeaderView>
+#include <QIntValidator>
 #include <QLabel>
+#include <QLineEdit>
 #include <QLocale>
 #include <QPainter>
 #include <QPainterPath>
 #include <QPushButton>
+#include <QScrollArea>
 #include <QSettings>
+#include <QSignalBlocker>
 #include <QStackedWidget>
+#include <QTimer>
 #include <QTreeWidget>
 #include <QVBoxLayout>
 #include <QtConcurrent/QtConcurrentRun>
@@ -23,65 +31,6 @@
 #include <tuple>
 
 namespace kiebitz::app {
-
-/// A bar in three parts: White won, drawn, Black won, with their shares written in when there is
-/// room (as Lichess and En Croissant show results).
-class ResultBar : public QWidget {
-public:
-    explicit ResultBar(const AppStyle& style, int height = 18, QWidget* parent = nullptr)
-        : QWidget(parent), m_style(style) {
-        setMinimumWidth(110);
-        setFixedHeight(height);
-    }
-    void setResults(std::uint64_t white, std::uint64_t draws, std::uint64_t black) {
-        m_counts = {white, draws, black};
-        update();
-    }
-
-protected:
-    void paintEvent(QPaintEvent* /*event*/) override {
-        QPainter painter(this);
-        painter.setRenderHint(QPainter::Antialiasing);
-        const std::uint64_t total = m_counts[0] + m_counts[1] + m_counts[2];
-        const QRectF area = QRectF(rect()).adjusted(0, 1, 0, -1);
-        QPainterPath clip;
-        clip.addRoundedRect(area, area.height() / 2.5, area.height() / 2.5);
-        painter.setClipPath(clip);
-        const auto& c = m_style.colors();
-        if (total == 0) {
-            painter.fillRect(area, c.raised);
-            return;
-        }
-        const std::array<QColor, 3> colors{c.whiteWins, c.draws, c.blackWins};
-        const std::array<QColor, 3> texts{c.blackWins, c.whiteWins, c.whiteWins};
-        QFont font = painter.font();
-        font.setPixelSize(height() <= 14 ? 9 : 10);
-        font.setWeight(QFont::DemiBold);
-        painter.setFont(font);
-        double x = area.left();
-        for (std::size_t k = 0; k < 3; ++k) {
-            const double share = static_cast<double>(m_counts[k]) / static_cast<double>(total);
-            const QRectF part(x, area.top(), share * area.width(), area.height());
-            painter.fillRect(part, colors[k]);
-            const QString text = QStringLiteral("%1%").arg(qRound(share * 100));
-            if (part.width() > painter.fontMetrics().horizontalAdvance(text) + 6) {
-                painter.setPen(texts[k]);
-                painter.drawText(part, Qt::AlignCenter, text);
-            }
-            x += part.width();
-        }
-        // A fine outline, so the dark (Black) part stays visible on a dark card.
-        painter.setClipping(false);
-        painter.setPen(QPen(c.border, 1));
-        painter.setBrush(Qt::NoBrush);
-        painter.drawRoundedRect(area.adjusted(0.5, 0.5, -0.5, -0.5), area.height() / 2.5,
-                                area.height() / 2.5);
-    }
-
-private:
-    const AppStyle& m_style;
-    std::array<std::uint64_t, 3> m_counts{};
-};
 
 namespace {
 
@@ -132,9 +81,10 @@ struct Answer {
 
 } // namespace
 
-ExplorerPanel::ExplorerPanel(DatabaseManager& databases, RepertoireStore& repertoires,
-                             const AppStyle& style, QWidget* parent)
-    : QWidget(parent), m_databases(databases), m_repertoires(repertoires), m_style(style) {
+ExplorerPanel::ExplorerPanel(DatabaseManager& databases, ProfileStore& profiles,
+                             RepertoireStore& repertoires, const AppStyle& style, QWidget* parent)
+    : QWidget(parent), m_databases(databases), m_profiles(profiles), m_repertoires(repertoires),
+      m_style(style) {
     setObjectName(QStringLiteral("explorerPanel"));
     auto* outer = new QVBoxLayout(this);
     outer->setContentsMargins(12, 10, 12, 10);
@@ -169,8 +119,9 @@ ExplorerPanel::ExplorerPanel(DatabaseManager& databases, RepertoireStore& repert
     m_source->setObjectName(QStringLiteral("explorerSource"));
     m_source->setFocusPolicy(Qt::NoFocus);
     connect(m_source, &QComboBox::activated, this, [this] {
-        QSettings().setValue(QString::fromLatin1(kSourceKey), m_source->currentText());
-        refresh();
+        QSettings().setValue(QString::fromLatin1(kSourceKey), m_source->currentData());
+        refreshParts();
+        filterChanged(); // "Filter •" may change with the parts
     });
     m_summary = label(QString(), "emptyHint");
     m_summary->setObjectName(QStringLiteral("explorerSummary"));
@@ -184,7 +135,8 @@ ExplorerPanel::ExplorerPanel(DatabaseManager& databases, RepertoireStore& repert
     viewsRow->setSpacing(2);
     auto* lists = new QStackedWidget;
     for (const auto& [index, text, name] : {std::tuple{0, tr("Moves"), "explorerShowMoves"},
-                                            std::tuple{1, tr("Top Games"), "explorerShowGames"}}) {
+                                            std::tuple{1, tr("Top Games"), "explorerShowGames"},
+                                            std::tuple{2, tr("Filter"), "explorerShowFilter"}}) {
         auto* button = new QPushButton(text);
         button->setObjectName(QString::fromLatin1(name));
         button->setProperty("role", "segment");
@@ -195,6 +147,9 @@ ExplorerPanel::ExplorerPanel(DatabaseManager& databases, RepertoireStore& repert
         connect(button, &QPushButton::clicked, lists,
                 [lists, index] { lists->setCurrentIndex(index); });
         viewsRow->addWidget(button);
+        if (index == 2) {
+            m_filterTab = button;
+        }
     }
     auto* top = new QHBoxLayout;
     top->setSpacing(8);
@@ -242,18 +197,17 @@ ExplorerPanel::ExplorerPanel(DatabaseManager& databases, RepertoireStore& repert
     m_games->header()->setSectionResizeMode(1, QHeaderView::Stretch);
     m_games->header()->setSectionResizeMode(2, QHeaderView::ResizeToContents);
     m_games->header()->setSectionResizeMode(3, QHeaderView::ResizeToContents);
-    connect(
-        m_games, &QTreeWidget::itemDoubleClicked, this, [this](QTreeWidgetItem* item) { // opens it
-            const auto id = item->data(0, kGameRole).toLongLong();
-            for (const InstalledDatabase& database : m_databases.databases()) {
-                if (QString::fromStdString(database.db->info().name) == m_source->currentText()) {
-                    if (const auto game = database.db->game(id)) {
+    connect(m_games, &QTreeWidget::itemDoubleClicked, this,
+            [this](QTreeWidgetItem* item) { // opens it
+                const auto id = item->data(0, kGameRole).toLongLong();
+                if (const auto db = sourceDatabase()) {
+                    if (const auto game = db->game(id)) {
                         emit openGameRequested(*game);
                     }
                 }
-            }
-        });
+            });
     lists->addWidget(m_games);
+    lists->addWidget(buildFilter());
     box->addWidget(lists, 1);
     m_pages->addWidget(page);
 
@@ -271,6 +225,10 @@ ExplorerPanel::ExplorerPanel(DatabaseManager& databases, RepertoireStore& repert
         refreshSources();
         refresh();
     });
+    connect(&m_profiles, &ProfileStore::changed, this, [this] {
+        refreshSources();
+        refresh();
+    });
     connect(&m_repertoires, &RepertoireStore::changed, this, &ExplorerPanel::refresh);
     refreshSources();
     refresh();
@@ -285,25 +243,98 @@ void ExplorerPanel::setPosition(const core::Game* game, core::NodeId current,
 }
 
 void ExplorerPanel::refreshSources() {
+    // Each source by a key that stays the same when names change:
+    //   "db:<folder>", "profile:<id>" (all its games) or "profile:<id>:<part>".
     const QString wanted = m_source->count() > 0
-                               ? m_source->currentText()
+                               ? m_source->currentData().toString()
                                : QSettings().value(QString::fromLatin1(kSourceKey)).toString();
+    const QSignalBlocker block(m_source);
     m_source->clear();
     for (const InstalledDatabase& database : m_databases.databases()) {
-        m_source->addItem(QString::fromStdString(database.db->info().name));
+        m_source->addItem(QString::fromStdString(database.db->info().name),
+                          QStringLiteral("db:") + database.folder);
     }
-    const int index = m_source->findText(wanted);
+    for (const Profile& profile : m_profiles.profiles()) {
+        if (!profile.all) {
+            continue; // no games yet
+        }
+        // Once; its accounts and over-the-board games are chosen in the Filter tab.
+        m_source->addItem(profile.name, QStringLiteral("profile:") + profile.id);
+    }
+    int index = m_source->findData(wanted);
+    if (index < 0 && wanted.startsWith(u"profile:")) { // "profile:id:part" from before
+        index = m_source->findData(wanted.section(u':', 0, 1));
+    }
     m_source->setCurrentIndex(index >= 0 ? index : 0);
+    refreshParts();
+}
+
+void ExplorerPanel::refreshParts() {
+    if (m_partBox == nullptr) {
+        return;
+    }
+    const QString key = m_source->currentData().toString();
+    const Profile* profile =
+        key.startsWith(u"profile:") ? m_profiles.profile(key.section(u':', 1, 1)) : nullptr;
+    m_partRow->setVisible(profile != nullptr);
+    m_partTitle->setVisible(profile != nullptr);
+    if (profile == nullptr) {
+        m_part.clear();
+        return;
+    }
+    // All, each account with games, the over-the-board games.
+    std::vector<std::pair<QString, QString>> choices{{QString(), tr("All games")}};
+    for (const Account& account : profile->accounts) {
+        if (profile->parts.contains(account.id)) {
+            choices.emplace_back(account.id,
+                                 QStringLiteral("%1 · %2").arg(account.site == AccountSite::Lichess
+                                                                   ? QStringLiteral("Lichess")
+                                                                   : QStringLiteral("chess.com"),
+                                                               account.username));
+        }
+    }
+    if (profile->parts.contains(QStringLiteral("otb"))) {
+        choices.emplace_back(QStringLiteral("otb"), tr("Over the board"));
+    }
+    if (std::none_of(choices.begin(), choices.end(),
+                     [this](const auto& choice) { return choice.first == m_part; })) {
+        m_part.clear(); // gone (another profile, an account removed)
+    }
+    const QSignalBlocker block(m_partBox);
+    m_partBox->clear();
+    for (const auto& [part, text] : choices) {
+        m_partBox->addItem(text, part);
+    }
+    m_partBox->setCurrentIndex(std::max(0, m_partBox->findData(m_part)));
+}
+
+std::shared_ptr<const gamedb::Database> ExplorerPanel::sourceDatabase() const {
+    const QString key = m_source->currentData().toString();
+    if (key.startsWith(u"db:")) {
+        for (const InstalledDatabase& database : m_databases.databases()) {
+            if (QStringLiteral("db:") + database.folder == key) {
+                return database.db;
+            }
+        }
+        return nullptr;
+    }
+    if (!key.startsWith(u"profile:")) {
+        return nullptr;
+    }
+    const Profile* profile = m_profiles.profile(key.section(u':', 1, 1));
+    if (profile == nullptr) {
+        return nullptr;
+    }
+    if (m_part.isEmpty()) {
+        return profile->all;
+    }
+    const auto found = profile->parts.find(m_part); // chosen under "Games from"
+    return found != profile->parts.end() ? found->second : nullptr;
 }
 
 void ExplorerPanel::refresh() {
     const int request = ++m_request;
-    std::shared_ptr<const gamedb::Database> db;
-    for (const InstalledDatabase& database : m_databases.databases()) {
-        if (QString::fromStdString(database.db->info().name) == m_source->currentText()) {
-            db = database.db;
-        }
-    }
+    const std::shared_ptr<const gamedb::Database> db = sourceDatabase();
     if (!db) {
         m_pages->setCurrentIndex(0);
         return;
@@ -403,9 +434,244 @@ void ExplorerPanel::refresh() {
         }
         emit updated();
     });
-    watcher->setFuture(QtConcurrent::run(
-        [db, line = std::move(line)] { return Answer{db->explore(line), db->gamesAt(line, 20)}; }));
+    // The filter; for a profile with a colour chosen, the profile's names in that part.
+    gamedb::ExploreFilter filter = m_filter;
+    filter.players.clear();
+    const QString key = m_source->currentData().toString();
+    const bool profile = key.startsWith(u"profile:");
+    if (m_sideRow != nullptr) {
+        m_sideRow->setVisible(profile);
+        m_sideTitle->setVisible(profile);
+    }
+    if (profile && filter.side != gamedb::ExploreFilter::Side::Any) {
+        if (const Profile* p = m_profiles.profile(key.section(u':', 1, 1))) {
+            for (const QString& name : ProfileStore::namesOf(*p, m_part)) {
+                filter.players.push_back(name.toStdString());
+            }
+        }
+    } else {
+        filter.side = gamedb::ExploreFilter::Side::Any;
+    }
+    watcher->setFuture(QtConcurrent::run([db, line = std::move(line), filter] {
+        return Answer{db->explore(line, filter), db->gamesAt(line, 20, filter)};
+    }));
 } // NOLINT(clang-analyzer-cplusplus.NewDeleteLeaks)
+
+QWidget* ExplorerPanel::buildFilter() {
+    // Rating, years, time control and (for a profile) the colour it played; remembered.
+    const QSettings settings;
+    m_filter.minRating = settings.value(QStringLiteral("explorer/minRating"), 0).toInt();
+    m_filter.maxRating = settings.value(QStringLiteral("explorer/maxRating"), 0).toInt();
+    m_filter.fromYear = settings.value(QStringLiteral("explorer/fromYear"), 0).toInt();
+    m_filter.toYear = settings.value(QStringLiteral("explorer/toYear"), 0).toInt();
+    m_filter.speeds =
+        static_cast<std::uint8_t>(settings.value(QStringLiteral("explorer/speeds"), 0).toUInt());
+    m_filter.white = settings.value(QStringLiteral("explorer/white")).toString().toStdString();
+    m_filter.black = settings.value(QStringLiteral("explorer/black")).toString().toStdString();
+
+    auto* page = new QWidget;
+    page->setObjectName(QStringLiteral("explorerFilter"));
+    auto* grid = new QGridLayout(page);
+    grid->setContentsMargins(2, 8, 2, 2);
+    grid->setHorizontalSpacing(10);
+    grid->setVerticalSpacing(10);
+    grid->setColumnStretch(2, 1);
+    int row = 0;
+    const auto caption = [&](const QString& text) {
+        auto* title = new QLabel(text);
+        title->setProperty("role", "infoLabel");
+        grid->addWidget(title, row, 0, Qt::AlignVCenter);
+    };
+    // A from–to pair of numbers; empty means "any".
+    const auto range = [&](const char* name, int low, int high, int* from, int* to) {
+        auto* box = new QHBoxLayout;
+        box->setSpacing(6);
+        std::array<QLineEdit*, 2> fields{};
+        for (std::size_t k = 0; k < 2; ++k) {
+            int* value = k == 0 ? from : to;
+            auto* field = new QLineEdit(*value > 0 ? QString::number(*value) : QString());
+            field->setObjectName(QStringLiteral("%1%2").arg(
+                QLatin1String(name), k == 0 ? QStringLiteral("From") : QStringLiteral("To")));
+            field->setPlaceholderText(tr("any"));
+            field->setValidator(new QIntValidator(0, high, field));
+            field->setFixedWidth(76);
+            field->setAlignment(Qt::AlignCenter);
+            connect(field, &QLineEdit::textChanged, this, [this, value, low](const QString& text) {
+                const int number = text.toInt();
+                *value = number >= low ? number : 0; // until it is a whole year or rating
+                filterChanged();
+            });
+            fields[k] = field;
+        }
+        box->addWidget(fields[0]);
+        box->addWidget(new QLabel(QStringLiteral("–")));
+        box->addWidget(fields[1]);
+        box->addStretch();
+        grid->addLayout(box, row, 1, 1, 2);
+        ++row;
+        return fields;
+    };
+    // Players by name (part of it, any case), for each colour.
+    const auto player = [&](const QString& title, const char* name, std::string* text) {
+        caption(title);
+        auto* field = new QLineEdit(QString::fromStdString(*text));
+        field->setObjectName(QString::fromLatin1(name));
+        field->setPlaceholderText(tr("Any player"));
+        field->setClearButtonEnabled(true);
+        field->setMaximumWidth(240);
+        auto* delay = new QTimer(field);
+        delay->setSingleShot(true);
+        delay->setInterval(400); // after typing stops
+        connect(field, &QLineEdit::textChanged, delay, qOverload<>(&QTimer::start));
+        connect(delay, &QTimer::timeout, this, [this, field, text] {
+            *text = field->text().trimmed().toStdString();
+            filterChanged();
+        });
+        grid->addWidget(field, row++, 1, 1, 2);
+        return field;
+    };
+    QLineEdit* whiteName = player(tr("White"), "explorerWhite", &m_filter.white);
+    QLineEdit* blackName = player(tr("Black"), "explorerBlack", &m_filter.black);
+    caption(tr("Rating"));
+    const auto ratings =
+        range("explorerRating", 600, 3500, &m_filter.minRating, &m_filter.maxRating);
+    caption(tr("Years"));
+    const auto years = range("explorerYear", 1800, 2100, &m_filter.fromYear, &m_filter.toYear);
+
+    // Time controls: none chosen means all of them.
+    caption(tr("Time control"));
+    auto* speeds = new QHBoxLayout;
+    speeds->setSpacing(4);
+    std::vector<QPushButton*> speedButtons;
+    for (const auto& [speed, text] : {std::pair{gamedb::Speed::Bullet, tr("Bullet")},
+                                      std::pair{gamedb::Speed::Blitz, tr("Blitz")},
+                                      std::pair{gamedb::Speed::Rapid, tr("Rapid")},
+                                      std::pair{gamedb::Speed::Classical, tr("Classical")},
+                                      std::pair{gamedb::Speed::Correspondence, tr("Corr.")}}) {
+        auto* chip = new QPushButton(text);
+        chip->setProperty("role", "chip");
+        chip->setCheckable(true);
+        chip->setFocusPolicy(Qt::NoFocus);
+        const auto bit = static_cast<std::uint8_t>(1U << static_cast<unsigned>(speed));
+        chip->setChecked((m_filter.speeds & bit) != 0);
+        connect(chip, &QPushButton::toggled, this, [this, bit](bool on) {
+            const unsigned speeds = m_filter.speeds;
+            m_filter.speeds =
+                static_cast<std::uint8_t>(on ? (speeds | bit) : (speeds & ~unsigned{bit}));
+            filterChanged();
+        });
+        speeds->addWidget(chip);
+        speedButtons.push_back(chip);
+    }
+    speeds->addStretch();
+    grid->addLayout(speeds, row++, 1, 1, 2);
+
+    // For a profile: the games of one account, or over the board.
+    m_partRow = new QWidget;
+    auto* partBox = new QHBoxLayout(m_partRow);
+    partBox->setContentsMargins(0, 0, 0, 0);
+    partBox->setSpacing(0);
+    m_partTitle = new QLabel(tr("Games from"));
+    m_partTitle->setProperty("role", "infoLabel");
+    grid->addWidget(m_partTitle, row, 0);
+    m_partBox = new QComboBox;
+    m_partBox->setObjectName(QStringLiteral("explorerPart"));
+    m_partBox->setFocusPolicy(Qt::NoFocus);
+    m_partBox->setSizeAdjustPolicy(QComboBox::AdjustToContents);
+    connect(m_partBox, &QComboBox::activated, this, [this] {
+        m_part = m_partBox->currentData().toString();
+        filterChanged();
+    });
+    partBox->addWidget(m_partBox);
+    partBox->addStretch();
+    grid->addWidget(m_partRow, row++, 1, 1, 2);
+
+    // For a profile: its games with one colour.
+    m_sideRow = new QWidget;
+    auto* sideBox = new QHBoxLayout(m_sideRow);
+    sideBox->setContentsMargins(0, 0, 0, 0);
+    sideBox->setSpacing(0);
+    m_sideTitle = new QLabel(tr("Played as"));
+    m_sideTitle->setProperty("role", "infoLabel");
+    grid->addWidget(m_sideTitle, row, 0);
+    auto* sides = new QWidget;
+    sides->setProperty("role", "segmented");
+    auto* sidesRow = new QHBoxLayout(sides);
+    sidesRow->setContentsMargins(2, 2, 2, 2);
+    sidesRow->setSpacing(2);
+    std::vector<QPushButton*> sideButtons;
+    for (const auto& [side, text] : {std::pair{gamedb::ExploreFilter::Side::Any, tr("Both")},
+                                     std::pair{gamedb::ExploreFilter::Side::White, tr("White")},
+                                     std::pair{gamedb::ExploreFilter::Side::Black, tr("Black")}}) {
+        auto* segment = new QPushButton(text);
+        segment->setProperty("role", "segment");
+        segment->setCheckable(true);
+        segment->setAutoExclusive(true);
+        segment->setChecked(side == gamedb::ExploreFilter::Side::Any);
+        segment->setFocusPolicy(Qt::NoFocus);
+        segment->setObjectName(QStringLiteral("explorerSide%1").arg(static_cast<int>(side)));
+        connect(segment, &QPushButton::clicked, this, [this, side] {
+            m_filter.side = side;
+            filterChanged();
+        });
+        sidesRow->addWidget(segment);
+        sideButtons.push_back(segment);
+    }
+    sideBox->addWidget(sides);
+    sideBox->addStretch();
+    grid->addWidget(m_sideRow, row++, 1, 1, 2);
+
+    auto* reset = new QPushButton(tr("Reset"));
+    reset->setObjectName(QStringLiteral("explorerFilterReset"));
+    reset->setProperty("role", "secondary");
+    m_resetFilter = [this, ratings, years, speedButtons, sideButtons, whiteName, blackName] {
+        m_part.clear();
+        refreshParts();
+        whiteName->clear();
+        blackName->clear();
+        m_filter.white.clear();
+        m_filter.black.clear();
+        for (QLineEdit* field : {ratings[0], ratings[1], years[0], years[1]}) {
+            field->clear();
+        }
+        for (QPushButton* chip : speedButtons) {
+            chip->setChecked(false);
+        }
+        sideButtons.front()->click();
+    };
+    connect(reset, &QPushButton::clicked, this, [this] { m_resetFilter(); });
+    auto* resetRow = new QHBoxLayout;
+    resetRow->addWidget(reset);
+    resetRow->addStretch();
+    grid->addLayout(resetRow, row++, 0, 1, 3);
+    grid->setRowStretch(row, 1);
+    filterChanged();
+    // Rows keep their height; a short tab scrolls instead of squeezing them.
+    auto* scroll = new QScrollArea;
+    scroll->setObjectName(QStringLiteral("explorerFilterScroll"));
+    scroll->setWidget(page);
+    scroll->setWidgetResizable(true);
+    scroll->setFrameShape(QFrame::NoFrame);
+    scroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    return scroll;
+}
+
+void ExplorerPanel::filterChanged() {
+    QSettings settings;
+    settings.setValue(QStringLiteral("explorer/minRating"), m_filter.minRating);
+    settings.setValue(QStringLiteral("explorer/maxRating"), m_filter.maxRating);
+    settings.setValue(QStringLiteral("explorer/fromYear"), m_filter.fromYear);
+    settings.setValue(QStringLiteral("explorer/toYear"), m_filter.toYear);
+    settings.setValue(QStringLiteral("explorer/speeds"), m_filter.speeds);
+    settings.setValue(QStringLiteral("explorer/white"), QString::fromStdString(m_filter.white));
+    settings.setValue(QStringLiteral("explorer/black"), QString::fromStdString(m_filter.black));
+    const bool active =
+        m_filter.active() || m_filter.side != gamedb::ExploreFilter::Side::Any || !m_part.isEmpty();
+    if (m_filterTab != nullptr) {
+        m_filterTab->setText(active ? tr("Filter •") : tr("Filter"));
+    }
+    refresh();
+}
 
 QStringList ExplorerPanel::moveTexts() const {
     QStringList texts;

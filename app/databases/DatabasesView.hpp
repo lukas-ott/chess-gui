@@ -21,7 +21,7 @@ namespace kiebitz::app {
 
 class AppStyle;
 class DatabaseManager;
-class DatabaseGamesModel;
+class GamesModel;
 class ElidedText;
 class EmptyState;
 class PageHeader;
@@ -58,7 +58,7 @@ private:
     QLabel* m_subtitle = nullptr;
     QLineEdit* m_search = nullptr;
     QTableView* m_games = nullptr;
-    DatabaseGamesModel* m_model = nullptr;
+    GamesModel* m_model = nullptr;
     QString m_shown; ///< the folder of the database shown
     std::shared_ptr<const gamedb::Database> m_db;
     int m_searchRequest = 0;
