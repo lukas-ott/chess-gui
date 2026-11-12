@@ -88,7 +88,7 @@ QString findInstalledStockfish() {
 
 QString downloadFolder() {
     return QDir(QStandardPaths::writableLocation(QStandardPaths::AppDataLocation))
-        .filePath(QStringLiteral("engines"));
+        .filePath(QStringLiteral("Engines"));
 }
 
 } // namespace engines

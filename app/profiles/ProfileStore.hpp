@@ -78,6 +78,8 @@ class ProfileStore : public QObject {
 public:
     /// `root`: where profiles live (empty: the default).
     explicit ProfileStore(const QString& root = {}, QObject* parent = nullptr);
+    /// Where the profiles are kept.
+    [[nodiscard]] const QString& root() const noexcept { return m_root; }
     ~ProfileStore() override;
     ProfileStore(const ProfileStore&) = delete;
     ProfileStore& operator=(const ProfileStore&) = delete;

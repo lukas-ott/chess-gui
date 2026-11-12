@@ -25,6 +25,7 @@ int main(int argc, char** argv) {
     QSettings().clear(); // each run starts fresh
     const QString library = QDir(root).filePath(QStringLiteral("library"));
     QSettings().setValue(QStringLiteral("library/folder"), library);
+    QSettings().setValue(QStringLiteral("sound/on"), false); // tests make no noise
     const QString data = QDir(root).filePath(QStringLiteral("data"));
     qputenv("KIEBITZ_SETTINGS_DIR", data.toUtf8());
     ::testing::InitGoogleTest(&argc, argv);

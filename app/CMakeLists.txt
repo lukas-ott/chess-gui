@@ -79,6 +79,16 @@ qt_add_library(kiebitz_ui STATIC
     repertoire/GapSource.hpp
     repertoire/RepertoirePanel.cpp
     repertoire/RepertoirePanel.hpp
+    settings/Settings.cpp
+    settings/Settings.hpp
+    settings/SettingsView.cpp
+    settings/SettingsView.hpp
+    settings/Shortcuts.cpp
+    settings/Shortcuts.hpp
+    settings/ShortcutsPage.cpp
+    settings/ShortcutsPage.hpp
+    sound/Sounds.cpp
+    sound/Sounds.hpp
     style/AppStyle.cpp
     style/AppStyle.hpp
     style/Icons.cpp
@@ -102,10 +112,16 @@ qt_add_library(kiebitz_ui STATIC
     widgets/SortCycle.hpp
     widgets/SortableItem.hpp
     widgets/Stepper.cpp
+    widgets/Toggle.cpp
+    widgets/Toggle.hpp
     widgets/Stepper.hpp)
 target_include_directories(kiebitz_ui PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")
 target_link_libraries(kiebitz_ui PUBLIC Qt6::Widgets Qt6::Svg Qt6::Concurrent Qt6::Network
     kiebitz::pgn kiebitz::engine kiebitz::gamedb kiebitz::library kiebitz::repertoire)
+if(APPLE)
+    # The board's sounds play as macOS sound effects (no audio stream of our own).
+    target_link_libraries(kiebitz_ui PUBLIC "-framework AudioToolbox" "-framework CoreFoundation")
+endif()
 kiebitz_set_warnings(kiebitz_ui)
 
 # Piece SVGs are compiled into the binary (":/pieces/<set>/wK.svg"), so the app has no loose
@@ -121,6 +137,14 @@ qt_add_resources(kiebitz_ui "openings"
     PREFIX "/openings"
     BASE "${CMAKE_CURRENT_SOURCE_DIR}/resources/openings"
     FILES "${CMAKE_CURRENT_SOURCE_DIR}/resources/openings/openings.tsv")
+
+# The board's sounds: Lichess's sound sets by Enigmahack (AGPLv3+, see resources/sounds/LICENSE.md),
+# as WAV files.
+file(GLOB sound_files CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/resources/sounds/*/*.wav")
+qt_add_resources(kiebitz_ui "sounds"
+    PREFIX "/sounds"
+    BASE "${CMAKE_CURRENT_SOURCE_DIR}/resources/sounds"
+    FILES ${sound_files})
 
 # The app icon (made from resources/icon/Kiebitz.svg by scripts/make_icon.sh).
 set(kiebitz_icon "${CMAKE_CURRENT_SOURCE_DIR}/resources/icon/Kiebitz.icns")

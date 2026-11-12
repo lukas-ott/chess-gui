@@ -10,7 +10,9 @@
 #include "profiles/ProfileStore.hpp"
 #include "profiles/ProfilesView.hpp"
 #include "repertoire/RepertoireStore.hpp"
+#include "sound/Sounds.hpp"
 #include "style/AppStyle.hpp"
+#include "style/Icons.hpp"
 #include "widgets/Message.hpp"
 
 #include <QApplication>
@@ -22,6 +24,7 @@
 #include <QLineEdit>
 #include <QNetworkAccessManager>
 #include <QNetworkReply>
+#include <QPainter>
 #include <QPushButton>
 #include <QSettings>
 #include <QSignalSpy>
@@ -1008,4 +1011,61 @@ TEST(MessageDialog, AsksWithButtonsNamedForWhatTheyDo) {
         QTest::qWait(100);
         question.grab().save(QDir(dir).filePath(QStringLiteral("message.png")));
     }
+}
+
+TEST(Sounds, EverySetHasShortWavFilesAtTheVolumeChosen) {
+    using kiebitz::app::Sounds;
+    // The samples of a WAV the app wrote: after its header (format chunk of 16 bytes).
+    const auto loudest = [](const QByteArray& wav) {
+        int peak = 0;
+        for (qsizetype i = 44; i + 1 < wav.size(); i += 2) {
+            const auto sample = static_cast<std::int16_t>(
+                static_cast<std::uint16_t>(static_cast<std::uint8_t>(wav[i])) |
+                static_cast<std::uint16_t>(static_cast<std::uint8_t>(wav[i + 1]) << 8U));
+            peak = std::max(peak, std::abs(static_cast<int>(sample)));
+        }
+        return peak;
+    };
+    ASSERT_EQ(Sounds::sets().front(), QStringLiteral("standard")); // the default
+    for (const QString& set : Sounds::sets()) {
+        for (const auto kind : {Sounds::Kind::Move, Sounds::Kind::Capture, Sounds::Kind::Check}) {
+            const QByteArray wav = Sounds::wav(set, kind, 70);
+            ASSERT_GT(wav.size(), 44) << set.toStdString();
+            EXPECT_TRUE(wav.startsWith("RIFF"));
+            EXPECT_EQ(wav.mid(8, 8), QByteArray("WAVEfmt "));
+            EXPECT_EQ(wav.mid(36, 4), QByteArray("data"));
+            EXPECT_LT(wav.size() - 44, 44100 * 2); // under a second (16-bit mono)
+            // Softer at a lower volume, silent at none.
+            EXPECT_GT(loudest(Sounds::wav(set, kind, 100)), loudest(Sounds::wav(set, kind, 40)));
+            EXPECT_EQ(loudest(Sounds::wav(set, kind, 0)), 0);
+        }
+    }
+    EXPECT_TRUE(Sounds::wav(QStringLiteral("none"), Sounds::Kind::Move, 70).isEmpty());
+    if (const QString dir = qEnvironmentVariable("KIEBITZ_SNAPSHOT_DIR"); !dir.isEmpty()) {
+        QFile file(QDir(dir).filePath(QStringLiteral("capture.wav"))); // to check with afinfo
+        if (file.open(QIODevice::WriteOnly)) {
+            file.write(Sounds::wav(QStringLiteral("sfx"), Sounds::Kind::Capture, 70));
+        }
+    }
+}
+
+TEST(Icons, SidebarIconsSnapshot) {
+    const kiebitz::app::AppStyle style(*qApp);
+    const auto& c = style.colors();
+    if (const QString dir = qEnvironmentVariable("KIEBITZ_SNAPSHOT_DIR"); !dir.isEmpty()) {
+        // The sidebar's icons side by side, large, to see them as a set.
+        QPixmap sheet(4 * 96, 96);
+        sheet.fill(c.window);
+        QPainter painter(&sheet);
+        int x = 8;
+        for (const auto kind : {kiebitz::app::IconKind::Person, kiebitz::app::IconKind::Engine,
+                                kiebitz::app::IconKind::Gear, kiebitz::app::IconKind::Database}) {
+            painter.drawPixmap(x, 8,
+                               kiebitz::app::makeIcon(kind, c.text, c.dimmed, 80).pixmap(80, 80));
+            x += 96;
+        }
+        painter.end();
+        sheet.save(QDir(dir).filePath(QStringLiteral("icons.png")));
+    }
+    SUCCEED();
 }

@@ -25,4 +25,13 @@ int rewriteEnginePaths(const QString& oldFolder, const QString& newFolder, QSett
 /// marker in the settings) and costs next to nothing after that.
 void fromChessGui();
 
+/// Renames the folder `<parent>/<from>` to `<parent>/<to>` when only the case differs (the
+/// disk ignores case, so a plain rename does nothing): through a temporary name. Returns
+/// whether it renamed it; false when there is no folder spelt exactly `from`.
+bool renameFolderCase(const QString& parent, const QString& from, const QString& to);
+
+/// The downloaded engines' folder was called "engines"; now "Engines", like the other folders.
+/// Renames it and points the engine list at it.
+void capitalizeEngineFolder();
+
 } // namespace kiebitz::app::migration

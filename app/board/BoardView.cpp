@@ -100,7 +100,7 @@ void BoardView::setPosition(const core::Position& position, std::optional<Move> 
 
     m_animation->stop();
     m_slides.clear();
-    if (animate && lastMove && !m_skipNextSlide) {
+    if (animate && m_options.slideMs > 0 && lastMove && !m_skipNextSlide) {
         m_slides.push_back({lastMove->from, lastMove->to});
         // Castling: the rook moves too.
         const Piece moved = m_position.pieceAt(lastMove->to);
@@ -147,7 +147,13 @@ void BoardView::setFlipped(bool flipped) {
 }
 
 void BoardView::setShowCoordinates(bool show) {
-    m_showCoordinates = show;
+    m_options.coordinates = show ? Options::Coordinates::Edge : Options::Coordinates::None;
+    update();
+}
+
+void BoardView::setOptions(const Options& options) {
+    m_options = options;
+    m_animation->setDuration(std::max(1, m_options.slideMs));
     update();
 }
 
@@ -210,6 +216,10 @@ bool BoardView::tryMove(Square from, Square to) {
         return false;
     }
     if (candidates.front().promotion != PieceType::None) {
+        if (m_options.autoQueen) {
+            emit moveMade(Move{from, to, PieceType::Queen});
+            return true;
+        }
         m_promotion = Promotion{from, to}; // ask which piece first
         m_selected.reset();
         update();
@@ -314,7 +324,9 @@ void BoardView::mousePressEvent(QMouseEvent* event) {
         select(std::nullopt);
         return;
     }
-    if (m_selected && *m_selected != *square && tryMove(*m_selected, *square)) {
+    // Click-click: the picked piece goes to the square clicked (not when only dragging is on).
+    if (m_options.moveMethod != Options::MoveMethod::Drag && m_selected && *m_selected != *square &&
+        tryMove(*m_selected, *square)) {
         return;
     }
     if (canPick(*square)) {
@@ -345,6 +357,7 @@ void BoardView::mouseMoveEvent(QMouseEvent* event) {
         return;
     }
     if (m_pressSquare && (event->buttons() & Qt::LeftButton) != 0 && !m_dragging &&
+        m_options.moveMethod != Options::MoveMethod::Click &&
         (point - m_pressPoint).manhattanLength() >= QApplication::startDragDistance()) {
         m_dragging = true;
     }
@@ -396,8 +409,8 @@ void BoardView::mouseReleaseEvent(QMouseEvent* event) {
         if (!square || *square != from) {
             select(std::nullopt); // dropped somewhere useless: put the piece back
         }
-    } else if (m_wasSelected) {
-        select(std::nullopt);
+    } else if (m_wasSelected || m_options.moveMethod == Options::MoveMethod::Drag) {
+        select(std::nullopt); // only dragging: a click alone picks nothing up
     }
     update();
     updateCursor(point);
@@ -451,7 +464,7 @@ void BoardView::paintSquares(QPainter& painter) const {
 }
 
 void BoardView::paintHighlights(QPainter& painter) const {
-    if (m_lastMove) {
+    if (m_lastMove && m_options.lastMove) {
         painter.fillRect(m_geometry.squareRect(m_lastMove->from), m_theme.highlight);
         painter.fillRect(m_geometry.squareRect(m_lastMove->to), m_theme.highlight);
     }
@@ -479,7 +492,7 @@ void BoardView::paintHighlights(QPainter& painter) const {
 }
 
 void BoardView::paintCoordinates(QPainter& painter) const {
-    if (!m_showCoordinates) {
+    if (m_options.coordinates == Options::Coordinates::None) {
         return;
     }
     const int size = m_geometry.squareSize();
@@ -488,6 +501,18 @@ void BoardView::paintCoordinates(QPainter& painter) const {
     font.setBold(true);
     painter.setFont(font);
     const int pad = std::max(2, size / 20);
+    if (m_options.coordinates == Options::Coordinates::All) {
+        // Every square's name in its lower left corner ("e4"), small and in the other colour.
+        for (int index = 0; index < 64; ++index) {
+            const Square square = Square::fromIndex(index);
+            const bool light = (square.file() + square.rank()) % 2 == 1;
+            painter.setPen(light ? m_theme.dark : m_theme.light);
+            painter.drawText(m_geometry.squareRect(square).adjusted(pad, pad, -pad, -pad),
+                             static_cast<int>(Qt::AlignLeft | Qt::AlignBottom),
+                             QString::fromStdString(square.name()));
+        }
+        return;
+    }
 
     for (int i = 0; i < 8; ++i) {
         // Files along the bottom row, ranks along the left column (as seen on screen).
@@ -546,7 +571,9 @@ void BoardView::paintMoveHints(QPainter& painter) const {
     const auto hover = m_dragging ? m_geometry.squareAt(m_mousePoint) : std::nullopt;
     for (const Move& move : movesFrom(*from)) {
         const QRectF rect(m_geometry.squareRect(move.to));
-        if (m_position.pieceAt(move.to).isNone()) {
+        if (!m_options.legalDots) {
+            // No dots or rings; the frame under a dragged piece still shows (below).
+        } else if (m_position.pieceAt(move.to).isNone()) {
             // A quiet move: a small dot in the middle of the square.
             painter.setPen(Qt::NoPen);
             painter.setBrush(kMoveHint);

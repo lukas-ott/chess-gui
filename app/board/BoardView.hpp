@@ -61,8 +61,24 @@ public:
 
     void setFlipped(bool flipped);
     [[nodiscard]] bool isFlipped() const noexcept { return m_flipped; }
+    /// How the board looks and takes moves (the Settings page's Board section).
+    struct Options {
+        enum class Coordinates : std::uint8_t { None, Edge, All };
+        enum class MoveMethod : std::uint8_t { Both, Drag, Click };
+        Coordinates coordinates = Coordinates::Edge; ///< none, along the edge, on every square
+        int slideMs = 160;                           ///< how long a move slides; 0: it doesn't
+        bool legalDots = true; ///< dots (and rings) on the squares a picked piece can go to
+        bool lastMove = true;  ///< the last move's squares highlighted
+        MoveMethod moveMethod = MoveMethod::Both;
+        bool autoQueen = false; ///< promote to a queen without asking
+    };
+    void setOptions(const Options& options);
+    [[nodiscard]] const Options& options() const noexcept { return m_options; }
+    /// Coordinates along the edge, or none (a shortcut for the Options' coordinates).
     void setShowCoordinates(bool show);
-    [[nodiscard]] bool showCoordinates() const noexcept { return m_showCoordinates; }
+    [[nodiscard]] bool showCoordinates() const noexcept {
+        return m_options.coordinates != Options::Coordinates::None;
+    }
     void setTheme(const BoardTheme& theme);
     [[nodiscard]] const BoardTheme& theme() const noexcept { return m_theme; }
     void setPieceSet(const QString& name);
@@ -137,7 +153,7 @@ private:
     PieceSet m_pieces;
     BoardGeometry m_geometry;
     bool m_flipped = false;
-    bool m_showCoordinates = true;
+    Options m_options;
     bool m_interactive = true;
 
     // Interaction state

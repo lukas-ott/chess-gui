@@ -8,6 +8,7 @@
 #include "kiebitz/repertoire/gaps.hpp"
 #include "kiebitz/repertoire/summary.hpp"
 #include "repertoire/RepertoireStore.hpp"
+#include "settings/Settings.hpp"
 #include "style/AppStyle.hpp"
 #include "style/Icons.hpp"
 #include "style/Layout.hpp"
@@ -1428,14 +1429,18 @@ void LibraryView::checkGaps() {
                 m_gapsStatus->setText(status);
                 emit gapsChecked();
             });
-    watcher->setFuture(QtConcurrent::run(
-        [games = std::move(games), side, explore = source.explore, cancel = m_gapsCancel] {
-            repertoire::Tree tree(side);
-            for (std::size_t k = 0; k < games.size(); ++k) {
-                tree.add(games[k], 0, static_cast<int>(k));
-            }
-            return repertoire::findGaps(tree, explore, {}, [cancel] { return cancel->load(); });
-        }));
+    // The limits from Settings: how rare a move may be, and how few games, to be no gap.
+    repertoire::GapOptions options;
+    options.minShare = Settings::instance().number(Settings::kGapShare) / 100.0;
+    options.minGames = static_cast<std::uint64_t>(Settings::instance().number(Settings::kGapGames));
+    watcher->setFuture(QtConcurrent::run([games = std::move(games), side, options,
+                                          explore = source.explore, cancel = m_gapsCancel] {
+        repertoire::Tree tree(side);
+        for (std::size_t k = 0; k < games.size(); ++k) {
+            tree.add(games[k], 0, static_cast<int>(k));
+        }
+        return repertoire::findGaps(tree, explore, options, [cancel] { return cancel->load(); });
+    }));
 } // NOLINT(clang-analyzer-cplusplus.NewDeleteLeaks)
 
 QStringList LibraryView::repertoireGaps() const {

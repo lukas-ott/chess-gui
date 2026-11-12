@@ -4,6 +4,7 @@
 
 #include <QDir>
 #include <QFile>
+#include <QFileInfo>
 #include <QSettings>
 #include <QTemporaryDir>
 #include <gtest/gtest.h>
@@ -65,6 +66,21 @@ TEST(Migration, MovesDownloadedEnginesAndTheirPaths) {
     EXPECT_EQ(settings.value(QStringLiteral("engines/list/2/path")).toString(),
               QStringLiteral("/opt/homebrew/bin/stockfish"));
     EXPECT_EQ(migration::rewriteEnginePaths(oldEngines, newEngines, settings), 0);
+}
+
+TEST(Migration, RenamesAFolderWhenOnlyItsCaseDiffers) {
+    const QTemporaryDir dir;
+    ASSERT_TRUE(dir.isValid());
+    ASSERT_TRUE(QDir(dir.path()).mkpath(QStringLiteral("engines/sf_19")));
+
+    EXPECT_TRUE(migration::renameFolderCase(dir.path(), QStringLiteral("engines"),
+                                            QStringLiteral("Engines")));
+    const QStringList names = QDir(dir.path()).entryList(QDir::Dirs | QDir::NoDotAndDotDot);
+    EXPECT_EQ(names, QStringList{QStringLiteral("Engines")});
+    EXPECT_TRUE(QFileInfo::exists(dir.filePath(QStringLiteral("Engines/sf_19"))));
+    // Already renamed, or never there: nothing to do.
+    EXPECT_FALSE(migration::renameFolderCase(dir.path(), QStringLiteral("engines"),
+                                             QStringLiteral("Engines")));
 }
 
 } // namespace

@@ -2,6 +2,7 @@
 
 #include "RepertoireStore.hpp"
 #include "kiebitz/repertoire/drill.hpp"
+#include "settings/Settings.hpp"
 #include "style/AppStyle.hpp"
 #include "widgets/Stepper.hpp"
 
@@ -21,8 +22,6 @@
 
 namespace kiebitz::app {
 namespace {
-
-constexpr auto kDepthKey = "practice/depth";
 
 QLabel* label(const QString& text, const char* role) {
     auto* result = new QLabel(text);
@@ -192,10 +191,15 @@ RepertoirePanel::RepertoirePanel(RepertoireStore& store, const AppStyle& style, 
     m_depth = new Stepper;
     m_depth->setObjectName(QStringLiteral("practiceDepth"));
     m_depth->setRange(1, 99);
-    m_depth->setValue(QSettings().value(QString::fromLatin1(kDepthKey), 15).toInt());
-    connect(m_depth, &Stepper::valueChanged, this, [this](int value) {
-        QSettings().setValue(QString::fromLatin1(kDepthKey), value);
-        refreshPractice();
+    m_depth->setValue(Settings::instance().number(Settings::kPracticeDepth));
+    connect(m_depth, &Stepper::valueChanged, this,
+            [](int value) { Settings::instance().setValue(Settings::kPracticeDepth, value); });
+    // Set here or on the Settings page: both show it.
+    connect(&Settings::instance(), &Settings::changed, this, [this](const QString& key) {
+        if (key == QLatin1String(Settings::kPracticeDepth)) {
+            m_depth->setValue(Settings::instance().number(Settings::kPracticeDepth));
+            refreshPractice();
+        }
     });
     depthRow->addWidget(m_depth);
     depthRow->addStretch();

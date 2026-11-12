@@ -9,6 +9,7 @@
 #include "document/PgnIo.hpp"
 #include "engine/EnginePanel.hpp"
 #include "engine/EngineRegistry.hpp"
+#include "engine/EngineSettings.hpp"
 #include "engine/EnginesView.hpp"
 #include "explorer/ExplorerPanel.hpp"
 #include "kiebitz/core/annotations.hpp"
@@ -24,6 +25,11 @@
 #include "repertoire/PracticeStats.hpp"
 #include "repertoire/RepertoirePanel.hpp"
 #include "repertoire/RepertoireStore.hpp"
+#include "settings/Settings.hpp"
+#include "settings/SettingsView.hpp"
+#include "settings/Shortcuts.hpp"
+#include "settings/ShortcutsPage.hpp"
+#include "sound/Sounds.hpp"
 #include "style/AppStyle.hpp"
 #include "style/Icons.hpp"
 #include "style/Layout.hpp"
@@ -69,6 +75,7 @@
 #include <QToolButton>
 #include <QUrl>
 #include <QVBoxLayout>
+#include <QWheelEvent>
 
 #include <algorithm>
 #include <optional>
@@ -104,14 +111,10 @@ QString explanation(const Game& game, NodeId node) {
 }
 
 // QSettings keys (compile-time constants: nothing to construct at startup)
-constexpr auto kThemeKey = "board/theme"_L1;
 constexpr auto kCustomLightKey = "board/customLight"_L1;
 constexpr auto kCustomDarkKey = "board/customDark"_L1;
-constexpr auto kPiecesKey = "board/pieces"_L1;
 constexpr auto kFlippedKey = "board/flipped"_L1;
-constexpr auto kCoordinatesKey = "board/coordinates"_L1;
 constexpr auto kCustomTheme = "Custom"_L1;
-constexpr auto kAppearanceKey = "app/appearance"_L1;
 constexpr auto kContinuationsLearnedKey = "hints/continuationsLearned"_L1;
 constexpr auto kLibraryFolderKey = "library/folder"_L1;
 constexpr int kEvalBarGap = 6; ///< between the eval bar and the board
@@ -212,6 +215,14 @@ MainWindow::MainWindow(AppStyle& style, QWidget* parent)
     buildLayout();
     restoreState(); // before the menus, which show the board's current settings
     buildMenus();
+    // Every command's key, the user's own where they set one. Keys such as ← and Space need the
+    // window's help on macOS; Shortcuts sees to that.
+    m_shortcuts = new Shortcuts(this);
+    m_shortcuts->addMenus(menuBar(), m_gameActions);
+    m_shortcuts->add(m_upAction, tr("Game"), true);
+    m_shortcuts->add(m_downAction, tr("Game"), true);
+    m_shortcuts->load();
+    m_settingsView->addSection(tr("Keyboard"), new ShortcutsPage(*m_shortcuts), tr("Folders"));
     statusBar()->setSizeGripEnabled(false);
 
     // The library loads in the background; the window is up before it's done.
@@ -225,24 +236,6 @@ MainWindow::MainWindow(AppStyle& style, QWidget* parent)
 MainWindow::~MainWindow() = default;
 
 // ---- Menus -------------------------------------------------------------------------------------
-
-void MainWindow::bindPlainKey(QAction* action, const QKeySequence& key) {
-    // macOS's menu bar ignores navigation keys (← → Home End) that have no modifier, so set on a
-    // menu item they never fire. The window handles these keys itself instead (whatever has
-    // focus inside it); the menu item keeps the key only to show it. WidgetShortcut stops the
-    // item's own copy from firing too (and from clashing with the window's on other platforms).
-    // Not for letters: the macOS menu bar does handle those, so they would fire twice.
-    action->setShortcut(key);
-    action->setShortcutContext(Qt::WidgetShortcut);
-    auto* shortcut = new QShortcut(key, this);
-    shortcut->setContext(Qt::WindowShortcut);
-    m_gameKeys.push_back(shortcut);
-    connect(shortcut, &QShortcut::activated, action, [action] {
-        if (action->isEnabled()) {
-            action->trigger();
-        }
-    });
-}
 
 void MainWindow::buildMenus() {
     buildFileMenu();
@@ -286,6 +279,10 @@ void MainWindow::buildFileMenu() {
     m_gameActions.insert(m_gameActions.end(), {saveAction, saveAsAction, closeAction});
     menu->addSeparator();
     menu->addAction(tr("Change Library Folder…"), this, &MainWindow::chooseLibraryFolder);
+    // macOS moves it to the app menu ("Kiebitz › Settings…").
+    auto* settingsAction = menu->addAction(tr("Settings…"), QKeySequence::Preferences, this,
+                                           [this] { showSection(Section::Settings); });
+    settingsAction->setMenuRole(QAction::PreferencesRole);
     menu->addSeparator();
     auto* quitAction = menu->addAction(tr("&Quit"), QKeySequence::Quit, this, &QWidget::close);
     quitAction->setMenuRole(QAction::QuitRole);
@@ -308,22 +305,22 @@ void MainWindow::buildEditMenu() {
 void MainWindow::buildGameMenu() {
     auto* menu = menuBar()->addMenu(tr("&Game"));
     m_backAction = menu->addAction(tr("&Back"), this, &MainWindow::goBack);
-    bindPlainKey(m_backAction, Qt::Key_Left);
+    m_backAction->setShortcut(Qt::Key_Left);
     m_forwardAction = menu->addAction(tr("&Forward"), this, &MainWindow::goForward);
-    bindPlainKey(m_forwardAction, Qt::Key_Right);
+    m_forwardAction->setShortcut(Qt::Key_Right);
     m_startAction = menu->addAction(tr("Go to &Start"), this, &MainWindow::goToStart);
-    bindPlainKey(m_startAction, Qt::Key_Home);
+    m_startAction->setShortcut(Qt::Key_Home);
     m_endAction = menu->addAction(tr("Go to &End"), this, &MainWindow::goToEnd);
-    bindPlainKey(m_endAction, Qt::Key_End);
+    m_endAction->setShortcut(Qt::Key_End);
 
     // ↑ ↓: choose between continuations at a branch point; elsewhere go to the start / end.
-    // Plain window shortcuts for the same macOS reason as bindPlainKey().
-    auto* up = new QShortcut(Qt::Key_Up, this);
-    connect(up, &QShortcut::activated, this, [this] { stepChoiceOrJump(-1); });
-    auto* down = new QShortcut(Qt::Key_Down, this);
-    connect(down, &QShortcut::activated, this, [this] { stepChoiceOrJump(+1); });
-    m_gameKeys.push_back(up);
-    m_gameKeys.push_back(down);
+    // Not in the menu (Back and Forward say enough there), but their keys can be changed.
+    m_upAction = new QAction(tr("Previous Continuation"), this);
+    m_upAction->setShortcut(Qt::Key_Up);
+    connect(m_upAction, &QAction::triggered, this, [this] { stepChoiceOrJump(-1); });
+    m_downAction = new QAction(tr("Next Continuation"), this);
+    m_downAction->setShortcut(Qt::Key_Down);
+    connect(m_downAction, &QAction::triggered, this, [this] { stepChoiceOrJump(+1); });
 
     menu->addSeparator();
     // ⌘↑ and ⌘⌫ also mean something in a text field (top of the text, delete to the start of
@@ -353,7 +350,7 @@ void MainWindow::buildGameMenu() {
     // claim the key before window shortcuts see it.
     auto* engineAction =
         menu->addAction(tr("Start / Stop &Engine"), this, [this] { m_enginePanel->toggle(); });
-    bindPlainKey(engineAction, Qt::Key_Space);
+    engineAction->setShortcut(Qt::Key_Space);
     m_gameActions.insert(m_gameActions.end(),
                          {m_backAction, m_forwardAction, m_startAction, m_endAction, promoteAction,
                           mainLineAction, deleteFromAction, deleteVariationAction, commentAction,
@@ -372,9 +369,8 @@ void MainWindow::buildViewMenu(QMenu* menu) {
         action->setCheckable(true);
         action->setChecked(m_style.appearance() == appearance);
         m_appearanceGroup->addAction(action);
-        connect(action, &QAction::triggered, this, [this, appearance] {
-            m_style.setAppearance(appearance);
-            QSettings().setValue(kAppearanceKey, AppStyle::toString(appearance));
+        connect(action, &QAction::triggered, this, [appearance] {
+            Settings::instance().setValue(Settings::kAppearance, AppStyle::toString(appearance));
         });
     }
     menu->addSeparator();
@@ -400,11 +396,13 @@ void MainWindow::buildViewMenu(QMenu* menu) {
     });
 
     auto* coordinatesAction = menu->addAction(tr("Show &Coordinates"));
+    m_coordinatesAction = coordinatesAction;
     coordinatesAction->setCheckable(true);
     coordinatesAction->setChecked(m_board->showCoordinates());
-    connect(coordinatesAction, &QAction::toggled, this, [this](bool on) {
-        m_board->setShowCoordinates(on);
-        QSettings().setValue(kCoordinatesKey, on);
+    connect(coordinatesAction, &QAction::triggered, this, [](bool on) {
+        // Back on: along the edge (every square is chosen in Settings).
+        Settings::instance().setValue(Settings::kCoordinates,
+                                      on ? QStringLiteral("edge") : QStringLiteral("none"));
     });
     menu->addSeparator();
 
@@ -417,11 +415,8 @@ void MainWindow::buildViewMenu(QMenu* menu) {
         action->setCheckable(true);
         action->setChecked(theme.name == current);
         m_themeGroup->addAction(action);
-        connect(action, &QAction::triggered, this, [this, theme] {
-            m_board->setTheme(theme);
-            m_libraryView->setBoardLook(theme, m_board->pieceSetName());
-            QSettings().setValue(kThemeKey, theme.name);
-        });
+        connect(action, &QAction::triggered, this,
+                [name = theme.name] { Settings::instance().setValue(Settings::kTheme, name); });
     }
     themeMenu->addSeparator();
     m_customColorsAction = themeMenu->addAction(tr("Custom Colours…"));
@@ -438,11 +433,8 @@ void MainWindow::buildViewMenu(QMenu* menu) {
         action->setCheckable(true);
         action->setChecked(name == m_board->pieceSetName());
         m_piecesGroup->addAction(action);
-        connect(action, &QAction::triggered, this, [this, name] {
-            m_board->setPieceSet(name);
-            m_libraryView->setBoardLook(m_board->theme(), name);
-            QSettings().setValue(kPiecesKey, name);
-        });
+        connect(action, &QAction::triggered, this,
+                [name] { Settings::instance().setValue(Settings::kPieces, name); });
     }
 }
 
@@ -458,14 +450,14 @@ void MainWindow::chooseCustomColors() {
                                                         : action->text() == now.name;
             action->setChecked(inUse);
         }
+        emit Settings::instance().changed(QString::fromLatin1(Settings::kTheme));
         return;
     }
-    m_board->setTheme(BoardTheme::custom(light, dark));
-    m_libraryView->setBoardLook(m_board->theme(), m_board->pieceSetName());
     QSettings settings;
-    settings.setValue(kThemeKey, kCustomTheme);
     settings.setValue(kCustomLightKey, light);
     settings.setValue(kCustomDarkKey, dark);
+    Settings::instance().setValue(Settings::kTheme, QString(kCustomTheme));
+    applySetting(QString::fromLatin1(Settings::kTheme)); // new colours, if Custom was on already
 }
 
 void MainWindow::chooseLibraryFolder() {
@@ -474,7 +466,17 @@ void MainWindow::chooseLibraryFolder() {
     if (!folder.isEmpty()) {
         m_library->setFolder(folder);
         QSettings().setValue(kLibraryFolderKey, folder);
+        showFolders();
     }
+}
+
+void MainWindow::showFolders() {
+    m_settingsView->setFolders({
+        {tr("Library"), m_library->folder()},
+        {tr("Game databases"), m_databases->root()},
+        {tr("Profiles"), m_profiles->root()},
+        {tr("Downloaded engines"), engines::downloadFolder()},
+    });
 }
 
 // ---- Layout ------------------------------------------------------------------------------------
@@ -585,6 +587,7 @@ void MainWindow::buildLayout() {
     m_databasesView = new DatabasesView(*m_databases, m_style);
     connect(m_databasesView, &DatabasesView::openGameRequested, this, &MainWindow::openGameCopy);
     // Profiles: you and the people whose games you follow.
+    m_sounds = new Sounds(this);
     m_lichess = new LichessLogin(LichessLogin::privateFile(), this);
     connect(m_lichess, &LichessLogin::failed, this,
             [this](const QString& message) { notice(this, tr("Lichess"), message); });
@@ -638,6 +641,23 @@ void MainWindow::buildLayout() {
     m_pages->addWidget(m_databasesView);
     m_pages->addWidget(m_profilesView);
     m_pages->addWidget(m_enginesView);
+    m_settingsView = new SettingsView(m_style);
+    connect(m_settingsView, &SettingsView::customColorsRequested, this,
+            &MainWindow::chooseCustomColors);
+    connect(m_settingsView, &SettingsView::changeLibraryFolderRequested, this,
+            &MainWindow::chooseLibraryFolder);
+    connect(m_settingsView, &SettingsView::showEnginesRequested, this,
+            [this] { showSection(Section::Engines); });
+    connect(m_settingsView, &SettingsView::soundTestRequested, this,
+            [this] { m_sounds->play(Sounds::Kind::Move); });
+    connect(&Settings::instance(), &Settings::changed, this, [this](const QString& key) {
+        if (key == QLatin1String(Settings::kSoundSet)) {
+            m_sounds->play(Sounds::Kind::Move); // a new set: heard at once
+        }
+    });
+    m_pages->addWidget(m_settingsView);
+    showFolders();
+    connect(&Settings::instance(), &Settings::changed, this, &MainWindow::applySetting);
 
     // The sidebar: one icon per section, as in En Croissant.
     auto* sidebar = new QFrame;
@@ -665,6 +685,17 @@ void MainWindow::buildLayout() {
         sideLayout->addWidget(button);
     }
     sideLayout->addStretch();
+    // Settings: at the bottom, apart from the sections.
+    auto* settingsButton = new QToolButton;
+    settingsButton->setObjectName(QStringLiteral("sideSettings"));
+    settingsButton->setProperty("role", "sideNav");
+    settingsButton->setToolTip(tr("Settings (⌘,)"));
+    settingsButton->setCheckable(true);
+    settingsButton->setFocusPolicy(Qt::NoFocus);
+    settingsButton->setIconSize(QSize(22, 22));
+    settingsButton->setFixedSize(52, 44);
+    m_sidebar->addButton(settingsButton, static_cast<int>(Section::Settings));
+    sideLayout->addWidget(settingsButton);
     m_sidebar->setExclusive(true);
     connect(m_sidebar, &QButtonGroup::idClicked, this,
             [this](int id) { showSection(static_cast<Section>(id)); });
@@ -763,7 +794,8 @@ QWidget* MainWindow::buildMovesCard() {
     viewsLayout->setContentsMargins(2, 2, 2, 2);
     viewsLayout->setSpacing(2);
     auto* viewGroup = new QButtonGroup(views);
-    const bool rows = QSettings().value(QStringLiteral("notation/rows"), false).toBool();
+    m_notationViews = viewGroup;
+    const bool rows = Settings::instance().flag(Settings::kNotationRows);
     for (const auto& [id, text, tip] :
          {std::tuple{0, tr("Text"), tr("Moves as flowing text")},
           std::tuple{1, tr("Rows"), tr("Moves in rows, with comments and variations between")}}) {
@@ -794,10 +826,8 @@ QWidget* MainWindow::buildMovesCard() {
     connect(m_notation, &NotationView::commentEditRequested, this, &MainWindow::editComment);
     m_notation->setMinimumHeight(200); // always room for a good few lines of moves
     m_notation->setRows(rows);
-    connect(viewGroup, &QButtonGroup::idClicked, this, [this](int id) {
-        m_notation->setRows(id == 1);
-        QSettings().setValue(QStringLiteral("notation/rows"), id == 1);
-    });
+    connect(viewGroup, &QButtonGroup::idClicked, this,
+            [](int id) { Settings::instance().setValue(Settings::kNotationRows, id == 1); });
     layout->addWidget(m_notation, 1);
 
     // The current move's comment, edited in place, under a header naming the move.
@@ -935,18 +965,87 @@ void MainWindow::restoreState() {
     connect(m_sideSplitter, &QSplitter::splitterMoved, this,
             [this] { m_defaultSideSplit = false; });
 
-    const QString theme = settings.value(kThemeKey).toString();
-    if (theme == kCustomTheme) {
-        m_board->setTheme(BoardTheme::custom(settings.value(kCustomLightKey).value<QColor>(),
-                                             settings.value(kCustomDarkKey).value<QColor>()));
-    } else {
-        m_board->setTheme(BoardTheme::preset(theme));
-    }
-    m_board->setPieceSet(settings.value(kPiecesKey).toString());
     m_board->setFlipped(settings.value(kFlippedKey, false).toBool());
     m_evalBar->setFlipped(m_board->isFlipped());
-    m_board->setShowCoordinates(settings.value(kCoordinatesKey, true).toBool());
-    m_libraryView->setBoardLook(m_board->theme(), m_board->pieceSetName());
+    for (const char* key :
+         {Settings::kTheme, Settings::kPieces, Settings::kCoordinates, Settings::kFigurines}) {
+        applySetting(QString::fromLatin1(key));
+    }
+}
+
+void MainWindow::applySetting(const QString& key) {
+    const Settings& settings = Settings::instance();
+    const auto is = [&key](const char* name) {
+        return key == QLatin1String(name);
+    };
+    if (is(Settings::kTheme)) {
+        const QString theme = settings.string(Settings::kTheme);
+        const QSettings stored;
+        m_board->setTheme(theme == kCustomTheme
+                              ? BoardTheme::custom(stored.value(kCustomLightKey).value<QColor>(),
+                                                   stored.value(kCustomDarkKey).value<QColor>())
+                              : BoardTheme::preset(theme));
+        m_libraryView->setBoardLook(m_board->theme(), m_board->pieceSetName());
+        // The menus' ticks (at the start the menus aren't there yet: they read the board).
+        for (auto* action : m_themeGroup != nullptr ? m_themeGroup->actions() : QList<QAction*>{}) {
+            action->setChecked(theme == kCustomTheme ? action == m_customColorsAction
+                                                     : action->text() == m_board->theme().name);
+        }
+    } else if (is(Settings::kPieces)) {
+        m_board->setPieceSet(settings.string(Settings::kPieces));
+        m_libraryView->setBoardLook(m_board->theme(), m_board->pieceSetName());
+        for (auto* action :
+             m_piecesGroup != nullptr ? m_piecesGroup->actions() : QList<QAction*>{}) {
+            action->setChecked(action->text() == m_board->pieceSetName());
+        }
+    } else if (is(Settings::kCoordinates) || is(Settings::kAnimation) || is(Settings::kLegalDots) ||
+               is(Settings::kLastMove) || is(Settings::kMoveMethod) || is(Settings::kAutoQueen)) {
+        BoardView::Options options;
+        const QString coordinates = settings.string(Settings::kCoordinates);
+        options.coordinates = BoardView::Options::Coordinates::Edge;
+        if (coordinates == u"none") {
+            options.coordinates = BoardView::Options::Coordinates::None;
+        } else if (coordinates == u"all") {
+            options.coordinates = BoardView::Options::Coordinates::All;
+        }
+        options.slideMs = settings.animationMs();
+        options.legalDots = settings.flag(Settings::kLegalDots);
+        options.lastMove = settings.flag(Settings::kLastMove);
+        const QString method = settings.string(Settings::kMoveMethod);
+        options.moveMethod = BoardView::Options::MoveMethod::Both;
+        if (method == u"drag") {
+            options.moveMethod = BoardView::Options::MoveMethod::Drag;
+        } else if (method == u"click") {
+            options.moveMethod = BoardView::Options::MoveMethod::Click;
+        }
+        options.autoQueen = settings.flag(Settings::kAutoQueen);
+        m_board->setOptions(options);
+        if (m_coordinatesAction != nullptr) {
+            const QSignalBlocker block(m_coordinatesAction);
+            m_coordinatesAction->setChecked(m_board->showCoordinates());
+        }
+    } else if (is(Settings::kNotationRows)) {
+        const bool rows = settings.flag(Settings::kNotationRows);
+        m_notation->setRows(rows);
+        if (auto* button = m_notationViews->button(rows ? 1 : 0)) {
+            button->setChecked(true);
+        }
+    } else if (is(Settings::kFigurines)) {
+        m_notation->setFigurines(settings.flag(Settings::kFigurines));
+    } else if (is(Settings::kAppearance)) {
+        const auto appearance = AppStyle::fromString(settings.string(Settings::kAppearance));
+        m_style.setAppearance(appearance);
+        const QStringList names{tr("Same as System"), tr("Light"), tr("Dark")};
+        for (auto* action :
+             m_appearanceGroup != nullptr ? m_appearanceGroup->actions() : QList<QAction*>{}) {
+            action->setChecked(action->text() == names.value(static_cast<int>(appearance)));
+        }
+    } else if (is(Settings::kAccent)) {
+        const QString accent = settings.string(Settings::kAccent);
+        m_style.setAccent(accent.isEmpty() ? QColor() : QColor(accent));
+    } else if (is(Settings::kTextSize)) {
+        m_style.setTextScale(settings.number(Settings::kTextSize));
+    }
 }
 
 void MainWindow::resizeEvent(QResizeEvent* event) {
@@ -959,6 +1058,22 @@ void MainWindow::resizeEvent(QResizeEvent* event) {
 bool MainWindow::eventFilter(QObject* watched, QEvent* event) {
     if (watched == m_board && (event->type() == QEvent::Resize || event->type() == QEvent::Move)) {
         placeEvalBar();
+    }
+    // The wheel (or two fingers on a trackpad) over the board: back and forward through the
+    // moves, one per notch (a trackpad's small steps are added up first).
+    if (watched == m_board && event->type() == QEvent::Wheel &&
+        Settings::instance().flag(Settings::kWheel)) {
+        const auto* wheel = dynamic_cast<const QWheelEvent*>(event);
+        m_wheel += wheel->angleDelta().y();
+        while (m_wheel >= 120) {
+            m_wheel -= 120;
+            goBack();
+        }
+        while (m_wheel <= -120) {
+            m_wheel += 120;
+            goForward();
+        }
+        return true;
     }
     return QMainWindow::eventFilter(watched, event);
 }
@@ -1151,9 +1266,7 @@ void MainWindow::updatePage() {
     }
     // The arrow keys move through the game only on the board; in the Library they belong to the
     // file tree and the game list.
-    for (auto* key : m_gameKeys) {
-        key->setEnabled(d != nullptr);
-    }
+    m_shortcuts->setGameKeysEnabled(d != nullptr);
     m_pages->setCurrentIndex(static_cast<int>(m_section));
     if (d == nullptr) {
         m_enginePanel->setPosition(std::nullopt); // nothing to analyse off the board
@@ -1181,6 +1294,8 @@ void MainWindow::updateSidebarIcons() {
             kind = IconKind::Person;
         } else if (section == Section::Engines) {
             kind = IconKind::Engine;
+        } else if (section == Section::Settings) {
+            kind = IconKind::Gear;
         }
         button->setIcon(makeIcon(kind, button->isChecked() ? c.text : c.muted, c.dimmed, 22));
     }
@@ -1683,6 +1798,9 @@ void MainWindow::showNode(NodeId id, bool animate) {
     const core::Node& node = d->game.node(id);
     const auto lastMove = id == Game::root() ? std::nullopt : std::optional(node.move);
     m_board->setPosition(d->game.positionAt(id), lastMove, animate);
+    if (animate) {
+        playMoveSound(d->game, id); // a move played, or one step forward
+    }
     m_board->setDrawings(node.arrows, node.squareMarks);
     refreshClocks();
     m_notation->setCurrent(id);
@@ -2009,9 +2127,7 @@ void MainWindow::startPractice(bool fromHere, int depth, bool mistakes) {
     m_board->setFlipped(side == core::Color::Black);
     m_evalBar->setFlipped(side == core::Color::Black);
     m_enginePanel->setPosition(std::nullopt);
-    for (auto* key : m_gameKeys) {
-        key->setEnabled(false);
-    }
+    m_shortcuts->setGameKeysEnabled(false);
     m_movesStack->setCurrentIndex(1);
     m_practiceTitle->setText((mistakes ? tr("PRACTICE MISTAKES") : tr("PRACTICE")) +
                              QStringLiteral("  ·  ") + d->title());
@@ -2031,12 +2147,29 @@ void MainWindow::stopPractice() {
     m_drill.reset();
     ++m_drillRun;
     m_movesStack->setCurrentIndex(0);
-    for (auto* key : m_gameKeys) {
-        key->setEnabled(doc() != nullptr);
-    }
+    m_shortcuts->setGameKeysEnabled(doc() != nullptr);
     if (doc() != nullptr) {
         showDocument(); // the game as it was, from its own side
     }
+}
+
+void MainWindow::playMoveSound(const Game& game, NodeId id) {
+    if (id == Game::root()) {
+        return;
+    }
+    const core::Move move = game.node(id).move;
+    const core::Position before = game.positionAt(game.parent(id));
+    const core::Position after = game.positionAt(id);
+    // A capture: a piece on the target square, or a pawn moving aside to an empty one.
+    const core::Piece moved = before.pieceAt(move.from);
+    const bool captures =
+        !before.pieceAt(move.to).isNone() ||
+        (moved.type == core::PieceType::Pawn && move.from.file() != move.to.file());
+    Sounds::Kind kind = captures ? Sounds::Kind::Capture : Sounds::Kind::Move;
+    if (after.inCheck()) {
+        kind = Sounds::Kind::Check;
+    }
+    m_sounds->play(kind);
 }
 
 void MainWindow::showPracticeNode(NodeId id, bool animate, std::vector<core::Arrow> arrows) {
@@ -2046,6 +2179,9 @@ void MainWindow::showPracticeNode(NodeId id, bool animate, std::vector<core::Arr
     }
     const auto lastMove = id == Game::root() ? std::nullopt : std::optional(d->game.node(id).move);
     m_board->setPosition(d->game.positionAt(id), lastMove, animate);
+    if (animate) {
+        playMoveSound(d->game, id);
+    }
     m_board->setDrawings(std::move(arrows), {}); // the file's own arrows would give answers away
 }
 

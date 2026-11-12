@@ -47,6 +47,12 @@ public:
 
     /// Applies an appearance now and follows the system setting from then on if it's System.
     void setAppearance(Appearance appearance);
+    /// The accent colour (buttons, selections, highlights); invalid: the theme's own.
+    void setAccent(const QColor& accent);
+    [[nodiscard]] QColor accentOverride() const { return m_accent; }
+    /// The size of the app's text, in percent of the usual (90 to 130).
+    void setTextScale(int percent);
+    [[nodiscard]] int textScale() const noexcept { return m_textScale; }
     /// Makes tooltips see-through, so their rounded corners show (installed on the app).
     bool eventFilter(QObject* watched, QEvent* event) override;
     [[nodiscard]] Appearance appearance() const noexcept { return m_appearance; }
@@ -63,7 +69,8 @@ signals:
 private:
     void apply();
     /// `checkImage`: a PNG of a tick in the accent colour (for checked menu items).
-    [[nodiscard]] static QString styleSheet(const Colors& colors, const QString& checkImage = {});
+    [[nodiscard]] static QString styleSheet(const Colors& colors, const QString& checkImage = {},
+                                            int textScale = 100);
     /// Draws the tick for the style sheet; returns its path.
     [[nodiscard]] QString writeCheckImage(const QColor& color);
 
@@ -71,6 +78,9 @@ private:
     Appearance m_appearance = Appearance::System;
     bool m_dark = true;
     Colors m_colors = darkColors();
+    QColor m_accent;       ///< invalid: the theme's
+    int m_textScale = 100; ///< percent
+    qreal m_baseFont = 0;  ///< the system's text size (points), before scaling
     bool m_applying = false;
     std::unique_ptr<QTemporaryDir> m_images; ///< images the style sheet uses
 };

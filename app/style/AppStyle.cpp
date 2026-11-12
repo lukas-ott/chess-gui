@@ -6,15 +6,18 @@
 #include <QComboBox>
 #include <QEvent>
 #include <QFileInfo>
+#include <QFont>
 #include <QFrame>
 #include <QImage>
 #include <QMenu>
 #include <QPalette>
+#include <QRegularExpression>
 #include <QStyleFactory>
 #include <QStyleHints>
 #include <QStyledItemDelegate>
 #include <QWidget>
 
+#include <algorithm>
 #include <array>
 #include <utility>
 
@@ -127,6 +130,16 @@ AppStyle::Appearance AppStyle::fromString(const QString& text) {
     return Appearance::System;
 }
 
+void AppStyle::setAccent(const QColor& accent) {
+    m_accent = accent;
+    apply();
+}
+
+void AppStyle::setTextScale(int percent) {
+    m_textScale = std::clamp(percent, 80, 140);
+    apply();
+}
+
 void AppStyle::apply() {
     // First tell the system which appearance we want, so its own parts (title bar, menus,
     // dialogs) match; with System, hand the choice back to macOS. This emits colorSchemeChanged,
@@ -150,7 +163,20 @@ void AppStyle::apply() {
     m_dark = m_appearance == Appearance::Dark ||
              (m_appearance == Appearance::System && hints->colorScheme() != Qt::ColorScheme::Light);
     m_colors = m_dark ? darkColors() : lightColors();
+    if (m_accent.isValid()) {
+        // Your accent; the text on it light or dark, whichever reads better.
+        m_colors.accent = m_accent;
+        m_colors.accentText =
+            m_accent.lightnessF() > 0.62F ? QColor(QStringLiteral("#111318")) : QColor(Qt::white);
+    }
     const Colors& c = m_colors;
+    // The text size: the app's font, and every size in the style sheet.
+    if (m_baseFont <= 0) {
+        m_baseFont = QApplication::font().pointSizeF();
+    }
+    QFont font = QApplication::font();
+    font.setPointSizeF(m_baseFont * m_textScale / 100.0);
+    QApplication::setFont(font);
 
     QPalette palette;
     palette.setColor(QPalette::Window, c.window);
@@ -171,7 +197,7 @@ void AppStyle::apply() {
         palette.setColor(QPalette::Disabled, role, c.dimmed);
     }
     QApplication::setPalette(palette);
-    m_app.setStyleSheet(styleSheet(c, writeCheckImage(c.accent)));
+    m_app.setStyleSheet(styleSheet(c, writeCheckImage(c.accent), m_textScale));
     emit changed();
 }
 
@@ -200,7 +226,7 @@ QString AppStyle::writeCheckImage(const QColor& color) {
     return path;
 }
 
-QString AppStyle::styleSheet(const Colors& colors, const QString& checkImage) {
+QString AppStyle::styleSheet(const Colors& colors, const QString& checkImage, int textScale) {
     const auto hex = [](const QColor& color) {
         return color.name(QColor::HexRgb);
     };
@@ -538,6 +564,45 @@ QPushButton[role="link"][compact="true"] { font-size: 12px; padding: 0; }
 
 /* A field whose text isn't what it asks for (a date range's "2024.13") */
 QLineEdit[invalid="true"] { border-color: @bad; }
+QLabel[role="notice"] { color: @bad; font-size: 12px; }
+
+/* Settings: the sections on the left, a row per setting; preview swatches (board colours,
+   piece sets) and round accent colours, outlined in the accent when chosen */
+QListWidget#settingsSections { background: transparent; color: @text; outline: none; }
+QListWidget#settingsSections::item { padding: 6px 10px; border: none; border-radius: 6px; }
+QListWidget#settingsSections::item:hover { background: @raised; }
+QListWidget#settingsSections::item:selected { background: @accentTint; color: @accent; }
+QScrollArea#settingsScroll, QScrollArea#settingsScroll > QWidget > QWidget {
+    background: transparent;
+}
+QWidget#settingsRow { border-bottom: 1px solid @border; }
+QPushButton[role="swatch"] {
+    background: transparent;
+    border: 2px solid transparent;
+    border-radius: 8px;
+    padding: 2px;
+}
+QPushButton[role="swatch"]:hover { border-color: @border; }
+QPushButton[role="swatch"]:checked { border-color: @accent; }
+QPushButton[role="accentSwatch"] {
+    background: transparent;
+    border: 2px solid transparent;
+    border-radius: 15px;
+    padding: 2px;
+}
+QPushButton[role="accentSwatch"]:checked { border-color: @text; }
+
+/* Sliders (the sounds' volume): a thin track, the part up to the knob in the accent colour */
+QSlider::groove:horizontal { height: 4px; background: @border; border-radius: 2px; }
+QSlider::sub-page:horizontal { background: @accent; border-radius: 2px; }
+QSlider::handle:horizontal {
+    width: 14px;
+    height: 14px;
+    margin: -5px 0;
+    border-radius: 7px;
+    background: @text;
+}
+QSlider::groove:horizontal:disabled, QSlider::sub-page:horizontal:disabled { background: @raised; }
 
 /* Chips: small toggles (the explorer's time controls) */
 QPushButton[role="chip"] {
@@ -827,6 +892,21 @@ QStatusBar::item { border: none; }
         css.replace(QLatin1String(name), hex(color));
     }
     css.replace(QStringLiteral("@checkImage"), checkImage);
+    if (textScale != 100) { // every "font-size: 12px", scaled
+        static const QRegularExpression size(QStringLiteral(R"(font-size:\s*(\d+)px)"));
+        QString scaled;
+        qsizetype last = 0;
+        auto matches = size.globalMatch(css);
+        while (matches.hasNext()) {
+            const auto match = matches.next();
+            scaled += css.mid(last, match.capturedStart() - last);
+            scaled += QStringLiteral("font-size: %1px")
+                          .arg(qRound(match.captured(1).toInt() * textScale / 100.0));
+            last = match.capturedEnd();
+        }
+        scaled += css.mid(last);
+        css = std::move(scaled);
+    }
     return css;
 }
 

@@ -1,6 +1,7 @@
 #include "MainWindow.hpp"
 #include "Migration.hpp"
 #include "kiebitz/core/version.hpp"
+#include "settings/Settings.hpp"
 #include "style/AppStyle.hpp"
 
 #include <QApplication>
@@ -39,14 +40,21 @@ int main(int argc, char* argv[]) {
     } else {
         // The app was called ChessGui: bring its settings and engines along, once.
         kiebitz::app::migration::fromChessGui();
+        kiebitz::app::migration::capitalizeEngineFolder();
     }
     QApplication::setApplicationVersion(QString::fromUtf8(
         kiebitz::core::version().data(), static_cast<qsizetype>(kiebitz::core::version().size())));
 
     // Style first, with the saved appearance, so the window never flashes in the wrong colours.
     kiebitz::app::AppStyle style(app);
-    style.setAppearance(kiebitz::app::AppStyle::fromString(
-        QSettings().value(QStringLiteral("app/appearance")).toString()));
+    const auto& settings = kiebitz::app::Settings::instance();
+    if (const QString accent = settings.string(kiebitz::app::Settings::kAccent);
+        !accent.isEmpty()) {
+        style.setAccent(QColor(accent));
+    }
+    style.setTextScale(settings.number(kiebitz::app::Settings::kTextSize));
+    style.setAppearance(
+        kiebitz::app::AppStyle::fromString(settings.string(kiebitz::app::Settings::kAppearance)));
 
     kiebitz::app::MainWindow window(style);
     window.show();

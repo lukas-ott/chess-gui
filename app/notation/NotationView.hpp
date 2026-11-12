@@ -40,6 +40,8 @@ public:
     /// Two ways to show the moves: flowing text (the default), or rows (number, White, Black)
     /// with comments and variations as blocks in between, as En Croissant shows them.
     void setRows(bool rows);
+    /// Pieces as symbols (♘f3) instead of letters (Nf3).
+    void setFigurines(bool figurines);
     [[nodiscard]] bool rows() const noexcept { return m_rows; }
 
     /// The text as shown, one paragraph per line (for tests and copying).
@@ -154,6 +156,7 @@ private:
     core::NodeId m_pressed = core::kNoNode; ///< a click goes to the move it started on
     int m_hovered = -1;                     ///< the move word under the mouse
     bool m_rows = false;                    ///< the rows view
+    bool m_figurines = false;               ///< ♘f3 instead of Nf3
 };
 
 } // namespace kiebitz::app

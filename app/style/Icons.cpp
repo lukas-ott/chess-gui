@@ -6,6 +6,9 @@
 #include <QPixmap>
 #include <QPolygonF>
 
+#include <cmath>
+#include <numbers>
+
 namespace kiebitz::app {
 namespace {
 
@@ -245,6 +248,31 @@ void draw(QPainter& painter, IconKind kind, const QColor& color, int size) {
         painter.drawLine(QPointF(2.5, 6.5), QPointF(13.5, 6.5));
         painter.drawLine(QPointF(5.5, 2.0), QPointF(5.5, 4.5));
         painter.drawLine(QPointF(10.5, 2.0), QPointF(10.5, 4.5));
+        break;
+    }
+    case IconKind::Gear: { // one outline with eight square teeth, and a round hole
+        painter.setPen(QPen(color, 1.3, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
+        const QPointF centre(8.0, 8.0);
+        const auto at = [&](double radius, double degrees) {
+            const double angle = degrees * std::numbers::pi / 180.0;
+            return centre + QPointF(radius * std::cos(angle), radius * std::sin(angle));
+        };
+        QPainterPath gear;
+        for (int k = 0; k < 8; ++k) {
+            const double middle = (k * 45.0) - 90.0;
+            const QPointF start = at(5.0, middle - 15.0); // the root before the tooth
+            if (k == 0) {
+                gear.moveTo(start);
+            } else {
+                gear.lineTo(start);
+            }
+            gear.lineTo(at(6.9, middle - 9.0)); // the tooth
+            gear.lineTo(at(6.9, middle + 9.0));
+            gear.lineTo(at(5.0, middle + 15.0));
+        }
+        gear.closeSubpath();
+        painter.drawPath(gear);
+        painter.drawEllipse(centre, 2.2, 2.2);
         break;
     }
     case IconKind::Refresh: { // most of a circle, with an arrow head

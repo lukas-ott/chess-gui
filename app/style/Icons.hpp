@@ -34,6 +34,7 @@ enum class IconKind : std::uint8_t {
     Engine,    ///< a chip (sidebar, engine cards)
     Cloud,     ///< the Lichess cloud
     Plus,
+    Gear, ///< a cog: settings (sidebar)
 };
 
 /// An icon with a normal and a disabled look. `size` is in logical pixels.

@@ -43,6 +43,9 @@ class EvalBar;
 class LichessLogin;
 class ProfileStore;
 class ProfilesView;
+class SettingsView;
+class Shortcuts;
+class Sounds;
 class ExplorerPanel;
 class GameInfoPanel;
 class Library;
@@ -63,7 +66,7 @@ class MainWindow : public QMainWindow {
 
 public:
     /// The sidebar's sections: the board with its game tabs, the Library, the Engines page.
-    enum class Section : std::uint8_t { Board, Library, Databases, Profiles, Engines };
+    enum class Section : std::uint8_t { Board, Library, Databases, Profiles, Engines, Settings };
 
     explicit MainWindow(AppStyle& style, QWidget* parent = nullptr);
     ~MainWindow() override;
@@ -105,7 +108,6 @@ private:
     void buildEditMenu();
     void buildGameMenu();
     void buildViewMenu(QMenu* menu);
-    void bindPlainKey(QAction* action, const QKeySequence& key);
     void buildLayout();
     [[nodiscard]] QWidget* buildAnalysisPage();
     [[nodiscard]] QWidget* buildMovesCard();
@@ -114,6 +116,12 @@ private:
     void fitBoardColumn();
     /// Puts the eval bar beside the board: as tall as its squares, centred in the gap.
     void placeEvalBar();
+    /// A setting changed (or at the start): applied wherever it shows.
+    void applySetting(const QString& key);
+    /// The sound for a move just shown: a capture, a check, or a plain move.
+    void playMoveSound(const core::Game& game, core::NodeId id);
+    /// The Settings page's Folders section: where the library, databases, ... are.
+    void showFolders();
     /// The players' clocks above and below the board, from the [%clk] comments up to the
     /// current move; hidden for games without clocks.
     void refreshClocks();
@@ -233,6 +241,11 @@ private:
     LichessLogin* m_lichess = nullptr; ///< signed in: Lichess explorer, faster downloads
     ProfileStore* m_profiles = nullptr;
     ProfilesView* m_profilesView = nullptr;
+    SettingsView* m_settingsView = nullptr;
+    Sounds* m_sounds = nullptr;              ///< the board's move sounds
+    QButtonGroup* m_notationViews = nullptr; ///< Text | Rows over the move list
+    QAction* m_coordinatesAction = nullptr;
+    int m_wheel = 0; ///< wheel turned over the board, not yet a whole step (1/8°)
     Section m_section = Section::Board;
     QButtonGroup* m_sidebar = nullptr; ///< one button per section, ids = Section
     EngineRegistry* m_engineRegistry = nullptr;
@@ -286,7 +299,9 @@ private:
     QAction* m_startAction = nullptr;
     QAction* m_endAction = nullptr;
     std::vector<QAction*> m_gameActions; ///< only make sense on a game tab
-    std::vector<QShortcut*> m_gameKeys;  ///< ← → ↑ ↓ Home End for the game; off in the Library
+    Shortcuts* m_shortcuts = nullptr;    ///< every command's key, and ← → ↑ ↓ for the game
+    QAction* m_upAction = nullptr;       ///< ↑: the previous continuation (not in a menu)
+    QAction* m_downAction = nullptr;     ///< ↓: the next one
     QPushButton* m_backButton = nullptr;
     QPushButton* m_forwardButton = nullptr;
     QPushButton* m_startButton = nullptr;

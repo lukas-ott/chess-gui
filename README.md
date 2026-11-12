@@ -124,4 +124,6 @@ also the word for the lapwing, the crested bird on the app icon.
 
 ## License
 
-GPL-3.0. See [LICENSE](LICENSE).
+GPL-3.0. See [LICENSE](LICENSE). The board's sounds are Lichess's sound sets (see
+[app/resources/sounds/LICENSE.md](app/resources/sounds/LICENSE.md) for who made them and their
+licences); the piece sets keep their own licences (in app/resources/pieces/).

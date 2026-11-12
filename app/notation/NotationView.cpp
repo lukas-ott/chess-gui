@@ -19,6 +19,29 @@
 namespace kiebitz::app {
 namespace {
 
+/// A move as written: "Nf3", or with the pieces as symbols "♘f3" ("e8=♕").
+QString moveText(const std::string& san, bool figurines) {
+    QString text = QString::fromStdString(san);
+    if (!figurines) {
+        return text;
+    }
+    static const std::array<std::pair<QChar, QString>, 5> kSymbols{{
+        {u'K', QStringLiteral("♔")},
+        {u'Q', QStringLiteral("♕")},
+        {u'R', QStringLiteral("♖")},
+        {u'B', QStringLiteral("♗")},
+        {u'N', QStringLiteral("♘")},
+    }};
+    QString result;
+    for (const QChar c : text) {
+        const auto* const found =
+            std::find_if(kSymbols.begin(), kSymbols.end(),
+                         [c](const auto& symbol) { return symbol.first == c; });
+        result += found != kSymbols.end() ? found->second : QString(c);
+    }
+    return result;
+}
+
 using core::NodeId;
 
 constexpr int kMargin = 6;           ///< around the text
@@ -201,7 +224,7 @@ void NotationView::rebuild() {
                 Kind::Number);
             nbspOwed = true;
         }
-        QString san = QString::fromStdString(node.san);
+        QString san = moveText(node.san, m_figurines);
         for (const auto nag : node.nags) {
             san += nagText(nag);
         }
@@ -266,7 +289,7 @@ void NotationView::rebuild() {
                 }
                 rowOpen = true;
             }
-            QString san = QString::fromStdString(n.san);
+            QString san = moveText(n.san, m_figurines);
             for (const auto nag : n.nags) {
                 san += nagText(nag);
             }
@@ -460,6 +483,13 @@ QString NotationView::plainText() const {
 }
 
 // ---- Highlight and painting --------------------------------------------------------------------
+
+void NotationView::setFigurines(bool figurines) {
+    if (figurines != m_figurines) {
+        m_figurines = figurines;
+        rebuild();
+    }
+}
 
 void NotationView::setRows(bool rows) {
     if (rows != m_rows) {

@@ -81,4 +81,32 @@ void fromChessGui() {
     settings.setValue(QString::fromLatin1(kDoneKey), true);
 }
 
+bool renameFolderCase(const QString& parent, const QString& from, const QString& to) {
+    const QDir dir(parent);
+    // entryList() gives the names as they are on disk, so this tells "engines" from "Engines".
+    if (!dir.entryList(QDir::Dirs | QDir::NoDotAndDotDot).contains(from)) {
+        return false;
+    }
+    const QString temporary = to + QStringLiteral(".renaming");
+    if (dir.exists(temporary) || !QDir(parent).rename(from, temporary)) {
+        return false;
+    }
+    if (!QDir(parent).rename(temporary, to)) {
+        QDir(parent).rename(temporary, from); // put it back as it was
+        return false;
+    }
+    return true;
+}
+
+void capitalizeEngineFolder() {
+    const QFileInfo folder(engines::downloadFolder());
+    const QString parent = folder.absolutePath();
+    const QString oldFolder = QDir(parent).filePath(QStringLiteral("engines"));
+    if (renameFolderCase(parent, QStringLiteral("engines"), folder.fileName())) {
+        QSettings settings;
+        settings.setFallbacksEnabled(false);
+        rewriteEnginePaths(oldFolder, folder.absoluteFilePath(), settings);
+    }
+}
+
 } // namespace kiebitz::app::migration
