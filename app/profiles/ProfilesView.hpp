@@ -26,6 +26,7 @@ namespace kiebitz::app {
 class ActivityChart;
 class AppStyle;
 class GamesModel;
+class LichessLogin;
 class ResultBar;
 class PageHeader;
 class ProfileStore;
@@ -39,7 +40,8 @@ class ProfilesView : public QWidget {
     Q_OBJECT
 
 public:
-    ProfilesView(ProfileStore& store, const AppStyle& style, QWidget* parent = nullptr);
+    ProfilesView(ProfileStore& store, LichessLogin& lichess, const AppStyle& style,
+                 QWidget* parent = nullptr);
 
     /// The profile shown (its id).
     [[nodiscard]] QString current() const { return m_current; }
@@ -52,6 +54,8 @@ private:
     void refreshList();
     void showProfile();
     void showAccounts(const Profile& profile);
+    /// Your main profile: the Lichess login, as a card above the accounts.
+    void showLichessLogin();
     void showParts(const Profile& profile);
     void showGames();
     void showStats();
@@ -62,6 +66,7 @@ private:
     void showFideCard();
 
     ProfileStore& m_store;
+    LichessLogin& m_lichess;
     const AppStyle& m_style;
     QString m_current;
     PageHeader* m_header = nullptr;

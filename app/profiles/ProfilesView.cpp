@@ -2,6 +2,7 @@
 
 #include "AddAccountDialog.hpp"
 #include "FideCard.hpp"
+#include "LichessLogin.hpp"
 #include "ProfileStore.hpp"
 #include "databases/GamesModel.hpp"
 #include "style/AppStyle.hpp"
@@ -109,8 +110,10 @@ QString siteText(AccountSite site) {
 
 } // namespace
 
-ProfilesView::ProfilesView(ProfileStore& store, const AppStyle& style, QWidget* parent)
-    : QWidget(parent), m_store(store), m_style(style), m_model(new GamesModel(this)) {
+ProfilesView::ProfilesView(ProfileStore& store, LichessLogin& lichess, const AppStyle& style,
+                           QWidget* parent)
+    : QWidget(parent), m_store(store), m_lichess(lichess), m_style(style),
+      m_model(new GamesModel(this)) {
     setObjectName(QStringLiteral("profilesView"));
     auto* layout = new QVBoxLayout(this);
     layout->setContentsMargins(layout::kPage);
@@ -389,6 +392,25 @@ ProfilesView::ProfilesView(ProfileStore& store, const AppStyle& style, QWidget* 
     layout->addWidget(splitter, 1);
 
     connect(&m_store, &ProfileStore::changed, this, &ProfilesView::refreshList);
+    connect(&m_lichess, &LichessLogin::changed, this, [this] {
+        // Signed in: your Lichess account belongs to your profile (its games come with it).
+        if (m_lichess.signedIn()) {
+            for (const Profile& profile : m_store.profiles()) {
+                if (profile.main) {
+                    const bool has = std::any_of(
+                        profile.accounts.begin(), profile.accounts.end(), [this](const auto& a) {
+                            return a.site == AccountSite::Lichess &&
+                                   a.username.compare(m_lichess.username(), Qt::CaseInsensitive) ==
+                                       0;
+                        });
+                    if (!has) {
+                        m_store.addAccount(profile.id, AccountSite::Lichess, m_lichess.username());
+                    }
+                }
+            }
+        }
+        showProfile();
+    });
     connect(&m_store, &ProfileStore::progress, this, [this](const QString& id) {
         if (id == m_current) {
             const QString status = m_store.status(id);
@@ -560,6 +582,9 @@ void ProfilesView::showAccounts(const Profile& profile) {
         }
     };
 
+    if (profile.main) {
+        showLichessLogin();
+    }
     for (const Account& account : profile.accounts) {
         auto* remove = new QPushButton;
         remove->setProperty("role", "nav");
@@ -619,6 +644,53 @@ void ProfilesView::showAccounts(const Profile& profile) {
     connect(addAccountButton, &QPushButton::clicked, this, &ProfilesView::addAccount);
     m_accounts->addWidget(addAccountButton);
     m_accounts->addStretch();
+}
+
+void ProfilesView::showLichessLogin() {
+    auto* frame = new QFrame;
+    frame->setProperty("statTile", true);
+    frame->setObjectName(QStringLiteral("lichessLogin"));
+    auto* box = new QVBoxLayout(frame);
+    box->setContentsMargins(14, 12, 12, 12);
+    box->setSpacing(6);
+    auto* head = new QHBoxLayout;
+    head->setSpacing(8);
+    auto* badge = label(tr("LICHESS"), "siteBadge");
+    badge->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed);
+    head->addWidget(badge, 0, Qt::AlignVCenter);
+    auto* button = new QPushButton;
+    button->setObjectName(QStringLiteral("lichessSignIn"));
+    QString title;
+    QString foot;
+    if (m_lichess.signedIn()) {
+        title = tr("Signed in as %1").arg(m_lichess.username());
+        foot = tr("Its opening explorer is in the Explorer tab; your games download faster.");
+        button->setText(tr("Sign Out"));
+        button->setProperty("role", "secondary");
+        connect(button, &QPushButton::clicked, &m_lichess, &LichessLogin::signOut);
+    } else if (m_lichess.busy()) {
+        title = tr("Waiting for your browser…");
+        foot = tr("Allow Kiebitz on the Lichess page that opened, then come back here.");
+        button->setText(tr("Cancel"));
+        button->setProperty("role", "secondary");
+        connect(button, &QPushButton::clicked, &m_lichess, &LichessLogin::cancel);
+    } else {
+        title = tr("Sign in with Lichess");
+        foot = tr("For Lichess's opening explorer, and faster downloads of your games.");
+        button->setText(tr("Sign In"));
+        button->setProperty("role", "primary");
+        connect(button, &QPushButton::clicked, &m_lichess, &LichessLogin::signIn);
+    }
+    button->setProperty("compact", true);
+    auto* titleLabel = label(title, "databaseName");
+    titleLabel->setWordWrap(true); // the column is narrow: never wider than it
+    head->addWidget(titleLabel, 1);
+    head->addWidget(button, 0, Qt::AlignTop);
+    box->addLayout(head);
+    auto* hint = label(foot, "cardFoot");
+    hint->setWordWrap(true);
+    box->addWidget(hint);
+    m_accounts->addWidget(frame);
 }
 
 void ProfilesView::showParts(const Profile& profile) {

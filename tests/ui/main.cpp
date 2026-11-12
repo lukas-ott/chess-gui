@@ -16,6 +16,7 @@ int main(int argc, char** argv) {
                        QDir::temp().filePath(QStringLiteral("kiebitz-ui-tests")));
     QApplication::setOrganizationName(QStringLiteral("KiebitzTests"));
     const QApplication app(argc, argv);
+    QSettings().clear(); // each run starts fresh: nothing left over from the last one
     // A throwaway library folder too: tests must never touch the real library
     // (~/Documents/Kiebitz).
     const QString library = QDir::temp().filePath(QStringLiteral("kiebitz-ui-tests-library"));

@@ -592,6 +592,11 @@ void ProfileStore::downloadLichess(const std::shared_ptr<Job>& job, Account& acc
     QNetworkRequest request(url);
     request.setRawHeader("Accept", "application/x-chess-pgn");
     request.setHeader(QNetworkRequest::UserAgentHeader, userAgent());
+    // Signed in, Lichess sends games faster (and your own games faster still).
+    if (const QByteArray token = m_lichessToken ? m_lichessToken() : QByteArray();
+        !token.isEmpty()) {
+        request.setRawHeader("Authorization", "Bearer " + token);
+    }
     const qint64 started = QDateTime::currentMSecsSinceEpoch();
     const QString target = QDir(QDir(folderOf(job->profileId)).filePath(account.id))
                                .filePath(QStringLiteral("%1.pgn").arg(started));

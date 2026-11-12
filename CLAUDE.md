@@ -56,6 +56,6 @@ bash scripts/package_macos.sh                    # self-contained .app + .dmg
 M0 skeleton (done) → M1 core (game tree, SAN/FEN; done) → M2 board UI (done) → M3 PGN viewer/editor (done) →
 M4 engine (= v1; done) → M5 library + cache (done) → M6 repertoire (done) → M7 training (done:
 practice, mistakes per position, `[%depth n]`) → M8 databases + explorer + gap check (= v2;
-game databases, the Explorer tab and profiles (accounts' games, OTB games) done; the Lichess
-login with the Lichess explorer, and the gap check to do)
+done: game databases, the Explorer tab, profiles, the Lichess login with the Lichess and
+masters explorer, and the gap check)
 → M9 game import → M10 large database (= v3).

@@ -40,6 +40,7 @@ class EnginesView;
 class DatabaseManager;
 class DatabasesView;
 class EvalBar;
+class LichessLogin;
 class ProfileStore;
 class ProfilesView;
 class ExplorerPanel;
@@ -229,6 +230,7 @@ private:
     DatabaseManager* m_databases = nullptr;
     DatabasesView* m_databasesView = nullptr;
     ExplorerPanel* m_explorer = nullptr;
+    LichessLogin* m_lichess = nullptr; ///< signed in: Lichess explorer, faster downloads
     ProfileStore* m_profiles = nullptr;
     ProfilesView* m_profilesView = nullptr;
     Section m_section = Section::Board;
@@ -256,6 +258,7 @@ private:
     std::array<bool, 2> m_mistakesAsked{}; ///< White, Black: their mistakes are being read
     /// A repertoire file to show at a position (hash) as soon as its tab has opened.
     std::optional<std::pair<QString, std::uint64_t>> m_jumpOnOpen;
+    std::optional<core::Move> m_playOnJump; ///< a gap's move: played once the jump is done
     core::NodeId m_drillStart = core::Game::root();
     QLabel* m_practiceTitle = nullptr;
     QLabel* m_practiceMark = nullptr; ///< a tick or a cross

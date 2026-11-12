@@ -152,7 +152,7 @@ RepertoirePanel::RepertoirePanel(RepertoireStore& store, const AppStyle& style, 
         row.jump->setObjectName(side == core::Color::White ? QStringLiteral("jumpWhite")
                                                            : QStringLiteral("jumpBlack"));
         row.jump->setProperty("role", "secondary");
-        row.jump->setProperty("size", "small");
+        row.jump->setProperty("compact", true);
         row.jump->setFocusPolicy(Qt::NoFocus);
         row.jump->setToolTip(tr("Open the repertoire file at this position"));
         connect(row.jump, &QPushButton::clicked, this, [this, side] {
@@ -164,7 +164,7 @@ RepertoirePanel::RepertoirePanel(RepertoireStore& store, const AppStyle& style, 
         buttons->addWidget(row.jump);
         row.add = new QPushButton(tr("Add Line"));
         row.add->setProperty("role", "secondary");
-        row.add->setProperty("size", "small");
+        row.add->setProperty("compact", true);
         row.add->setFocusPolicy(Qt::NoFocus);
         row.add->setToolTip(tr("Add this game's moves up to here to the repertoire"));
         connect(row.add, &QPushButton::clicked, this,

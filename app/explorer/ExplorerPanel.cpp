@@ -1,6 +1,8 @@
 #include "ExplorerPanel.hpp"
 
+#include "LichessExplorer.hpp"
 #include "databases/DatabaseManager.hpp"
+#include "profiles/LichessLogin.hpp"
 #include "profiles/ProfileStore.hpp"
 #include "repertoire/RepertoireStore.hpp"
 #include "style/AppStyle.hpp"
@@ -29,6 +31,7 @@
 
 #include <array>
 #include <tuple>
+#include <utility>
 
 namespace kiebitz::app {
 
@@ -56,6 +59,9 @@ QString ratings(int white, int black) {
     const auto one = [](int value) {
         return value > 0 ? QString::number(value) : QStringLiteral("–");
     };
+    if (white == black) {
+        return one(white); // one average for both (Lichess's explorer)
+    }
     return QStringLiteral("%1 – %2").arg(one(white), one(black));
 }
 
@@ -82,9 +88,10 @@ struct Answer {
 } // namespace
 
 ExplorerPanel::ExplorerPanel(DatabaseManager& databases, ProfileStore& profiles,
-                             RepertoireStore& repertoires, const AppStyle& style, QWidget* parent)
+                             RepertoireStore& repertoires, LichessLogin& lichess,
+                             const AppStyle& style, QWidget* parent)
     : QWidget(parent), m_databases(databases), m_profiles(profiles), m_repertoires(repertoires),
-      m_style(style) {
+      m_lichess(lichess), m_online(new LichessExplorer(lichess, this)), m_style(style) {
     setObjectName(QStringLiteral("explorerPanel"));
     auto* outer = new QVBoxLayout(this);
     outer->setContentsMargins(12, 10, 12, 10);
@@ -119,6 +126,7 @@ ExplorerPanel::ExplorerPanel(DatabaseManager& databases, ProfileStore& profiles,
     m_source->setObjectName(QStringLiteral("explorerSource"));
     m_source->setFocusPolicy(Qt::NoFocus);
     connect(m_source, &QComboBox::activated, this, [this] {
+        m_sourceChosen = true;
         QSettings().setValue(QString::fromLatin1(kSourceKey), m_source->currentData());
         refreshParts();
         filterChanged(); // "Filter •" may change with the parts
@@ -157,6 +165,27 @@ ExplorerPanel::ExplorerPanel(DatabaseManager& databases, ProfileStore& profiles,
     top->addWidget(views);
     top->addWidget(m_summary, 1);
     box->addLayout(top);
+    // Lichess's explorer, signed out: what to do.
+    m_signIn = new QFrame;
+    m_signIn->setObjectName(QStringLiteral("explorerSignIn"));
+    m_signIn->setProperty("statTile", true);
+    auto* signInBox = new QVBoxLayout(m_signIn);
+    signInBox->setContentsMargins(14, 12, 14, 12);
+    signInBox->setSpacing(8);
+    signInBox->addWidget(label(tr("Sign in to Lichess to use its explorer"), "checkHeadline"));
+    signInBox->addWidget(label(tr("Lichess asks for a login for its opening explorer. Kiebitz "
+                                  "only reads with it; your password stays with Lichess."),
+                               "emptyHint"));
+    auto* signIn = new QPushButton(tr("Sign In with Lichess"));
+    signIn->setObjectName(QStringLiteral("explorerSignInButton"));
+    signIn->setProperty("role", "primary");
+    connect(signIn, &QPushButton::clicked, &m_lichess, &LichessLogin::signIn);
+    auto* signInRow = new QHBoxLayout;
+    signInRow->addWidget(signIn);
+    signInRow->addStretch();
+    signInBox->addLayout(signInRow);
+    m_signIn->hide();
+    box->addWidget(m_signIn);
     box->addWidget(m_total);
 
     m_moves = new QTreeWidget;
@@ -200,6 +229,20 @@ ExplorerPanel::ExplorerPanel(DatabaseManager& databases, ProfileStore& profiles,
     connect(m_games, &QTreeWidget::itemDoubleClicked, this,
             [this](QTreeWidgetItem* item) { // opens it
                 const auto id = item->data(0, kGameRole).toLongLong();
+                if (onlineSource()) {
+                    if (id >= 0 && std::cmp_less(id, m_onlineIds.size())) {
+                        const auto kind = m_source->currentData().toString() == u"lichess:masters"
+                                              ? LichessExplorer::Kind::Masters
+                                              : LichessExplorer::Kind::Lichess;
+                        m_online->fetchGame(kind, m_onlineIds[static_cast<std::size_t>(id)],
+                                            [this](std::optional<core::Game> game) {
+                                                if (game) {
+                                                    emit openGameRequested(*game);
+                                                }
+                                            });
+                    }
+                    return;
+                }
                 if (const auto db = sourceDatabase()) {
                     if (const auto game = db->game(id)) {
                         emit openGameRequested(*game);
@@ -230,6 +273,7 @@ ExplorerPanel::ExplorerPanel(DatabaseManager& databases, ProfileStore& profiles,
         refresh();
     });
     connect(&m_repertoires, &RepertoireStore::changed, this, &ExplorerPanel::refresh);
+    connect(&m_lichess, &LichessLogin::changed, this, &ExplorerPanel::refresh);
     refreshSources();
     refresh();
 }
@@ -245,7 +289,9 @@ void ExplorerPanel::setPosition(const core::Game* game, core::NodeId current,
 void ExplorerPanel::refreshSources() {
     // Each source by a key that stays the same when names change:
     //   "db:<folder>", "profile:<id>" (all its games) or "profile:<id>:<part>".
-    const QString wanted = m_source->count() > 0
+    // The source picked, now or last time; else the first one (a database or profile before
+    // Lichess, so the first database added is shown).
+    const QString wanted = m_sourceChosen
                                ? m_source->currentData().toString()
                                : QSettings().value(QString::fromLatin1(kSourceKey)).toString();
     const QSignalBlocker block(m_source);
@@ -261,10 +307,14 @@ void ExplorerPanel::refreshSources() {
         // Once; its accounts and over-the-board games are chosen in the Filter tab.
         m_source->addItem(profile.name, QStringLiteral("profile:") + profile.id);
     }
+    // Lichess's explorer: its own games and the masters' (it asks for a login).
+    m_source->addItem(tr("Lichess"), QStringLiteral("lichess:lichess"));
+    m_source->addItem(tr("Masters (Lichess)"), QStringLiteral("lichess:masters"));
     int index = m_source->findData(wanted);
     if (index < 0 && wanted.startsWith(u"profile:")) { // "profile:id:part" from before
         index = m_source->findData(wanted.section(u':', 0, 1));
     }
+    m_sourceChosen = index >= 0;
     m_source->setCurrentIndex(index >= 0 ? index : 0);
     refreshParts();
 }
@@ -335,7 +385,7 @@ std::shared_ptr<const gamedb::Database> ExplorerPanel::sourceDatabase() const {
 void ExplorerPanel::refresh() {
     const int request = ++m_request;
     const std::shared_ptr<const gamedb::Database> db = sourceDatabase();
-    if (!db) {
+    if (!db && !onlineSource()) {
         m_pages->setCurrentIndex(0);
         return;
     }
@@ -363,6 +413,40 @@ void ExplorerPanel::refresh() {
             }
         }
     }
+    // Lichess's explorer: over the network, signed in.
+    const QString key = m_source->currentData().toString();
+    const bool online = onlineSource();
+    m_signIn->setVisible(online && !m_lichess.signedIn());
+    for (QWidget* row : m_nameRows) {
+        row->setVisible(!online);
+    }
+    if (online) {
+        m_onlineIds.clear();
+        if (m_sideRow != nullptr) {
+            m_sideRow->hide();
+            m_sideTitle->hide();
+        }
+        if (!m_lichess.signedIn()) {
+            showAnswer({}, {}, {});
+            m_summary->setText(QString());
+            return;
+        }
+        m_summary->setText(tr("Asking Lichess…"));
+        const auto kind = key == u"lichess:masters" ? LichessExplorer::Kind::Masters
+                                                    : LichessExplorer::Kind::Lichess;
+        m_online->ask(kind, line, m_filter,
+                      [this, request, repertoire](const LichessExplorer::Answer& answer) {
+                          if (request != m_request) {
+                              return;
+                          }
+                          m_onlineIds = answer.ids;
+                          showAnswer(answer.explored, answer.games, repertoire);
+                          if (!answer.error.isEmpty()) {
+                              m_summary->setText(answer.error);
+                          }
+                      });
+        return;
+    }
     // Owned by the panel and deleted when done (deleteLater); the analyzer can't see that.
     auto* watcher =
         new QFutureWatcher<Answer>(this); // NOLINT(clang-analyzer-cplusplus.NewDeleteLeaks)
@@ -372,72 +456,12 @@ void ExplorerPanel::refresh() {
             return; // the board has moved on
         }
         const Answer answer = watcher->result();
-        const auto& explored = answer.explored;
-        QString summary =
-            explored.games == 1 ? tr("1 game") : tr("%1 games").arg(number(explored.games));
-        if (const QString average = ratings(explored.whiteElo, explored.blackElo);
-            !average.isEmpty()) {
-            summary += QStringLiteral("  ·  ") + tr("rated %1").arg(average);
-        }
-        m_summary->setText(summary);
-        m_total->setResults(explored.white, explored.draws, explored.black);
-        m_moves->clear();
-        const auto& c = m_style.colors();
-        for (const gamedb::MoveStats& stats : explored.moves) {
-            auto* item = new QTreeWidgetItem(m_moves);
-            item->setData(0, kMoveRole, QString::fromStdString(stats.move.uci()));
-            item->setText(0, QString::fromStdString(stats.san));
-            item->setText(1, number(stats.games));
-            item->setTextAlignment(1, Qt::AlignRight | Qt::AlignVCenter);
-            // Its share of the games here.
-            const double share = explored.games > 0 ? 100.0 * static_cast<double>(stats.games) /
-                                                          static_cast<double>(explored.games)
-                                                    : 0.0;
-            item->setText(2, share >= 1.0 ? QStringLiteral("%1%").arg(qRound(share))
-                                          : QStringLiteral("<1%"));
-            item->setTextAlignment(2, Qt::AlignRight | Qt::AlignVCenter);
-            item->setForeground(2, c.muted);
-            item->setText(4, ratings(stats.whiteElo, stats.blackElo));
-            item->setForeground(4, c.muted);
-            QFont san = item->font(0);
-            san.setWeight(QFont::DemiBold);
-            item->setFont(0, san);
-            if (std::find(repertoire.begin(), repertoire.end(), stats.move) != repertoire.end()) {
-                item->setForeground(0, c.accent);
-                item->setToolTip(0, m_viewSide == core::Color::White
-                                        ? tr("In your White repertoire")
-                                        : tr("In your Black repertoire"));
-            }
-            // The bar in a box of its own, so it sits in the middle of the row.
-            auto* cell = new QWidget;
-            auto* cellBox = new QVBoxLayout(cell);
-            cellBox->setContentsMargins(4, 0, 6, 0);
-            auto* bar = new ResultBar(m_style, 14);
-            bar->setResults(stats.white, stats.draws, stats.black);
-            cellBox->addWidget(bar, 0, Qt::AlignVCenter);
-            m_moves->setItemWidget(item, 3, cell);
-        }
-        m_games->clear();
-        for (const gamedb::GameInfo& game : answer.games) {
-            auto* item = new QTreeWidgetItem(m_games);
-            item->setData(0, kGameRole, static_cast<qlonglong>(game.id));
-            const auto player = [](const std::string& name, int elo) {
-                const QString text = QString::fromStdString(name);
-                return elo > 0 ? QStringLiteral("%1 (%2)").arg(text).arg(elo) : text;
-            };
-            item->setText(0, player(game.white, game.whiteElo));
-            item->setText(1, player(game.black, game.blackElo));
-            item->setText(2, resultText(game.result));
-            item->setText(3, QString::fromStdString(game.date.substr(0, 4)));
-            item->setForeground(3, c.muted);
-            item->setToolTip(0, QString::fromStdString(game.event));
-        }
+        showAnswer(answer.explored, answer.games, repertoire);
         emit updated();
     });
     // The filter; for a profile with a colour chosen, the profile's names in that part.
     gamedb::ExploreFilter filter = m_filter;
     filter.players.clear();
-    const QString key = m_source->currentData().toString();
     const bool profile = key.startsWith(u"profile:");
     if (m_sideRow != nullptr) {
         m_sideRow->setVisible(profile);
@@ -456,6 +480,107 @@ void ExplorerPanel::refresh() {
         return Answer{db->explore(line, filter), db->gamesAt(line, 20, filter)};
     }));
 } // NOLINT(clang-analyzer-cplusplus.NewDeleteLeaks)
+
+GapSource ExplorerPanel::gapSource() {
+    GapSource source;
+    source.name = m_source->currentText();
+    if (onlineSource()) {
+        if (!m_lichess.signedIn()) {
+            source.unavailable = tr("Sign in to Lichess to check against its games, or choose a "
+                                    "database in the Explorer tab.");
+            return source;
+        }
+        const auto kind = m_source->currentData().toString() == u"lichess:masters"
+                              ? LichessExplorer::Kind::Masters
+                              : LichessExplorer::Kind::Lichess;
+        source.explore = m_online->blocking(kind, m_filter);
+        return source;
+    }
+    const std::shared_ptr<const gamedb::Database> db = sourceDatabase();
+    if (!db) {
+        source.unavailable = tr("Add a database or sign in to Lichess, then choose it in the "
+                                "Explorer tab.");
+        return source;
+    }
+    gamedb::ExploreFilter filter = m_filter;
+    filter.players.clear();
+    filter.side = gamedb::ExploreFilter::Side::Any;
+    source.explore = [db, filter](std::span<const core::Move> line) {
+        std::vector<repertoire::MoveCount> result;
+        for (const auto& stats : db->explore(line, filter).moves) {
+            result.push_back({stats.move, stats.games});
+        }
+        return result;
+    };
+    return source;
+}
+
+bool ExplorerPanel::onlineSource() const {
+    return m_source->currentData().toString().startsWith(u"lichess:");
+}
+
+void ExplorerPanel::showAnswer(const gamedb::Explored& explored,
+                               const std::vector<gamedb::GameInfo>& games,
+                               const std::vector<core::Move>& repertoire) {
+    QString summary =
+        explored.games == 1 ? tr("1 game") : tr("%1 games").arg(number(explored.games));
+    if (const QString average = ratings(explored.whiteElo, explored.blackElo); !average.isEmpty()) {
+        summary += QStringLiteral("  ·  ") + tr("rated %1").arg(average);
+    }
+    m_summary->setText(summary);
+    m_total->setResults(explored.white, explored.draws, explored.black);
+    m_moves->clear();
+    const auto& c = m_style.colors();
+    for (const gamedb::MoveStats& stats : explored.moves) {
+        auto* item = new QTreeWidgetItem(m_moves);
+        item->setData(0, kMoveRole, QString::fromStdString(stats.move.uci()));
+        item->setText(0, QString::fromStdString(stats.san));
+        item->setText(1, number(stats.games));
+        item->setTextAlignment(1, Qt::AlignRight | Qt::AlignVCenter);
+        // Its share of the games here.
+        const double share = explored.games > 0 ? 100.0 * static_cast<double>(stats.games) /
+                                                      static_cast<double>(explored.games)
+                                                : 0.0;
+        item->setText(2, share >= 1.0 ? QStringLiteral("%1%").arg(qRound(share))
+                                      : QStringLiteral("<1%"));
+        item->setTextAlignment(2, Qt::AlignRight | Qt::AlignVCenter);
+        item->setForeground(2, c.muted);
+        item->setText(4, ratings(stats.whiteElo, stats.blackElo));
+        item->setForeground(4, c.muted);
+        QFont san = item->font(0);
+        san.setWeight(QFont::DemiBold);
+        item->setFont(0, san);
+        if (std::find(repertoire.begin(), repertoire.end(), stats.move) != repertoire.end()) {
+            item->setForeground(0, c.accent);
+            item->setToolTip(0, m_viewSide == core::Color::White ? tr("In your White repertoire")
+                                                                 : tr("In your Black repertoire"));
+        }
+        // The bar in a box of its own, so it sits in the middle of the row.
+        auto* cell = new QWidget;
+        auto* cellBox = new QVBoxLayout(cell);
+        cellBox->setContentsMargins(4, 0, 6, 0);
+        auto* bar = new ResultBar(m_style, 14);
+        bar->setResults(stats.white, stats.draws, stats.black);
+        cellBox->addWidget(bar, 0, Qt::AlignVCenter);
+        m_moves->setItemWidget(item, 3, cell);
+    }
+    m_games->clear();
+    for (const gamedb::GameInfo& game : games) {
+        auto* item = new QTreeWidgetItem(m_games);
+        item->setData(0, kGameRole, static_cast<qlonglong>(game.id));
+        const auto player = [](const std::string& name, int elo) {
+            const QString text = QString::fromStdString(name);
+            return elo > 0 ? QStringLiteral("%1 (%2)").arg(text).arg(elo) : text;
+        };
+        item->setText(0, player(game.white, game.whiteElo));
+        item->setText(1, player(game.black, game.blackElo));
+        item->setText(2, resultText(game.result));
+        item->setText(3, QString::fromStdString(game.date.substr(0, 4)));
+        item->setForeground(3, c.muted);
+        item->setToolTip(0, QString::fromStdString(game.event));
+    }
+    emit updated();
+}
 
 QWidget* ExplorerPanel::buildFilter() {
     // Rating, years, time control and (for a profile) the colour it played; remembered.
@@ -481,6 +606,7 @@ QWidget* ExplorerPanel::buildFilter() {
         auto* title = new QLabel(text);
         title->setProperty("role", "infoLabel");
         grid->addWidget(title, row, 0, Qt::AlignVCenter);
+        return title;
     };
     // A from–to pair of numbers; empty means "any".
     const auto range = [&](const char* name, int low, int high, int* from, int* to) {
@@ -513,7 +639,7 @@ QWidget* ExplorerPanel::buildFilter() {
     };
     // Players by name (part of it, any case), for each colour.
     const auto player = [&](const QString& title, const char* name, std::string* text) {
-        caption(title);
+        m_nameRows.push_back(caption(title));
         auto* field = new QLineEdit(QString::fromStdString(*text));
         field->setObjectName(QString::fromLatin1(name));
         field->setPlaceholderText(tr("Any player"));
@@ -528,6 +654,7 @@ QWidget* ExplorerPanel::buildFilter() {
             filterChanged();
         });
         grid->addWidget(field, row++, 1, 1, 2);
+        m_nameRows.push_back(field);
         return field;
     };
     QLineEdit* whiteName = player(tr("White"), "explorerWhite", &m_filter.white);

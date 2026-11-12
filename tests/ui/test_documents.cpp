@@ -9,6 +9,7 @@
 #include "library/NewFileDialog.hpp"
 #include "notation/NotationView.hpp"
 #include "panels/GameInfoPanel.hpp"
+#include "repertoire/GapSource.hpp"
 #include "repertoire/RepertoirePanel.hpp"
 #include "repertoire/RepertoireStore.hpp"
 #include "style/AppStyle.hpp"
@@ -1271,3 +1272,61 @@ TEST_F(DocumentsTest, Snapshots) {
 }
 
 } // namespace
+
+TEST_F(DocumentsTest, TheGapCheckListsUnansweredMovesAndOpensOne) {
+    writeFile(path("sicilian.pgn"), "[FileType \"Repertoire\"]\n[Orientation \"black\"]\n\n"
+                                    "1. e4 c5 2. Nf3 d6 *\n");
+    scanLibrary();
+    auto* view = window.findChild<kiebitz::app::LibraryView*>();
+    ASSERT_NE(view, nullptr);
+    // A made-up source: 1. e4 or 1. d4 from the start; after 1. e4 c5, 2. Nf3 or 2. c3.
+    view->setGapSource([] {
+        kiebitz::app::GapSource source;
+        source.name = QStringLiteral("Test games");
+        source.explore = [](std::span<const core::Move> line) {
+            core::Position position;
+            std::string key;
+            for (const core::Move move : line) {
+                key += position.san(move) + " ";
+                position.play(move);
+            }
+            std::vector<kiebitz::repertoire::MoveCount> moves;
+            const auto add = [&](const char* san, std::uint64_t games) {
+                moves.push_back({position.parseSan(san).value(), games});
+            };
+            if (key.empty()) {
+                add("e4", 600);
+                add("d4", 400);
+            } else if (key == "e4 c5 ") {
+                add("Nf3", 450);
+                add("c3", 150);
+            }
+            return moves;
+        };
+        return source;
+    });
+    auto* tree = window.findChild<QTreeWidget*>(QStringLiteral("libraryFiles"));
+    tree->setCurrentItem(
+        tree->findItems(QStringLiteral("sicilian"), Qt::MatchExactly | Qt::MatchRecursive)
+            .value(0));
+    ASSERT_TRUE(QTest::qWaitFor([&] { return view->repertoireStats().value(0) != u"…"; }, 5000));
+    QSignalSpy checked(view, &kiebitz::app::LibraryView::gapsChecked);
+    view->checkGaps();
+    ASSERT_TRUE(checked.wait(5000));
+    // 1. d4: 40% of games, nothing against it; 2. c3: 25% of the games after 1. e4 c5.
+    EXPECT_EQ(view->repertoireGaps(), (QStringList{QStringLiteral("1. d4  40%  40% of games"),
+                                                   QStringLiteral("2. c3  25%  15% of games")}));
+    EXPECT_TRUE(view->gapsStatus().startsWith(u"2 gaps against Test games"));
+    if (const QString dir = qEnvironmentVariable("KIEBITZ_SNAPSHOT_DIR"); !dir.isEmpty()) {
+        window.resize(1200, 760);
+        QTest::qWait(100);
+        window.grab().save(QDir(dir).filePath(QStringLiteral("library-gaps.png")));
+    }
+    // Clicked: the file opens after 1. e4 c5 with 2. c3 played, for your answer.
+    auto* gaps = window.findChild<QTreeWidget*>(QStringLiteral("repertoireGaps"));
+    QSignalSpy opened(&window, &MainWindow::fileOpened);
+    emit gaps->itemClicked(gaps->topLevelItem(1), 0);
+    ASSERT_TRUE(opened.wait(5000));
+    QApplication::processEvents();
+    EXPECT_EQ(fen(), "rnbqkbnr/pp1ppppp/8/2p5/4P3/2P5/PP1P1PPP/RNBQKBNR b KQkq - 0 2");
+}

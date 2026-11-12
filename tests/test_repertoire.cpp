@@ -1,5 +1,6 @@
 #include "kiebitz/pgn/pgn.hpp"
 #include "kiebitz/repertoire/drill.hpp"
+#include "kiebitz/repertoire/gaps.hpp"
 #include "kiebitz/repertoire/openings.hpp"
 #include "kiebitz/repertoire/summary.hpp"
 #include "kiebitz/repertoire/tree.hpp"
@@ -8,6 +9,7 @@
 
 #include <algorithm>
 #include <fstream>
+#include <map>
 #include <sstream>
 #include <string>
 #include <unordered_set>
@@ -299,4 +301,83 @@ TEST(Drill, AnAnswerSaysWhetherItWasTheFirstTry) {
     const auto right = drill.play(wrong.expected);
     EXPECT_TRUE(right.correct);
     EXPECT_FALSE(right.first); // after a mistake here
+}
+
+namespace {
+
+/// A made-up explorer: what is played after each line (by SAN), and which lines were asked.
+struct FakeExplorer {
+    std::map<std::string, std::vector<std::pair<std::string, std::uint64_t>>> played;
+    std::vector<std::string> asked;
+
+    repertoire::Explore function() {
+        return [this](std::span<const core::Move> moves) {
+            core::Position position;
+            std::string key;
+            for (const core::Move move : moves) {
+                key += (key.empty() ? "" : " ") + position.san(move);
+                position.play(move);
+            }
+            asked.push_back(key);
+            std::vector<repertoire::MoveCount> result;
+            for (const auto& [san, games] : played[key]) {
+                result.push_back({position.parseSan(san).value(), games});
+            }
+            return result;
+        };
+    }
+};
+
+} // namespace
+
+TEST(RepertoireGaps, FindsCommonRepliesTheRepertoireDoesNotAnswer) {
+    // White: 1. e4, against 1... e5 2. Nf3, against 1... c5 2. Nf3; nothing against 1... e6.
+    repertoire::Tree tree(core::Color::White);
+    tree.add(game("1. e4 e5 (1... c5 2. Nf3) 2. Nf3 Nc6 3. Bb5 *"), 0, 0);
+    FakeExplorer explorer;
+    explorer.played[""] = {{"e4", 500}, {"d4", 400}};
+    explorer.played["e4"] = {{"e5", 400}, {"c5", 350}, {"e6", 200}, {"b6", 10}};
+    explorer.played["e4 e5 Nf3"] = {{"Nc6", 300}, {"d6", 60}};
+    explorer.played["e4 c5 Nf3"] = {{"d6", 100}, {"Nc6", 80}};
+    const auto report = repertoire::findGaps(tree, explorer.function());
+    // It's never asked about our own moves (1. e4 is ours), only where the opponent moves.
+    EXPECT_EQ(std::count(explorer.asked.begin(), explorer.asked.end(), ""), 0);
+    // 1... e6 and 2... d6; after 1... c5 2. Nf3 the file just ends: lines end, that's no gap.
+    ASSERT_EQ(report.gaps.size(), 2U);
+    // 1... e6: a quarter of the games, at once: the most likely gap.
+    EXPECT_EQ(report.gaps[0].san, "e6");
+    EXPECT_TRUE(report.gaps[0].line == line({"e4"}));
+    EXPECT_NEAR(report.gaps[0].share, 200.0 / 960.0, 1e-9);
+    EXPECT_NEAR(report.gaps[0].likelihood, 200.0 / 960.0, 1e-9);
+    // 1... b6 is too rare to matter (1%).
+    for (const auto& gap : report.gaps) {
+        EXPECT_NE(gap.san, "b6");
+    }
+    // Deeper: 2... d6 after 1... e5 2. Nf3 is reached in 400/960 of the games, then 1/6.
+    const auto d6 = std::find_if(report.gaps.begin(), report.gaps.end(), [](const auto& gap) {
+        return gap.san == "d6" && gap.line.size() == 3;
+    });
+    ASSERT_NE(d6, report.gaps.end());
+    EXPECT_NEAR(d6->likelihood, (400.0 / 960.0) * (60.0 / 360.0), 1e-9);
+    // Most likely first.
+    for (std::size_t k = 1; k < report.gaps.size(); ++k) {
+        EXPECT_GE(report.gaps[k - 1].likelihood, report.gaps[k].likelihood);
+    }
+    EXPECT_FALSE(report.stopped);
+}
+
+TEST(RepertoireGaps, TooFewGamesOrTooManyPositionsStopIt) {
+    repertoire::Tree tree(core::Color::Black);
+    tree.add(game("1. e4 c5 2. Nf3 d6 *"), 0, 0);
+    FakeExplorer explorer;
+    explorer.played[""] = {{"e4", 5}, {"d4", 4}}; // 9 games: too few to judge
+    EXPECT_TRUE(repertoire::findGaps(tree, explorer.function()).gaps.empty());
+    explorer.played[""] = {{"e4", 500}, {"d4", 400}};
+    repertoire::GapOptions options;
+    options.maxPositions = 1;
+    const auto report = repertoire::findGaps(tree, explorer.function(), options);
+    EXPECT_EQ(report.asked, 1U);
+    ASSERT_EQ(report.gaps.size(), 1U);
+    EXPECT_EQ(report.gaps[0].san, "d4"); // Black has nothing against 1. d4
+    EXPECT_TRUE(report.stopped);         // 2. Nf3 wasn't looked at
 }

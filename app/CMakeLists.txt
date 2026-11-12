@@ -28,6 +28,8 @@ qt_add_library(kiebitz_ui STATIC
     document/GameDocument.cpp
     explorer/ExplorerPanel.cpp
     explorer/ExplorerPanel.hpp
+    explorer/LichessExplorer.cpp
+    explorer/LichessExplorer.hpp
     document/GameDocument.hpp
     document/PgnIo.cpp
     document/PgnIo.hpp
@@ -66,12 +68,17 @@ qt_add_library(kiebitz_ui STATIC
     profiles/Fide.hpp
     profiles/FideCard.cpp
     profiles/FideCard.hpp
+    profiles/Keychain.cpp
+    profiles/Keychain.hpp
+    profiles/LichessLogin.cpp
+    profiles/LichessLogin.hpp
     profiles/ProfileStore.cpp
     profiles/ProfileStore.hpp
     profiles/ProfilesView.cpp
     profiles/ProfilesView.hpp
     repertoire/PracticeStats.cpp
     repertoire/PracticeStats.hpp
+    repertoire/GapSource.hpp
     repertoire/RepertoirePanel.cpp
     repertoire/RepertoirePanel.hpp
     style/AppStyle.cpp
@@ -94,7 +101,8 @@ qt_add_library(kiebitz_ui STATIC
     widgets/Stepper.hpp)
 target_include_directories(kiebitz_ui PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")
 target_link_libraries(kiebitz_ui PUBLIC Qt6::Widgets Qt6::Svg Qt6::Concurrent Qt6::Network
-    kiebitz::pgn kiebitz::engine kiebitz::gamedb kiebitz::library kiebitz::repertoire)
+    kiebitz::pgn kiebitz::engine kiebitz::gamedb kiebitz::library kiebitz::repertoire
+    "-framework Security" "-framework CoreFoundation")
 kiebitz_set_warnings(kiebitz_ui)
 
 # Piece SVGs are compiled into the binary (":/pieces/<set>/wK.svg"), so the app has no loose

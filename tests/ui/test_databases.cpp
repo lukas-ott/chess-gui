@@ -6,6 +6,7 @@
 #include "databases/DatabasesView.hpp"
 #include "explorer/ExplorerPanel.hpp"
 #include "library/Library.hpp"
+#include "profiles/LichessLogin.hpp"
 #include "profiles/ProfileStore.hpp"
 #include "repertoire/RepertoireStore.hpp"
 #include "style/AppStyle.hpp"
@@ -191,7 +192,8 @@ TEST_F(DatabasesTest, TheExplorerShowsWhatIsPlayedAndPlaysAMove) {
     kiebitz::app::Library library;
     kiebitz::app::RepertoireStore repertoires(library);
     kiebitz::app::ProfileStore profiles(path("profiles"));
-    kiebitz::app::ExplorerPanel explorer(manager, profiles, repertoires, style);
+    kiebitz::app::LichessLogin lichess{kiebitz::app::LichessLogin::Storage{}};
+    kiebitz::app::ExplorerPanel explorer(manager, profiles, repertoires, lichess, style);
     explorer.resize(560, 300); // as short as the tab under the board can be
     explorer.show();
     write(path("games.pgn"), kGames);
@@ -229,7 +231,8 @@ TEST_F(DatabasesTest, ADoubleClickOnATopGameOpensIt) {
     kiebitz::app::Library library;
     kiebitz::app::RepertoireStore repertoires(library);
     kiebitz::app::ProfileStore profiles(path("profiles"));
-    kiebitz::app::ExplorerPanel explorer(manager, profiles, repertoires, style);
+    kiebitz::app::LichessLogin lichess{kiebitz::app::LichessLogin::Storage{}};
+    kiebitz::app::ExplorerPanel explorer(manager, profiles, repertoires, lichess, style);
     explorer.resize(560, 300);
     explorer.show();
     write(path("games.pgn"), kGames);

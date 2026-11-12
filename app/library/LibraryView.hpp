@@ -3,10 +3,12 @@
 #include "document/GameDocument.hpp"
 #include "kiebitz/core/game.hpp"
 #include "kiebitz/library/file_kind.hpp"
+#include "repertoire/GapSource.hpp"
 
 #include <QWidget>
 
 #include <array>
+#include <atomic>
 #include <functional>
 #include <memory>
 #include <optional>
@@ -90,6 +92,14 @@ public:
     /// openings listed ("Benko Gambit Accepted  210").
     [[nodiscard]] QStringList repertoireStats() const;
     [[nodiscard]] QStringList repertoireOpenings() const;
+    /// For tests: the gaps listed ("8… h6  14%  3% of games"), and the status above them.
+    [[nodiscard]] QStringList repertoireGaps() const;
+    [[nodiscard]] QString gapsStatus() const;
+
+    /// Where the gap check asks how often moves are played (the Explorer's source, now).
+    void setGapSource(std::function<GapSource()> source) { m_gapSource = std::move(source); }
+    /// Checks the repertoire shown for gaps (the "Check" button).
+    void checkGaps();
 
 signals:
     void openGameRequested(std::shared_ptr<kiebitz::app::PgnFile> file, int index);
@@ -105,6 +115,12 @@ signals:
     /// From a file's or folder's menu: set the type of these files (a library::FileKind; for a
     /// repertoire `side` is 0 = White, 1 = Black, else -1).
     void fileKindRequested(const QStringList& paths, int kind, int side);
+    /// A gap, clicked: open the file at `line` (from the start) and play the opponent's `move`
+    /// there, so you can add your answer.
+    void gapRequested(const QString& path, const std::vector<kiebitz::core::Move>& line,
+                      kiebitz::core::Move move);
+    /// The gap check is done (tests).
+    void gapsChecked();
 
 private:
     void refreshFiles();
@@ -179,6 +195,15 @@ private:
     QLabel* m_repStatus = nullptr;       ///< "Reading the repertoire…"
     QTreeWidget* m_repOpenings = nullptr;
     int m_summaryRequest = 0;
+    // The gap check
+    std::function<GapSource()> m_gapSource;
+    QPushButton* m_checkGaps = nullptr;
+    QLabel* m_gapsStatus = nullptr;
+    QTreeWidget* m_gaps = nullptr;
+    std::vector<repertoire::Gap> m_gapList;
+    std::shared_ptr<std::atomic<bool>> m_gapsCancel; ///< set when another file is shown
+    int m_gapsRequest = 0;
+    void resetGaps();
 
     std::array<QFrame*, 2> m_cards{};       ///< files, the selection: the focused one is outlined
     QMetaObject::Connection m_focusOutline; ///< to qApp's focusChanged; see ~LibraryView()

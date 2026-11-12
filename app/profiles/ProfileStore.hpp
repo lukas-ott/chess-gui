@@ -9,6 +9,7 @@
 #include <QString>
 #include <QUrl>
 
+#include <functional>
 #include <map>
 #include <memory>
 #include <optional>
@@ -111,6 +112,8 @@ public:
 
     /// The servers (tests point them at a fake one).
     void setServers(const QUrl& lichess, const QUrl& chessCom, const QUrl& fide = {});
+    /// The Lichess login's token (empty: not signed in). Downloads with it go faster.
+    void setLichessToken(std::function<QByteArray()> token) { m_lichessToken = std::move(token); }
     /// Waits for running builds (tests, quitting).
     void wait();
 
@@ -140,6 +143,7 @@ private:
     std::map<QString, QString> m_status; ///< profile id → what it is doing
     QUrl m_lichess{QStringLiteral("https://lichess.org")};
     QUrl m_chessCom{QStringLiteral("https://api.chess.com")};
+    std::function<QByteArray()> m_lichessToken;
     QUrl m_fide{QStringLiteral("https://ratings.fide.com")};
     QNetworkAccessManager* m_network = nullptr;
     std::vector<QFuture<void>> m_builds;

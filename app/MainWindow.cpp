@@ -18,6 +18,7 @@
 #include "library/NewFileDialog.hpp"
 #include "notation/NotationView.hpp"
 #include "panels/GameInfoPanel.hpp"
+#include "profiles/LichessLogin.hpp"
 #include "profiles/ProfileStore.hpp"
 #include "profiles/ProfilesView.hpp"
 #include "repertoire/PracticeStats.hpp"
@@ -520,6 +521,17 @@ void MainWindow::buildLayout() {
                     startPractice(false, m_repertoirePanel->practiceDepth());
                 }
             });
+    // The gap check: where to look, and a gap clicked.
+    m_libraryView->setGapSource([this] { return m_explorer->gapSource(); });
+    connect(m_libraryView, &LibraryView::gapRequested, this,
+            [this](const QString& path, const std::vector<core::Move>& line, core::Move move) {
+                core::Position position;
+                for (const core::Move& played : line) {
+                    position.play(played);
+                }
+                m_playOnJump = move;
+                jumpToLine(path, position.hash());
+            });
     connect(this, &MainWindow::fileOpened, this, [this](const QString& path) {
         if (m_jumpOnOpen && path == m_jumpOnOpen->first) {
             const std::uint64_t position = m_jumpOnOpen->second;
@@ -574,8 +586,12 @@ void MainWindow::buildLayout() {
     m_databasesView = new DatabasesView(*m_databases, m_style);
     connect(m_databasesView, &DatabasesView::openGameRequested, this, &MainWindow::openGameCopy);
     // Profiles: you and the people whose games you follow.
+    m_lichess = new LichessLogin(LichessLogin::keychain(), this);
+    connect(m_lichess, &LichessLogin::failed, this,
+            [this](const QString& message) { QMessageBox::warning(this, tr("Lichess"), message); });
     m_profiles = new ProfileStore({}, this);
-    m_profilesView = new ProfilesView(*m_profiles, m_style);
+    m_profiles->setLichessToken([this] { return m_lichess->token(); });
+    m_profilesView = new ProfilesView(*m_profiles, *m_lichess, m_style);
     connect(m_profilesView, &ProfilesView::openGameRequested, this, &MainWindow::openGameCopy);
 
     m_enginesView = new EnginesView(*m_engineRegistry, m_style);
@@ -824,7 +840,7 @@ QWidget* MainWindow::buildPanelsCard() {
                 m_evalBar->setVisible(running); // its space is kept: nothing else moves
             });
     panels->addTab(m_enginePanel, tr("Engine"));
-    m_explorer = new ExplorerPanel(*m_databases, *m_profiles, *m_repertoires, m_style);
+    m_explorer = new ExplorerPanel(*m_databases, *m_profiles, *m_repertoires, *m_lichess, m_style);
     connect(m_explorer, &ExplorerPanel::movePlayed, this, [this](core::Move move) {
         if (!m_drill) { // in practice the explorer would give the answers away
             playMoves({move});
@@ -1876,9 +1892,13 @@ void MainWindow::jumpToLine(const QString& path, quint64 position) {
 }
 
 void MainWindow::goToPosition(std::uint64_t position) {
+    const std::optional<core::Move> play = std::exchange(m_playOnJump, std::nullopt);
     if (const GameDocument* d = doc()) {
         if (const auto node = findPosition(d->game, position)) {
             showNode(*node, false);
+            if (play) {
+                playMoves({*play}); // a gap's move: your answer comes next
+            }
         }
     }
 }

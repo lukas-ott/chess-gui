@@ -480,7 +480,13 @@ QPushButton[role="moveChip"] {
     font-weight: 600;
 }
 QPushButton[role="moveChip"]:hover { border-color: @accent; color: @accent; }
-QPushButton[role="secondary"][size="small"] {
+QPushButton[role="primary"][compact="true"] {
+    padding: 4px 12px;
+    min-height: 16px;
+    font-size: 12px;
+    border-radius: 6px;
+}
+QPushButton[role="secondary"][compact="true"] {
     padding: 3px 10px;
     min-height: 16px;
     font-size: 12px;
@@ -564,8 +570,16 @@ QProgressBar#accountProgress::chunk { background: @accent; border-radius: 2px; }
 QFrame[statTile="true"] { background: @raised; border: none; border-radius: 8px; }
 QLabel[role="statCaption"] { color: @muted; font-size: 11px; }
 QLabel[role="statValue"] { color: @text; font-size: 20px; font-weight: 600; }
-QTreeWidget#repertoireOpenings { background: transparent; color: @text; outline: none; }
-QTreeWidget#repertoireOpenings::item { padding: 4px 2px; border: none; }
+QTreeWidget#repertoireOpenings, QTreeWidget#repertoireGaps {
+    background: transparent;
+    color: @text;
+    outline: none;
+}
+QTreeWidget#repertoireOpenings::item, QTreeWidget#repertoireGaps::item {
+    padding: 4px 2px;
+    border: none;
+}
+QTreeWidget#repertoireGaps::item:hover { background: @raised; }
 /* A score chip in the colours of the side that is better, as Lichess shows it */
 QLabel[role="scorePill"] {
     border-radius: 6px;

@@ -21,7 +21,9 @@ and training opening repertoires.
 > friends, opponents) collect a player's Lichess and chess.com games and over-the-board PGNs
 > into a database of their own, also for the Explorer, with ratings, results by colour and
 > their FIDE player (looked up by name). The Explorer can be filtered by rating, years, time
-> control and, for a profile, the colour it played. The Engine tab
+> control and, for a profile, the colour it played; signed in to Lichess, it also shows Lichess's
+> and the masters' games. The gap check finds the common opponent moves a repertoire file
+> doesn't answer yet, judged by the Explorer's games. The Engine tab
 > analyses with Stockfish (one-click download) or the Lichess cloud.
 
 ## Requirements (macOS)

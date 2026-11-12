@@ -2,12 +2,14 @@
 
 #include "kiebitz/core/game.hpp"
 #include "kiebitz/gamedb/database.hpp"
+#include "repertoire/GapSource.hpp"
 
 #include <QWidget>
 
 #include <cstdint>
 #include <functional>
 #include <memory>
+#include <vector>
 
 class QComboBox;
 class QHBoxLayout;
@@ -24,6 +26,8 @@ namespace kiebitz::app {
 
 class AppStyle;
 class DatabaseManager;
+class LichessExplorer;
+class LichessLogin;
 class ProfileStore;
 class RepertoireStore;
 class ResultBar;
@@ -38,7 +42,13 @@ class ExplorerPanel : public QWidget {
 
 public:
     ExplorerPanel(DatabaseManager& databases, ProfileStore& profiles, RepertoireStore& repertoires,
-                  const AppStyle& style, QWidget* parent = nullptr);
+                  LichessLogin& lichess, const AppStyle& style, QWidget* parent = nullptr);
+
+    /// What the gap check asks: the source chosen here, with its filter.
+    [[nodiscard]] GapSource gapSource();
+
+    /// For tests: Lichess's explorer.
+    [[nodiscard]] LichessExplorer& lichessExplorer() { return *m_online; }
 
     /// The game and move shown (null: none). The game must outlive the panel or the next call.
     void setPosition(const core::Game* game, core::NodeId current, core::Color viewSide);
@@ -62,10 +72,20 @@ private:
     /// The database of the chosen source (a database, a profile, or a part of one), or null.
     [[nodiscard]] std::shared_ptr<const gamedb::Database> sourceDatabase() const;
     void refresh();
+    /// The Lichess or masters explorer is chosen (not a database or profile).
+    [[nodiscard]] bool onlineSource() const;
+    /// Puts an answer in the lists; `repertoire`: your moves here, marked.
+    void showAnswer(const gamedb::Explored& explored, const std::vector<gamedb::GameInfo>& games,
+                    const std::vector<core::Move>& repertoire);
 
     DatabaseManager& m_databases;
     ProfileStore& m_profiles;
     RepertoireStore& m_repertoires;
+    LichessLogin& m_lichess;
+    LichessExplorer* m_online = nullptr;
+    std::vector<QString> m_onlineIds; ///< the top games' Lichess ids (online sources)
+    QWidget* m_signIn = nullptr;      ///< "Sign in to use Lichess's explorer"
+    std::vector<QWidget*> m_nameRows; ///< White / Black name filters: not for online sources
     const AppStyle& m_style;
     const core::Game* m_game = nullptr;
     core::NodeId m_current = core::Game::root();
@@ -74,6 +94,7 @@ private:
 
     QStackedWidget* m_pages = nullptr; ///< 0: no databases, 1: explorer, 2: not from the start
     QComboBox* m_source = nullptr;
+    bool m_sourceChosen = false; ///< picked (now or before); else the first one, which may change
     QLabel* m_summary = nullptr;
     ResultBar* m_total = nullptr;
     QTreeWidget* m_moves = nullptr;

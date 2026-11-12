@@ -3,8 +3,10 @@
 
 #include "databases/DatabaseManager.hpp"
 #include "explorer/ExplorerPanel.hpp"
+#include "explorer/LichessExplorer.hpp"
 #include "library/Library.hpp"
 #include "profiles/Fide.hpp"
+#include "profiles/LichessLogin.hpp"
 #include "profiles/ProfileStore.hpp"
 #include "profiles/ProfilesView.hpp"
 #include "repertoire/RepertoireStore.hpp"
@@ -17,18 +19,24 @@
 #include <QHostAddress>
 #include <QLabel>
 #include <QLineEdit>
+#include <QNetworkAccessManager>
+#include <QNetworkReply>
 #include <QPushButton>
+#include <QSettings>
 #include <QSignalSpy>
 #include <QTableView>
 #include <QTcpServer>
 #include <QTcpSocket>
 #include <QTemporaryDir>
 #include <QTest>
+#include <QTreeWidget>
+#include <QUrlQuery>
 #include <gtest/gtest.h>
 
 #include <algorithm>
 #include <array>
 #include <map>
+#include <memory>
 
 namespace {
 
@@ -47,10 +55,27 @@ public:
         m_server.listen(QHostAddress::LocalHost);
         connect(&m_server, &QTcpServer::newConnection, this, [this] {
             QTcpSocket* socket = m_server.nextPendingConnection();
-            connect(socket, &QTcpSocket::readyRead, this, [this, socket] {
-                const QByteArray request = socket->readAll();
+            const auto buffer = std::make_shared<QByteArray>();
+            connect(socket, &QTcpSocket::readyRead, this, [this, socket, buffer] {
+                // A whole request: the headers, then as much body as Content-Length says.
+                buffer->append(socket->readAll());
+                const qsizetype end = buffer->indexOf("\r\n\r\n");
+                if (end < 0) {
+                    return;
+                }
+                qsizetype length = 0;
+                for (const QByteArray& line : buffer->left(end).split('\n')) {
+                    if (line.toLower().startsWith("content-length:")) {
+                        length = line.mid(15).trimmed().toLongLong();
+                    }
+                }
+                if (buffer->size() < end + 4 + length) {
+                    return;
+                }
+                const QByteArray& request = *buffer;
                 const QByteArray target = request.split(' ').value(1);
                 asked << QString::fromUtf8(target);
+                requests << request;
                 const QByteArray path = target.split('?').value(0);
                 const auto found = pages.find(path);
                 const QByteArray body = found != pages.end() ? found->second : "Not found";
@@ -67,6 +92,7 @@ public:
     }
     std::map<QByteArray, QByteArray> pages;
     QStringList asked;
+    QByteArrayList requests; ///< whole: method, headers, body
 
 private:
     QTcpServer m_server;
@@ -196,7 +222,8 @@ TEST_F(ProfilesTest, ThePageShowsAProfileAndItsPartsAndTheExplorerUsesThem) {
     const kiebitz::app::AppStyle style(*qApp);
     ProfileStore store(folder.filePath(QStringLiteral("profiles")));
     store.setServers(server.url(), server.url(), server.url());
-    kiebitz::app::ProfilesView view(store, style);
+    kiebitz::app::LichessLogin lichess{kiebitz::app::LichessLogin::Storage{}};
+    kiebitz::app::ProfilesView view(store, lichess, style);
     view.resize(1180, 720);
     view.show();
     const QString me = store.profiles()[0].id;
@@ -239,7 +266,7 @@ TEST_F(ProfilesTest, ThePageShowsAProfileAndItsPartsAndTheExplorerUsesThem) {
     kiebitz::app::DatabaseManager databases(folder.filePath(QStringLiteral("dbs")));
     kiebitz::app::Library library;
     kiebitz::app::RepertoireStore repertoires(library);
-    kiebitz::app::ExplorerPanel explorer(databases, store, repertoires, style);
+    kiebitz::app::ExplorerPanel explorer(databases, store, repertoires, lichess, style);
     auto* source = explorer.findChild<QComboBox*>(QStringLiteral("explorerSource"));
     ASSERT_NE(source, nullptr);
     EXPECT_GE(source->findData(QStringLiteral("profile:") + me), 0);
@@ -342,7 +369,8 @@ TEST_F(ProfilesTest, AProfileFindsItsFidePlayerAndCanPickAnother) {
 
     if (const QString dir = qEnvironmentVariable("KIEBITZ_SNAPSHOT_DIR"); !dir.isEmpty()) {
         const kiebitz::app::AppStyle style(*qApp);
-        kiebitz::app::ProfilesView view(store, style);
+        kiebitz::app::LichessLogin lichess{kiebitz::app::LichessLogin::Storage{}};
+        kiebitz::app::ProfilesView view(store, lichess, style);
         view.resize(1180, 720);
         view.show();
         view.select(id);
@@ -384,4 +412,202 @@ TEST_F(ProfilesTest, WhenFideDoesNotAnswerItSaysSoAndCanTryAgain) {
     ASSERT_TRUE(QTest::qWaitFor([&] { return store.profile(id)->fideLooked; }, 5000));
     EXPECT_TRUE(store.profile(id)->fideError.isEmpty());
     EXPECT_EQ(store.profile(id)->fide->id, 1503014);
+}
+
+TEST_F(ProfilesTest, SigningInToLichessKeepsTheTokenAndWhoItIs) {
+    using kiebitz::app::LichessLogin;
+    server.pages["/api/token"] = R"({"token_type":"Bearer","access_token":"lio_secret"})";
+    server.pages["/api/account"] = R"({"id":"alice","username":"Alice"})";
+    std::optional<QByteArray> kept;
+    LichessLogin::Storage storage;
+    storage.loadToken = [&] {
+        return kept;
+    };
+    storage.saveToken = [&](const QByteArray& token) {
+        kept = token;
+    };
+    storage.removeToken = [&] {
+        kept.reset();
+    };
+    QString name;
+    storage.loadUsername = [&] {
+        return name;
+    };
+    storage.saveUsername = [&](const QString& value) {
+        name = value;
+    };
+    LichessLogin login(storage);
+    login.setServer(server.url());
+    // The "browser": Lichess sends it back to the address the sign-in page names.
+    QUrl opened;
+    QNetworkAccessManager browser;
+    login.setOpenUrl([&](const QUrl& url) {
+        opened = url;
+        const QUrlQuery query(url);
+        QUrl back(query.queryItemValue(QStringLiteral("redirect_uri")));
+        back.setQuery(QStringLiteral("code=abc&state=") +
+                      query.queryItemValue(QStringLiteral("state")));
+        const QNetworkReply* reply = browser.get(QNetworkRequest(back));
+        QObject::connect(reply, &QNetworkReply::finished, reply, &QObject::deleteLater);
+    });
+    EXPECT_FALSE(login.signedIn());
+    login.signIn();
+    EXPECT_EQ(opened.path(), QStringLiteral("/oauth"));
+    EXPECT_EQ(QUrlQuery(opened).queryItemValue(QStringLiteral("code_challenge_method")),
+              QStringLiteral("S256"));
+    ASSERT_TRUE(QTest::qWaitFor([&] { return login.signedIn(); }, 5000));
+    EXPECT_EQ(login.username(), QStringLiteral("Alice"));
+    EXPECT_EQ(login.token(), QByteArray("lio_secret"));
+    EXPECT_EQ(kept, QByteArray("lio_secret"));
+    EXPECT_FALSE(login.busy());
+    // The token request had the code and the verifier; the account request the token.
+    const auto sent = [&](const char* path) {
+        for (const QByteArray& request : server.requests) {
+            if (request.split(' ').value(1).startsWith(path)) {
+                return request;
+            }
+        }
+        return QByteArray();
+    };
+    EXPECT_TRUE(sent("/api/token").startsWith("POST"));
+    EXPECT_TRUE(sent("/api/token").contains("code=abc"));
+    EXPECT_TRUE(sent("/api/token").contains("code_verifier="));
+    EXPECT_TRUE(sent("/api/account").contains("Bearer lio_secret"));
+
+    // Started again, it is still signed in; signed out, the token is gone here and on Lichess.
+    LichessLogin again(storage);
+    again.setServer(server.url());
+    EXPECT_TRUE(again.signedIn());
+    EXPECT_EQ(again.token(), QByteArray("lio_secret"));
+    again.signOut();
+    EXPECT_FALSE(again.signedIn());
+    EXPECT_FALSE(kept.has_value());
+    EXPECT_TRUE(QTest::qWaitFor(
+        [&] {
+            return std::any_of(
+                server.requests.begin(), server.requests.end(),
+                [](const QByteArray& r) { return r.startsWith("DELETE /api/token"); });
+        },
+        5000));
+}
+
+TEST_F(ProfilesTest, ALichessSignInYouTurnDownChangesNothing) {
+    using kiebitz::app::LichessLogin;
+    LichessLogin login(LichessLogin::Storage{});
+    login.setServer(server.url());
+    QNetworkAccessManager browser;
+    login.setOpenUrl([&](const QUrl& url) {
+        QUrl back(QUrlQuery(url).queryItemValue(QStringLiteral("redirect_uri")));
+        back.setQuery(QStringLiteral("error=access_denied&state=x"));
+        const QNetworkReply* reply = browser.get(QNetworkRequest(back));
+        QObject::connect(reply, &QNetworkReply::finished, reply, &QObject::deleteLater);
+    });
+    const QSignalSpy failed(&login, &LichessLogin::failed);
+    login.signIn();
+    EXPECT_TRUE(login.busy());
+    ASSERT_TRUE(QTest::qWaitFor([&] { return !login.busy(); }, 5000));
+    EXPECT_FALSE(login.signedIn());
+    EXPECT_EQ(failed.count(), 0);
+}
+
+TEST(LichessExplorer, AsksForTheFilterLichessKnows) {
+    using kiebitz::app::LichessExplorer;
+    const kiebitz::core::Position position;
+    const auto e4 = position.parseSan("e4").value();
+    kiebitz::gamedb::ExploreFilter filter;
+    filter.minRating = 1700;
+    filter.maxRating = 2100;
+    filter.fromYear = 2020;
+    filter.speeds =
+        static_cast<std::uint8_t>((1U << static_cast<unsigned>(kiebitz::gamedb::Speed::Blitz)) |
+                                  (1U << static_cast<unsigned>(kiebitz::gamedb::Speed::Rapid)));
+    const QUrl url = LichessExplorer::url(QUrl(QStringLiteral("https://x")),
+                                          LichessExplorer::Kind::Lichess, {e4}, filter);
+    const QUrlQuery query(url);
+    EXPECT_EQ(url.path(), QStringLiteral("/lichess"));
+    EXPECT_EQ(query.queryItemValue(QStringLiteral("play")), QStringLiteral("e2e4"));
+    EXPECT_EQ(query.queryItemValue(QStringLiteral("speeds")), QStringLiteral("blitz,rapid"));
+    // 1600–1800 holds 1700; up to 2000–2200, which holds 2100.
+    EXPECT_EQ(query.queryItemValue(QStringLiteral("ratings")), QStringLiteral("1600,1800,2000"));
+    EXPECT_EQ(query.queryItemValue(QStringLiteral("since")), QStringLiteral("2020-01"));
+    EXPECT_FALSE(query.hasQueryItem(QStringLiteral("until")));
+    // The masters: only the years.
+    const QUrlQuery masters(LichessExplorer::url(QUrl(QStringLiteral("https://x")),
+                                                 LichessExplorer::Kind::Masters, {}, filter));
+    EXPECT_EQ(masters.queryItemValue(QStringLiteral("since")), QStringLiteral("2020"));
+    EXPECT_FALSE(masters.hasQueryItem(QStringLiteral("speeds")));
+}
+
+TEST_F(ProfilesTest, TheExplorerShowsLichessOnceSignedIn) {
+    using kiebitz::app::LichessLogin;
+    server.pages["/masters"] =
+        R"({"white":60,"draws":30,"black":10,"moves":[)"
+        R"({"uci":"e2e4","san":"e4","averageRating":2410,"white":40,"draws":20,"black":5},)"
+        R"({"uci":"d2d4","san":"d4","averageRating":2430,"white":20,"draws":10,"black":5}],)"
+        R"("topGames":[{"uci":"e2e4","id":"abcd1234","winner":"white",)"
+        R"("white":{"name":"Carlsen, M.","rating":2863},"black":{"name":"Caruana, F.",)"
+        R"("rating":2828},"year":2019,"month":"2019-04"}]})";
+    server.pages["/masters/pgn/abcd1234"] =
+        "[White \"Carlsen, M.\"]\n[Black \"Caruana, F.\"]\n[Result \"1-0\"]\n\n1. e4 e5 1-0\n";
+    const kiebitz::app::AppStyle style(*qApp);
+    ProfileStore store(folder.filePath(QStringLiteral("profiles")));
+    kiebitz::app::DatabaseManager databases(folder.filePath(QStringLiteral("databases")));
+    kiebitz::app::Library library;
+    kiebitz::app::RepertoireStore repertoires(library);
+    // Signed out: the explorer says what to do.
+    std::optional<QByteArray> token;
+    QString name;
+    LichessLogin::Storage storage;
+    storage.loadToken = [&] {
+        return token;
+    };
+    storage.saveToken = [&](const QByteArray& value) {
+        token = value;
+    };
+    storage.removeToken = [&] {
+        token.reset();
+    };
+    storage.loadUsername = [&] {
+        return name;
+    };
+    storage.saveUsername = [&](const QString& value) {
+        name = value;
+    };
+    LichessLogin signedOut(storage);
+    kiebitz::app::ExplorerPanel offline(databases, store, repertoires, signedOut, style);
+    offline.show();
+    auto* offlineSource = offline.findChild<QComboBox*>(QStringLiteral("explorerSource"));
+    offlineSource->setCurrentIndex(offlineSource->findData(QStringLiteral("lichess:masters")));
+    emit offlineSource->activated(offlineSource->currentIndex());
+    EXPECT_TRUE(offline.findChild<QWidget*>(QStringLiteral("explorerSignIn"))->isVisible());
+
+    // Signed in: the masters' moves and top games, asked for with the token.
+    token = QByteArray("lio_secret");
+    name = QStringLiteral("Alice");
+    LichessLogin login(storage);
+    kiebitz::app::ExplorerPanel explorer(databases, store, repertoires, login, style);
+    explorer.lichessExplorer().setServers(server.url(), server.url());
+    explorer.show();
+    auto* source = explorer.findChild<QComboBox*>(QStringLiteral("explorerSource"));
+    source->setCurrentIndex(source->findData(QStringLiteral("lichess:masters")));
+    emit source->activated(source->currentIndex());
+    ASSERT_TRUE(QTest::qWaitFor([&] { return explorer.moveTexts().size() == 2; }, 5000));
+    EXPECT_EQ(explorer.moveTexts().front(), QStringLiteral("e4 65 2410"));
+    EXPECT_FALSE(explorer.findChild<QWidget*>(QStringLiteral("explorerSignIn"))->isVisible());
+    EXPECT_TRUE(std::any_of(server.requests.begin(), server.requests.end(), [](const auto& r) {
+        return r.startsWith("GET /masters") && r.contains("Bearer lio_secret");
+    }));
+    if (const QString dir = qEnvironmentVariable("KIEBITZ_SNAPSHOT_DIR"); !dir.isEmpty()) {
+        explorer.resize(460, 520);
+        QTest::qWait(100);
+        explorer.grab().save(QDir(dir).filePath(QStringLiteral("explorer-masters.png")));
+    }
+    // A top game opens whole.
+    auto* games = explorer.findChild<QTreeWidget*>(QStringLiteral("explorerGames"));
+    ASSERT_EQ(games->topLevelItemCount(), 1);
+    EXPECT_EQ(games->topLevelItem(0)->text(0), QStringLiteral("Carlsen, M. (2863)"));
+    QSignalSpy opened(&explorer, &kiebitz::app::ExplorerPanel::openGameRequested);
+    emit games->itemDoubleClicked(games->topLevelItem(0), 0);
+    EXPECT_TRUE(opened.wait(5000));
+    QSettings().remove(QStringLiteral("explorer/source")); // other tests start without a choice
 }

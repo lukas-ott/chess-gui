@@ -4,6 +4,7 @@
 #include "NewFileDialog.hpp"
 #include "board/BoardView.hpp"
 #include "document/PgnIo.hpp"
+#include "kiebitz/repertoire/gaps.hpp"
 #include "kiebitz/repertoire/summary.hpp"
 #include "repertoire/RepertoireStore.hpp"
 #include "style/AppStyle.hpp"
@@ -52,6 +53,7 @@
 #include <functional>
 #include <map>
 #include <span>
+#include <utility>
 
 namespace kiebitz::app {
 
@@ -781,6 +783,46 @@ LibraryView::LibraryView(Library& library, RepertoireStore& store, const AppStyl
     repBox->addWidget(label(tr("OPENINGS IN THIS FILE"), "cardTitle"));
     repBox->addWidget(m_repStatus);
     repBox->addWidget(m_repOpenings, 1);
+
+    // Gaps: common opponent moves the file doesn't answer yet, by the Explorer's games.
+    m_checkGaps = new QPushButton(tr("Check"));
+    m_checkGaps->setObjectName(QStringLiteral("libraryCheckGaps"));
+    m_checkGaps->setProperty("role", "secondary");
+    m_checkGaps->setProperty("compact", true);
+    m_checkGaps->setToolTip(tr("Look for common opponent moves this file doesn't answer, in the "
+                               "games of the Explorer's source"));
+    connect(m_checkGaps, &QPushButton::clicked, this, &LibraryView::checkGaps);
+    auto* gapsHeader = new QHBoxLayout;
+    gapsHeader->addWidget(label(tr("GAPS"), "cardTitle"));
+    gapsHeader->addStretch();
+    gapsHeader->addWidget(m_checkGaps);
+    m_gapsStatus = label(QString(), "emptyHint");
+    m_gapsStatus->setObjectName(QStringLiteral("libraryGapsStatus"));
+    m_gapsStatus->setWordWrap(true);
+    m_gaps = new QTreeWidget;
+    m_gaps->setObjectName(QStringLiteral("repertoireGaps"));
+    m_gaps->setColumnCount(3);
+    m_gaps->setHeaderHidden(true);
+    m_gaps->setRootIsDecorated(false);
+    m_gaps->setFrameShape(QFrame::NoFrame);
+    m_gaps->setFocusPolicy(Qt::NoFocus);
+    m_gaps->setUniformRowHeights(true);
+    m_gaps->setCursor(Qt::PointingHandCursor);
+    m_gaps->header()->setStretchLastSection(false);
+    m_gaps->header()->setSectionResizeMode(0, QHeaderView::Stretch);
+    m_gaps->header()->setSectionResizeMode(1, QHeaderView::ResizeToContents);
+    m_gaps->header()->setSectionResizeMode(2, QHeaderView::ResizeToContents);
+    connect(m_gaps, &QTreeWidget::itemClicked, this, [this](QTreeWidgetItem* item) {
+        const int index = m_gaps->indexOfTopLevelItem(item);
+        if (m_file && index >= 0 && std::cmp_less(index, m_gapList.size())) {
+            const repertoire::Gap& gap = m_gapList[static_cast<std::size_t>(index)];
+            emit gapRequested(m_file->path, gap.line, gap.move);
+        }
+    });
+    repBox->addSpacing(8);
+    repBox->addLayout(gapsHeader);
+    repBox->addWidget(m_gapsStatus);
+    repBox->addWidget(m_gaps, 1);
     m_detail->addWidget(repertoirePage);
     connect(&m_store, &RepertoireStore::changed, this, [this] {
         if (m_detail->currentIndex() == kRepertoirePage) {
@@ -1236,7 +1278,130 @@ void LibraryView::showRepertoire(const std::shared_ptr<PgnFile>& file) {
                                            QStringLiteral("  ·  ") + tr("%1 chapters").arg(games)
                                      : typeName(FileKind::Repertoire, side));
     m_store.loadOpenings();
+    resetGaps();
     refreshRepertoire();
+}
+
+void LibraryView::resetGaps() {
+    if (m_gapsCancel) {
+        m_gapsCancel->store(true); // a check of another file stops
+    }
+    ++m_gapsRequest;
+    m_gapList.clear();
+    m_gaps->clear();
+    m_gaps->hide();
+    m_checkGaps->setEnabled(true);
+    m_checkGaps->setText(tr("Check"));
+    m_gapsStatus->setText(tr("Which common opponent moves this file doesn't answer yet, judged by "
+                             "the games of the Explorer's source."));
+}
+
+void LibraryView::checkGaps() {
+    if (!m_file) {
+        return;
+    }
+    const RepertoireFile* built = m_store.builtFile(m_file->path);
+    const GapSource source = m_gapSource ? m_gapSource() : GapSource{};
+    if (built == nullptr || !source.explore) {
+        m_gapsStatus->setText(built == nullptr ? tr("Reading the repertoire…")
+                                               : source.unavailable);
+        return;
+    }
+    resetGaps();
+    const int request = m_gapsRequest;
+    m_gapsCancel = std::make_shared<std::atomic<bool>>(false);
+    m_checkGaps->setEnabled(false);
+    m_checkGaps->setText(tr("Checking…"));
+    m_gapsStatus->setText(tr("Checking against %1…").arg(source.name));
+    // In the background, from copies: the file may change meanwhile.
+    std::vector<core::Game> games = built->games;
+    const core::Color side = RepertoireStore::sideOf(*m_file);
+    // Owned by the view and deleted when done (deleteLater); the analyzer can't see that.
+    auto* watcher = new QFutureWatcher<repertoire::GapReport>(
+        this); // NOLINT(clang-analyzer-cplusplus.NewDeleteLeaks)
+    connect(watcher, &QFutureWatcher<repertoire::GapReport>::finished, this,
+            [this, watcher, request, name = source.name] {
+                watcher->deleteLater();
+                if (request != m_gapsRequest) {
+                    return; // another file is shown now
+                }
+                const repertoire::GapReport report = watcher->result();
+                m_checkGaps->setEnabled(true);
+                m_checkGaps->setText(tr("Check Again"));
+                m_gapList = report.gaps;
+                m_gaps->clear();
+                const QLocale locale;
+                for (const repertoire::Gap& gap : m_gapList) {
+                    // "8… h6": the move as the move list writes it, the line in the tooltip.
+                    core::Position position;
+                    QStringList line;
+                    for (std::size_t k = 0; k < gap.line.size(); ++k) {
+                        const QString number =
+                            k % 2 == 0 ? QStringLiteral("%1. ").arg((k / 2) + 1) : QString();
+                        line << number + QString::fromStdString(position.san(gap.line[k]));
+                        position.play(gap.line[k]);
+                    }
+                    const std::size_t ply = gap.line.size();
+                    const QString move =
+                        QStringLiteral("%1%2 %3")
+                            .arg((ply / 2) + 1)
+                            .arg(ply % 2 == 0 ? QStringLiteral(".") : QStringLiteral("…"))
+                            .arg(QString::fromStdString(gap.san));
+                    auto* item = new QTreeWidgetItem(m_gaps);
+                    item->setText(0, move);
+                    item->setToolTip(0, (line.join(u' ') + QStringLiteral("  ") + move).trimmed());
+                    item->setText(1, QStringLiteral("%1%").arg(qRound(gap.share * 100)));
+                    item->setToolTip(1,
+                                     tr("Played in %1% of the games here (%2)")
+                                         .arg(qRound(gap.share * 100))
+                                         .arg(locale.toString(static_cast<qulonglong>(gap.games))));
+                    item->setForeground(1, m_style.colors().muted);
+                    const double percent = gap.likelihood * 100;
+                    item->setText(2, percent >= 1 ? tr("%1% of games").arg(qRound(percent))
+                                                  : tr("<1% of games"));
+                    item->setToolTip(2, tr("How often you'd meet it from the start, playing "
+                                           "this file"));
+                    item->setForeground(2, m_style.colors().muted);
+                }
+                m_gaps->setVisible(!m_gapList.empty());
+                QString status;
+                if (m_gapList.empty()) {
+                    status = tr("No gaps against %1: every common reply is answered.").arg(name);
+                } else if (m_gapList.size() == 1) {
+                    status = tr("1 gap against %1. Click it to add your answer.").arg(name);
+                } else {
+                    status = tr("%1 gaps against %2. Click one to add your answer.")
+                                 .arg(m_gapList.size())
+                                 .arg(name);
+                }
+                if (report.stopped) {
+                    status += QLatin1Char(' ') +
+                              tr("(Checked the %1 most likely positions.)").arg(report.asked);
+                }
+                m_gapsStatus->setText(status);
+                emit gapsChecked();
+            });
+    watcher->setFuture(QtConcurrent::run(
+        [games = std::move(games), side, explore = source.explore, cancel = m_gapsCancel] {
+            repertoire::Tree tree(side);
+            for (std::size_t k = 0; k < games.size(); ++k) {
+                tree.add(games[k], 0, static_cast<int>(k));
+            }
+            return repertoire::findGaps(tree, explore, {}, [cancel] { return cancel->load(); });
+        }));
+} // NOLINT(clang-analyzer-cplusplus.NewDeleteLeaks)
+
+QStringList LibraryView::repertoireGaps() const {
+    QStringList texts;
+    for (int i = 0; i < m_gaps->topLevelItemCount(); ++i) {
+        const auto* item = m_gaps->topLevelItem(i);
+        texts << QStringLiteral("%1  %2  %3").arg(item->text(0), item->text(1), item->text(2));
+    }
+    return texts;
+}
+
+QString LibraryView::gapsStatus() const {
+    return m_gapsStatus->text();
 }
 
 void LibraryView::refreshRepertoire() {
