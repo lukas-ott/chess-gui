@@ -3,15 +3,25 @@
 # including new files not yet added to git (but not ignored ones like build/).
 # Fails on any difference or warning. CI runs this too.
 #
-# Usage: scripts/lint.sh [build-dir]
+# Usage: scripts/lint.sh [build-dir] [--changed]
 #   build-dir must be configured and built (clang-tidy needs its compile_commands.json and the
 #   files Qt generates). Defaults to build/dev.
+#   --changed: clang-tidy only the files changed since the last commit (and new ones), plus
+#   the .cpp files that include a changed header. Much faster while working; CI checks all.
+#   Files the build doesn't compile (e.g. bench/ without KIEBITZ_BUILD_BENCH) are skipped.
 #
 # Fix formatting in place with:
 #   git ls-files -z --cached --others --exclude-standard '*.cpp' '*.hpp' | xargs -0 clang-format -i
 set -euo pipefail
 
-BUILD_DIR="${1:-build/dev}"
+BUILD_DIR="build/dev"
+CHANGED=0
+for arg in "$@"; do
+    case "$arg" in
+        --changed) CHANGED=1 ;;
+        *) BUILD_DIR="$arg" ;;
+    esac
+done
 cd "$(git rev-parse --show-toplevel)"
 
 if [[ ! -f "$BUILD_DIR/compile_commands.json" ]]; then
@@ -31,7 +41,41 @@ if [[ "$(uname)" == "Darwin" ]]; then
 fi
 
 echo "clang-tidy: $(clang-tidy --version | grep -i version)"
+# The .cpp files to check: those the build compiles (in compile_commands.json) ...
+all_files="$(git ls-files --cached --others --exclude-standard '*.cpp')"
+compiled="$(cat "$BUILD_DIR/compile_commands.json")"
+files=()
+while IFS= read -r file; do
+    [[ -n "$file" && "$compiled" == *"$PWD/$file"* ]] && files+=("$file")
+done <<<"$all_files"
+# ... and with --changed, only the changed ones and those including a changed header.
+if [[ "$CHANGED" == 1 ]]; then
+    changed="$( (git diff --name-only HEAD; git ls-files --others --exclude-standard) | sort -u)"
+    headers=()
+    while IFS= read -r file; do
+        [[ "$file" == *.hpp ]] && headers+=("$(basename "$file")")
+    done <<<"$changed"
+    picked=()
+    for file in "${files[@]}"; do
+        if grep -qxF "$file" <<<"$changed"; then
+            picked+=("$file")
+            continue
+        fi
+        for header in "${headers[@]+"${headers[@]}"}"; do
+            if grep -q "#include [\"<].*$header[\">]" "$file"; then
+                picked+=("$file")
+                break
+            fi
+        done
+    done
+    files=("${picked[@]+"${picked[@]}"}")
+    echo "clang-tidy: ${#files[@]} changed file(s)"
+fi
+if [[ ${#files[@]} -eq 0 ]]; then
+    echo "Lint OK"
+    exit 0
+fi
 jobs="$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 4)"
-git ls-files -z --cached --others --exclude-standard '*.cpp' | xargs -0 -n 1 -P "$jobs" \
+printf '%s\0' "${files[@]}" | xargs -0 -n 1 -P "$jobs" \
     clang-tidy -p "$BUILD_DIR" --quiet --warnings-as-errors='*' "${extra_args[@]}"
 echo "Lint OK"

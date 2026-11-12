@@ -49,8 +49,11 @@ QByteArray userAgent() {
 } // namespace
 
 QString LichessLogin::defaultFile() {
-    return QDir(QStandardPaths::writableLocation(QStandardPaths::AppDataLocation))
-        .filePath(QStringLiteral("lichess-logins.json"));
+    QString folder = qEnvironmentVariable("KIEBITZ_SETTINGS_DIR"); // tests: never the real one
+    if (folder.isEmpty()) {
+        folder = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
+    }
+    return QDir(folder).filePath(QStringLiteral("lichess-logins.json"));
 }
 
 LichessLogin::Storage LichessLogin::privateFile(const QString& path) {

@@ -18,6 +18,7 @@ cmake --preset debug && cmake --build --preset debug && ctest --preset debug   #
 ./build/release/bench/kiebitz_bench
 bash scripts/measure_startup.sh build/release
 bash scripts/lint.sh [build-dir]                 # clang-format + clang-tidy, must pass in CI
+bash scripts/lint.sh build/dev --changed         # clang-tidy on changed files only (while working)
 bash scripts/package_macos.sh                    # self-contained .app + .dmg
 ```
 
@@ -32,6 +33,9 @@ bash scripts/package_macos.sh                    # self-contained .app + .dmg
 - Every new chess-logic feature gets unit tests. Move generation is verified with perft.
 - Engine UI tests use `tests/fake_engine.cpp`, a predictable UCI engine; a `RealEngine` test runs
   Homebrew's Stockfish when it is installed (skipped in CI). Tests never use the network.
+- Tests run in parallel (8 at a time): each UI test process gets its own temporary settings and
+  data folder (`tests/ui/main.cpp`), so tests must not depend on timing that only holds when
+  the machine is idle; wait for what they need (`QTest::qWaitFor`) with generous timeouts.
 - UI behaviour gets tests in `tests/ui/` (real mouse events, offscreen). Set
   `KIEBITZ_SNAPSHOT_DIR=<dir>` when running `kiebitz_ui_tests` to save PNGs of the board.
 - Performance-sensitive code gets a benchmark in `bench/`.

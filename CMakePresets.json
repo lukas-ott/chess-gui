@@ -89,7 +89,7 @@
       "name": "base",
       "hidden": true,
       "output": { "outputOnFailure": true },
-      "execution": { "noTestsAction": "error", "stopOnFailure": false }
+      "execution": { "noTestsAction": "error", "stopOnFailure": false, "jobs": 8 }
     },
     { "name": "debug", "inherits": "base", "configurePreset": "debug" },
     { "name": "dev", "inherits": "base", "configurePreset": "dev" },

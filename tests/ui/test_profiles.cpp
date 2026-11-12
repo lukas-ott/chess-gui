@@ -835,7 +835,7 @@ TEST_F(ProfilesTest, TheRepertoireTabShowsWhereGamesLeftTheBook) {
         QTest::qWaitFor([&] { return view.theorySummary().contains(u"games checked"); }, 5000));
     // Under their openings (the names come in the background).
     ASSERT_TRUE(QTest::qWaitFor(
-        [&] { return !view.theoryRows().join(u'|').contains(u"Other openings"); }, 5000));
+        [&] { return !view.theoryRows().join(u'|').contains(u"Other openings"); }, 20000));
     QStringList rows = view.theoryRows();
     rows.sort(); // openings with as many games come in any order
     EXPECT_EQ(rows, (QStringList{QStringLiteral("Bishop's Opening: 2. Bc4  You  2  2. Nf3"),

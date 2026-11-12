@@ -484,14 +484,23 @@ TEST_F(LibraryTreeTest, ALongFileNameDoesNotWidenTheWindow) {
               "[White \"?\"]\n[Black \"?\"]\n\n1. e4 *\n");
     ASSERT_TRUE(QTest::qWaitFor(
         [&] { return item(name) != nullptr && item(QStringLiteral("Short")) != nullptr; }, 5000));
-    tree->setCurrentItem(item(QStringLiteral("Short")));
-    QApplication::processEvents();
-    const int before = minimumWidth();
-    tree->setCurrentItem(item(name));
-    QApplication::processEvents();
-    // The heading over the game list is cut off with "…" (the tooltip has all of it) ...
+    // Selected and shown (a rescan for the new files may come in between: select again then).
     const auto* title = window.findChild<QLabel*>(QStringLiteral("libraryListTitle"));
     ASSERT_NE(title, nullptr);
+    const auto show = [&](const QString& file) {
+        return QTest::qWaitFor(
+            [&] {
+                if (title->toolTip() != file && item(file) != nullptr) {
+                    tree->setCurrentItem(item(file));
+                }
+                return title->toolTip() == file;
+            },
+            10000);
+    };
+    ASSERT_TRUE(show(QStringLiteral("Short")));
+    const int before = minimumWidth();
+    ASSERT_TRUE(show(name));
+    // The heading over the game list is cut off with "…" (the tooltip has all of it) ...
     EXPECT_TRUE(title->text().endsWith(QStringLiteral("…")));
     EXPECT_EQ(title->toolTip(), name);
     EXPECT_LE(minimumWidth(), before);
@@ -673,7 +682,8 @@ TEST_F(DocumentsTest, FileTypesShowInTheLibraryAndFilterIt) {
         QTest::qWaitFor([&] { return view->repertoireStats().value(0) == u"1"; }, 5000)); // 1... c5
     EXPECT_EQ(view->repertoireStats(),
               (QStringList{QStringLiteral("1"), QStringLiteral("1"), QStringLiteral("move 1")}));
-    ASSERT_TRUE(QTest::qWaitFor([&] { return !view->repertoireOpenings().isEmpty(); }, 5000));
+    // The opening names load in the background (slow under ASan with other tests running).
+    ASSERT_TRUE(QTest::qWaitFor([&] { return !view->repertoireOpenings().isEmpty(); }, 20000));
     // The one position to practise is after 1. e4 (your answer: 1... c5).
     EXPECT_EQ(view->repertoireOpenings(),
               QStringList{QStringLiteral("King's Pawn Game  1 position")});
