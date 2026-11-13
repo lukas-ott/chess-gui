@@ -39,7 +39,7 @@ protected:
     void SetUp() override {
         window.show();
         ASSERT_TRUE(QTest::qWaitForWindowExposed(&window));
-        board = window.findChild<BoardView*>();
+        board = window.findChild<BoardView*>(QStringLiteral("gameBoard"));
         ASSERT_NE(board, nullptr);
         // The app starts in the Library; the game tests work on the board.
         window.showSection(MainWindow::Section::Board);

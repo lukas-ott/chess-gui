@@ -488,6 +488,8 @@ QLabel[role="quote"] {
 }
 QProgressBar#practiceBar { background: @raised; border: none; border-radius: 2px; }
 QProgressBar#practiceBar::chunk { background: @accent; border-radius: 2px; }
+QProgressBar#puzzleProgress { background: @raised; border: none; border-radius: 2px; }
+QProgressBar#puzzleProgress::chunk { background: @accent; border-radius: 2px; }
 
 /* The players' clocks above and below the board */
 QLabel[role="boardClock"] {

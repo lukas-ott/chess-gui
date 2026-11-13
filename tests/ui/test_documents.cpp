@@ -116,7 +116,7 @@ protected:
         ASSERT_TRUE(folder.isValid());
         window.show();
         ASSERT_TRUE(QTest::qWaitForWindowExposed(&window));
-        board = window.findChild<BoardView*>();
+        board = window.findChild<BoardView*>(QStringLiteral("gameBoard"));
         tabs = window.findChild<QTabBar*>(QStringLiteral("documentTabs"));
         notation = window.findChild<NotationView*>();
         ASSERT_NE(board, nullptr);

@@ -120,6 +120,8 @@ signals:
                       kiebitz::core::Move move);
     /// The gap check is done (tests).
     void gapsChecked();
+    /// "Solve" on a puzzle file: its puzzles on the Puzzles page.
+    void puzzlesRequested(const QString& path);
     /// The repertoire preview's "Open Here": the file at the position after `line`.
     void positionRequested(const QString& path, const std::vector<kiebitz::core::Move>& line);
 
@@ -176,6 +178,7 @@ private:
     GameListModel* m_model = nullptr;
     GameFilter* m_filter = nullptr; ///< search, dates and order
     DateRange* m_dates = nullptr;
+    QPushButton* m_solvePuzzles = nullptr; ///< a puzzle file's "Solve"
 
     // Preview, under the games
     QStackedWidget* m_preview = nullptr; ///< a hint to pick a game, or the game

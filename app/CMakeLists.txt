@@ -62,6 +62,12 @@ qt_add_library(kiebitz_ui STATIC
     panels/GameInfoPanel.hpp
     repertoire/RepertoireStore.cpp
     repertoire/RepertoireStore.hpp
+    puzzles/LichessPuzzles.cpp
+    puzzles/LichessPuzzles.hpp
+    puzzles/PuzzleStats.cpp
+    puzzles/PuzzleStats.hpp
+    puzzles/PuzzlesView.cpp
+    puzzles/PuzzlesView.hpp
     profiles/AddAccountDialog.cpp
     profiles/AddAccountDialog.hpp
     profiles/Fide.cpp
@@ -117,7 +123,8 @@ qt_add_library(kiebitz_ui STATIC
     widgets/Stepper.hpp)
 target_include_directories(kiebitz_ui PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")
 target_link_libraries(kiebitz_ui PUBLIC Qt6::Widgets Qt6::Svg Qt6::Concurrent Qt6::Network
-    kiebitz::pgn kiebitz::engine kiebitz::gamedb kiebitz::library kiebitz::repertoire)
+    kiebitz::pgn kiebitz::engine kiebitz::gamedb kiebitz::library kiebitz::repertoire
+    kiebitz::puzzles)
 if(APPLE)
     # The board's sounds play as macOS sound effects (no audio stream of our own).
     target_link_libraries(kiebitz_ui PUBLIC "-framework AudioToolbox" "-framework CoreFoundation")

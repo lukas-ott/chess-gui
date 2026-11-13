@@ -37,6 +37,25 @@ set_target_properties(sqlite3 PROPERTIES POSITION_INDEPENDENT_CODE ON)
 find_package(Threads REQUIRED)
 target_link_libraries(sqlite3 PRIVATE Threads::Threads ${CMAKE_DL_LIBS})
 
+# zstd (BSD): reads the Lichess puzzle database, which comes zstd-compressed (macOS's own tar
+# can't). Only the library's C sources are built, without its CMake project or assembly.
+FetchContent_Declare(zstd
+    URL https://github.com/facebook/zstd/releases/download/v1.5.7/zstd-1.5.7.tar.gz
+    URL_HASH SHA256=eb33e51f49a15e023950cd7825ca74a4a2b43db8354825ac24fc1b7ee09e6fa3
+    SOURCE_SUBDIR do-not-add-subdirectory)
+FetchContent_MakeAvailable(zstd)
+
+file(GLOB KIEBITZ_ZSTD_SOURCES
+    "${zstd_SOURCE_DIR}/lib/common/*.c"
+    "${zstd_SOURCE_DIR}/lib/compress/*.c"
+    "${zstd_SOURCE_DIR}/lib/decompress/*.c")
+add_library(zstd STATIC ${KIEBITZ_ZSTD_SOURCES})
+add_library(thirdparty::zstd ALIAS zstd)
+target_include_directories(zstd SYSTEM INTERFACE "${zstd_SOURCE_DIR}/lib")
+target_include_directories(zstd PRIVATE "${zstd_SOURCE_DIR}/lib" "${zstd_SOURCE_DIR}/lib/common")
+target_compile_definitions(zstd PRIVATE ZSTD_DISABLE_ASM XXH_NAMESPACE=ZSTD_)
+set_target_properties(zstd PROPERTIES POSITION_INDEPENDENT_CODE ON)
+
 if(KIEBITZ_BUILD_TESTS)
     set(INSTALL_GTEST OFF CACHE BOOL "" FORCE)
     set(BUILD_GMOCK OFF CACHE BOOL "" FORCE)

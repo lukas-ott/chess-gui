@@ -749,6 +749,18 @@ LibraryView::LibraryView(Library& library, RepertoireStore& store, const AppStyl
     gamesHeader->addLayout(titles, 1);
     gamesHeader->addWidget(m_search);
     gamesHeader->addWidget(m_dates);
+    // A puzzle file: solved on the Puzzles page.
+    m_solvePuzzles = new QPushButton(tr("Solve"));
+    m_solvePuzzles->setObjectName(QStringLiteral("librarySolvePuzzles"));
+    m_solvePuzzles->setProperty("role", "primary");
+    m_solvePuzzles->setToolTip(tr("Solve this file's puzzles on the Puzzles page"));
+    m_solvePuzzles->hide();
+    connect(m_solvePuzzles, &QPushButton::clicked, this, [this] {
+        if (m_file) {
+            emit puzzlesRequested(m_file->path);
+        }
+    });
+    gamesHeader->addWidget(m_solvePuzzles);
     gamesBox->addLayout(gamesHeader);
     gamesBox->addWidget(m_games, 1);
     gamesBox->addSpacing(4);
@@ -1336,6 +1348,7 @@ void LibraryView::showGames(const std::shared_ptr<PgnFile>& file, FileKind kind)
     m_file = file;
     m_kind = kind;
     m_detail->setCurrentIndex(kGamesPage);
+    m_solvePuzzles->setVisible(kind == FileKind::Puzzle);
     const auto& c = m_style.colors();
     m_gamesIcon->setPixmap(makeIcon(iconOf(kind), c.text, c.dimmed, 22).pixmap(22, 22));
     m_listTitle->setFullText(QFileInfo(file->path).completeBaseName());

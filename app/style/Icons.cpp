@@ -250,6 +250,16 @@ void draw(QPainter& painter, IconKind kind, const QColor& color, int size) {
         painter.drawLine(QPointF(10.5, 2.0), QPointF(10.5, 4.5));
         break;
     }
+    case IconKind::Pause:
+        painter.drawLine(QPointF(5.5, 4.0), QPointF(5.5, 12.0));
+        painter.drawLine(QPointF(10.5, 4.0), QPointF(10.5, 12.0));
+        break;
+    case IconKind::Play: { // a rounded triangle pointing right
+        painter.setPen(QPen(color, 1.4, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
+        painter.setBrush(color);
+        painter.drawPolygon(QPolygonF{QPointF(5.0, 3.5), QPointF(12.5, 8.0), QPointF(5.0, 12.5)});
+        break;
+    }
     case IconKind::Gear: { // one outline with eight square teeth, and a round hole
         painter.setPen(QPen(color, 1.3, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
         const QPointF centre(8.0, 8.0);

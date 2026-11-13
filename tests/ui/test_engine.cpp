@@ -75,7 +75,7 @@ protected:
         window = std::make_unique<MainWindow>(style);
         window->show();
         ASSERT_TRUE(QTest::qWaitForWindowExposed(window.get()));
-        board = window->findChild<BoardView*>();
+        board = window->findChild<BoardView*>(QStringLiteral("gameBoard"));
         panel = window->findChild<EnginePanel*>(QStringLiteral("enginePanel"));
         bar = window->findChild<EvalBar*>(QStringLiteral("evalBar"));
         tabs = window->findChild<QTabBar*>(QStringLiteral("documentTabs"));

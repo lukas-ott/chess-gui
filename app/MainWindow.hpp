@@ -41,6 +41,7 @@ class DatabaseManager;
 class DatabasesView;
 class EvalBar;
 class LichessLogin;
+class LichessPuzzles;
 class ProfileStore;
 class ProfilesView;
 class SettingsView;
@@ -52,6 +53,8 @@ class Library;
 class LibraryView;
 class NotationView;
 class PracticeStats;
+class PuzzleStats;
+class PuzzlesView;
 class RepertoirePanel;
 class RepertoireStore;
 
@@ -66,7 +69,15 @@ class MainWindow : public QMainWindow {
 
 public:
     /// The sidebar's sections: the board with its game tabs, the Library, the Engines page.
-    enum class Section : std::uint8_t { Board, Library, Databases, Profiles, Engines, Settings };
+    enum class Section : std::uint8_t {
+        Board,
+        Library,
+        Puzzles,
+        Databases,
+        Profiles,
+        Engines,
+        Settings
+    };
 
     explicit MainWindow(AppStyle& style, QWidget* parent = nullptr);
     ~MainWindow() override;
@@ -251,6 +262,9 @@ private:
     LibraryView* m_libraryView = nullptr;
     DatabaseManager* m_databases = nullptr;
     DatabasesView* m_databasesView = nullptr;
+    LichessPuzzles* m_lichessPuzzles = nullptr;
+    PuzzleStats* m_puzzleStats = nullptr;
+    PuzzlesView* m_puzzlesView = nullptr;
     ExplorerPanel* m_explorer = nullptr;
     LichessLogin* m_lichess = nullptr; ///< signed in: Lichess explorer, faster downloads
     ProfileStore* m_profiles = nullptr;

@@ -22,6 +22,9 @@
 #include "profiles/LichessLogin.hpp"
 #include "profiles/ProfileStore.hpp"
 #include "profiles/ProfilesView.hpp"
+#include "puzzles/LichessPuzzles.hpp"
+#include "puzzles/PuzzleStats.hpp"
+#include "puzzles/PuzzlesView.hpp"
 #include "repertoire/PracticeStats.hpp"
 #include "repertoire/RepertoirePanel.hpp"
 #include "repertoire/RepertoireStore.hpp"
@@ -265,6 +268,8 @@ void MainWindow::buildFileMenu() {
                     [this] { showSection(Section::Library); });
     menu->addAction(tr("&Board"), QKeySequence(Qt::CTRL | Qt::Key_1), this,
                     [this] { showSection(Section::Board); });
+    menu->addAction(tr("P&uzzles"), QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_U), this,
+                    [this] { showSection(Section::Puzzles); });
     menu->addAction(tr("&Databases"), QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_D), this,
                     [this] { showSection(Section::Databases); });
     menu->addAction(tr("&Profiles"), QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_P), this,
@@ -635,6 +640,38 @@ void MainWindow::buildLayout() {
                 }
             });
 
+    // Puzzles: the Lichess puzzle database and the Library's puzzle files.
+    m_lichessPuzzles = new LichessPuzzles({}, this);
+    m_puzzleStats = new PuzzleStats({}, this);
+    m_puzzlesView =
+        new PuzzlesView(*m_lichessPuzzles, *m_puzzleStats, *m_library, *m_sounds, m_style);
+    connect(m_puzzlesView, &PuzzlesView::analyseRequested, this, &MainWindow::openGameCopy);
+    // The Lichess puzzles start around your best rating: the highest of your main profile's
+    // accounts and its FIDE ratings.
+    m_puzzlesView->setRatingSource([this] {
+        int highest = 0;
+        for (const Profile& profile : m_profiles->profiles()) {
+            if (!profile.main) {
+                continue;
+            }
+            for (const Account& account : profile.accounts) {
+                for (const auto& [speed, rating] : account.ratings) {
+                    highest = std::max(highest, rating);
+                }
+            }
+            if (profile.fide) {
+                highest = std::max(
+                    {highest, profile.fide->standard, profile.fide->rapid, profile.fide->blitz});
+            }
+        }
+        return highest;
+    });
+    connect(m_profiles, &ProfileStore::changed, m_puzzlesView, &PuzzlesView::followRating);
+    connect(m_libraryView, &LibraryView::puzzlesRequested, this, [this](const QString& path) {
+        m_puzzlesView->setSource(path); // before the page opens the puzzles of last time
+        showSection(Section::Puzzles);
+    });
+
     m_enginesView = new EnginesView(*m_engineRegistry, m_style);
     m_enginesView->setObjectName(QStringLiteral("enginesView"));
 
@@ -649,6 +686,7 @@ void MainWindow::buildLayout() {
     m_pages = new QStackedWidget; // in Section order
     m_pages->addWidget(boardPage);
     m_pages->addWidget(m_libraryView);
+    m_pages->addWidget(m_puzzlesView);
     m_pages->addWidget(m_databasesView);
     m_pages->addWidget(m_profilesView);
     m_pages->addWidget(m_enginesView);
@@ -681,6 +719,7 @@ void MainWindow::buildLayout() {
     for (const auto& [section, name, tip] :
          {std::tuple{Section::Board, "sideBoard", tr("Board (⌘1)")},
           std::tuple{Section::Library, "sideLibrary", tr("Library (⌘L)")},
+          std::tuple{Section::Puzzles, "sidePuzzles", tr("Puzzles (⇧⌘U)")},
           std::tuple{Section::Databases, "sideDatabases", tr("Databases (⇧⌘D)")},
           std::tuple{Section::Profiles, "sideProfiles", tr("Profiles (⇧⌘P)")},
           std::tuple{Section::Engines, "sideEngines", tr("Engines (⇧⌘E)")}}) {
@@ -729,6 +768,7 @@ void MainWindow::buildLayout() {
 
 QWidget* MainWindow::buildAnalysisPage() {
     m_board = new BoardView;
+    m_board->setObjectName(QStringLiteral("gameBoard"));
     connect(m_board, &BoardView::moveMade, this, &MainWindow::onMoveMade);
     connect(
         m_board, &BoardView::drawingsChanged, this,
@@ -1000,6 +1040,7 @@ void MainWindow::applySetting(const QString& key) {
                                                    stored.value(kCustomDarkKey).value<QColor>())
                               : BoardTheme::preset(theme));
         m_libraryView->setBoardLook(m_board->theme(), m_board->pieceSetName());
+        m_puzzlesView->setBoardLook(m_board->theme(), m_board->pieceSetName());
         // The menus' ticks (at the start the menus aren't there yet: they read the board).
         for (auto* action : m_themeGroup != nullptr ? m_themeGroup->actions() : QList<QAction*>{}) {
             action->setChecked(theme == kCustomTheme ? action == m_customColorsAction
@@ -1008,6 +1049,7 @@ void MainWindow::applySetting(const QString& key) {
     } else if (is(Settings::kPieces)) {
         m_board->setPieceSet(settings.string(Settings::kPieces));
         m_libraryView->setBoardLook(m_board->theme(), m_board->pieceSetName());
+        m_puzzlesView->setBoardLook(m_board->theme(), m_board->pieceSetName());
         for (auto* action :
              m_piecesGroup != nullptr ? m_piecesGroup->actions() : QList<QAction*>{}) {
             action->setChecked(action->text() == m_board->pieceSetName());
@@ -1034,6 +1076,7 @@ void MainWindow::applySetting(const QString& key) {
         }
         options.autoQueen = settings.flag(Settings::kAutoQueen);
         m_board->setOptions(options);
+        m_puzzlesView->setBoardOptions(options);
         if (m_coordinatesAction != nullptr) {
             const QSignalBlocker block(m_coordinatesAction);
             m_coordinatesAction->setChecked(m_board->showCoordinates());
@@ -1267,6 +1310,10 @@ void MainWindow::showSection(Section section) {
         button->setChecked(true);
     }
     updatePage();
+    if (section == Section::Puzzles) {
+        m_puzzlesView->activate(); // the puzzles of last time, opened when first wanted
+        m_puzzlesView->board()->setFocus();
+    }
 }
 
 void MainWindow::updatePage() {
@@ -1302,6 +1349,8 @@ void MainWindow::updateSidebarIcons() {
         IconKind kind = IconKind::Board;
         if (section == Section::Library) {
             kind = IconKind::Library;
+        } else if (section == Section::Puzzles) {
+            kind = IconKind::Puzzle;
         } else if (section == Section::Databases) {
             kind = IconKind::Database;
         } else if (section == Section::Profiles) {
@@ -1505,7 +1554,9 @@ void MainWindow::updateTitles() {
     const GameDocument* d = doc();
     if (d == nullptr) {
         QString page = tr("Library");
-        if (m_section == Section::Engines) {
+        if (m_section == Section::Puzzles) {
+            page = tr("Puzzles");
+        } else if (m_section == Section::Engines) {
             page = tr("Engines");
         } else if (m_section == Section::Databases) {
             page = tr("Databases");

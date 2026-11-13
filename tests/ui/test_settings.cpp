@@ -146,7 +146,7 @@ protected:
     void SetUp() override {
         window.show();
         ASSERT_TRUE(QTest::qWaitForWindowExposed(&window));
-        board = window.findChild<BoardView*>();
+        board = window.findChild<BoardView*>(QStringLiteral("gameBoard"));
         notation = window.findChild<NotationView*>();
         page = window.findChild<SettingsView*>();
         ASSERT_NE(board, nullptr);
