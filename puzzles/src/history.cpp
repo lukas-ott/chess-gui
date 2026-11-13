@@ -1,5 +1,7 @@
 #include "kiebitz/puzzles/history.hpp"
 
+#include "kiebitz/sql/sqlite.hpp"
+
 #include <algorithm>
 #include <sqlite3.h>
 
@@ -15,32 +17,7 @@ struct History::Impl {
     ~Impl() { sqlite3_close(db); }
 };
 
-namespace {
-
-struct Statement {
-    sqlite3_stmt* handle = nullptr;
-    Statement() = default;
-    Statement(const Statement&) = delete;
-    Statement& operator=(const Statement&) = delete;
-    Statement(Statement&&) = delete;
-    Statement& operator=(Statement&&) = delete;
-    ~Statement() { sqlite3_finalize(handle); }
-
-    bool prepare(sqlite3* db, const char* sql) {
-        return sqlite3_prepare_v2(db, sql, -1, &handle, nullptr) == SQLITE_OK;
-    }
-    void bind(int index, const std::string& text) const {
-        sqlite3_bind_text(handle, index, text.c_str(), static_cast<int>(text.size()),
-                          SQLITE_TRANSIENT);
-    }
-    [[nodiscard]] std::string text(int column) const {
-        const unsigned char* value = sqlite3_column_text(handle, column);
-        const int size = sqlite3_column_bytes(handle, column);
-        return value != nullptr ? std::string(value, value + size) : std::string();
-    }
-};
-
-} // namespace
+using sql::Statement;
 
 History::History(std::unique_ptr<Impl> impl) : m_impl(std::move(impl)) {}
 History::~History() = default;
@@ -51,7 +28,7 @@ core::Result<std::unique_ptr<History>> History::open(const std::string& path) {
                         SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE | SQLITE_OPEN_FULLMUTEX,
                         nullptr) != SQLITE_OK) {
         return core::Error{std::string("Couldn't open the puzzle history: ") +
-                           (impl->db != nullptr ? sqlite3_errmsg(impl->db) : "out of memory")};
+                           sql::errorOf(impl->db)};
     }
     sqlite3_busy_timeout(impl->db, 2000);
     if (sqlite3_exec(impl->db,
@@ -75,8 +52,8 @@ void History::record(const Attempt& attempt) {
                         "VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)")) {
         return;
     }
-    insert.bind(1, attempt.source);
-    insert.bind(2, attempt.puzzle);
+    sql::bindText(insert.handle, 1, attempt.source);
+    sql::bindText(insert.handle, 2, attempt.puzzle);
     sqlite3_bind_int(insert.handle, 3, attempt.solved ? 1 : 0);
     sqlite3_bind_int(insert.handle, 4, attempt.clean ? 1 : 0);
     sqlite3_bind_int64(insert.handle, 5, attempt.millis);
@@ -93,12 +70,12 @@ std::vector<Attempt> History::recent(const std::string& source, int limit) const
                        "source = ? ORDER BY id DESC LIMIT ?")) {
         return result;
     }
-    query.bind(1, source);
+    sql::bindText(query.handle, 1, source);
     sqlite3_bind_int(query.handle, 2, limit);
     while (sqlite3_step(query.handle) == SQLITE_ROW) {
         Attempt attempt;
         attempt.source = source;
-        attempt.puzzle = query.text(0);
+        attempt.puzzle = sql::columnText(query.handle, 0);
         attempt.solved = sqlite3_column_int(query.handle, 1) != 0;
         attempt.clean = sqlite3_column_int(query.handle, 2) != 0;
         attempt.millis = sqlite3_column_int64(query.handle, 3);
@@ -116,7 +93,7 @@ Totals History::totals(const std::string& source) const {
                        "SELECT clean, millis, solved FROM attempts WHERE source = ? ORDER BY id")) {
         return totals;
     }
-    query.bind(1, source);
+    sql::bindText(query.handle, 1, source);
     std::int64_t millis = 0;
     int timed = 0;
     int run = 0;
@@ -147,9 +124,9 @@ std::map<std::string, bool> History::latest(const std::string& source) const {
                        "SELECT puzzle, clean FROM attempts WHERE source = ? ORDER BY id")) {
         return result;
     }
-    query.bind(1, source);
+    sql::bindText(query.handle, 1, source);
     while (sqlite3_step(query.handle) == SQLITE_ROW) {
-        result[query.text(0)] = sqlite3_column_int(query.handle, 1) != 0;
+        result[sql::columnText(query.handle, 0)] = sqlite3_column_int(query.handle, 1) != 0;
     }
     return result;
 }
@@ -157,7 +134,7 @@ std::map<std::string, bool> History::latest(const std::string& source) const {
 void History::clear(const std::string& source) {
     Statement remove;
     if (remove.prepare(m_impl->db, "DELETE FROM attempts WHERE source = ?")) {
-        remove.bind(1, source);
+        sql::bindText(remove.handle, 1, source);
         sqlite3_step(remove.handle);
     }
 }

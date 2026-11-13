@@ -1,5 +1,7 @@
 #include "kiebitz/library/training_stats.hpp"
 
+#include "kiebitz/sql/sqlite.hpp"
+
 #include <sqlite3.h>
 
 namespace kiebitz::library {
@@ -16,15 +18,7 @@ struct TrainingStats::Impl {
 
 namespace {
 
-struct Statement {
-    sqlite3_stmt* handle = nullptr;
-    Statement() = default;
-    Statement(const Statement&) = delete;
-    Statement& operator=(const Statement&) = delete;
-    Statement(Statement&&) = delete;
-    Statement& operator=(Statement&&) = delete;
-    ~Statement() { sqlite3_finalize(handle); }
-};
+using sql::Statement;
 
 // SQLite stores signed 64-bit integers; a position hash is unsigned. The conversion keeps the
 // bits (two's complement, as C++20 defines it), so it comes back the same.
@@ -46,7 +40,7 @@ core::Result<std::unique_ptr<TrainingStats>> TrainingStats::open(const std::stri
                         SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE | SQLITE_OPEN_FULLMUTEX,
                         nullptr) != SQLITE_OK) {
         return core::Error{std::string("Couldn't open the practice statistics: ") +
-                           (impl->db != nullptr ? sqlite3_errmsg(impl->db) : "out of memory")};
+                           sql::errorOf(impl->db)};
     }
     sqlite3_busy_timeout(impl->db, 2000);
     if (sqlite3_exec(impl->db,

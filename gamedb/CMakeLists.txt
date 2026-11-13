@@ -15,5 +15,5 @@ add_library(kiebitz::gamedb ALIAS kiebitz_gamedb)
 target_include_directories(kiebitz_gamedb PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include")
 target_link_libraries(kiebitz_gamedb
     PUBLIC kiebitz::core
-    PRIVATE thirdparty::chess thirdparty::sqlite Threads::Threads)
+    PRIVATE kiebitz::sql thirdparty::chess Threads::Threads)
 kiebitz_set_warnings(kiebitz_gamedb)

@@ -1,5 +1,7 @@
 #include "kiebitz/library/index_cache.hpp"
 
+#include "kiebitz/sql/sqlite.hpp"
+
 #include <cstdio>
 #include <mutex>
 #include <sqlite3.h>
@@ -65,32 +67,10 @@ private:
 
 // ---- SQLite helpers ---------------------------------------------------------------------------
 
-struct Statement {
-    sqlite3_stmt* handle = nullptr;
-    Statement() = default;
-    Statement(const Statement&) = delete;
-    Statement& operator=(const Statement&) = delete;
-    Statement(Statement&&) = delete;
-    Statement& operator=(Statement&&) = delete;
-    ~Statement() { sqlite3_finalize(handle); }
-};
-
-bool exec(sqlite3* db, const char* sql) {
-    return sqlite3_exec(db, sql, nullptr, nullptr, nullptr) == SQLITE_OK;
-}
-
-/// A text column as a string. (SQLite hands text out as unsigned char; a blob read gives the same
-/// bytes as char without a cast.)
-std::string columnText(sqlite3_stmt* statement, int column) {
-    const auto* bytes = static_cast<const char*>(sqlite3_column_blob(statement, column));
-    return {bytes == nullptr ? "" : bytes,
-            static_cast<std::size_t>(sqlite3_column_bytes(statement, column))};
-}
-
-int bindText(sqlite3_stmt* statement, int index, std::string_view text) {
-    return sqlite3_bind_text(statement, index, text.data(), static_cast<int>(text.size()),
-                             SQLITE_TRANSIENT);
-}
+using sql::bindText;
+using sql::columnText;
+using sql::exec;
+using sql::Statement;
 
 } // namespace
 
@@ -162,7 +142,7 @@ std::string setUp(sqlite3*& db, const std::string& path) {
     if (sqlite3_open_v2(path.c_str(), &db,
                         SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE | SQLITE_OPEN_FULLMUTEX,
                         nullptr) != SQLITE_OK) {
-        return db != nullptr ? sqlite3_errmsg(db) : "out of memory";
+        return sql::errorOf(db);
     }
     sqlite3_busy_timeout(db, 2000); // another Kiebitz may be writing for a moment
     // WAL: reads never wait for a write. NORMAL: a crash may lose the last write, never the file.

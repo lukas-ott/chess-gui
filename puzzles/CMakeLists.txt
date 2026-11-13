@@ -12,5 +12,5 @@ add_library(kiebitz::puzzles ALIAS kiebitz_puzzles)
 target_include_directories(kiebitz_puzzles PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include")
 target_link_libraries(kiebitz_puzzles
     PUBLIC kiebitz::core
-    PRIVATE thirdparty::zstd thirdparty::sqlite)
+    PRIVATE kiebitz::sql thirdparty::zstd)
 kiebitz_set_warnings(kiebitz_puzzles)

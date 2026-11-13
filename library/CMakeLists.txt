@@ -8,5 +8,5 @@ add_library(kiebitz_library
 add_library(kiebitz::library ALIAS kiebitz_library)
 
 target_include_directories(kiebitz_library PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include")
-target_link_libraries(kiebitz_library PUBLIC kiebitz::pgn PRIVATE thirdparty::sqlite)
+target_link_libraries(kiebitz_library PUBLIC kiebitz::pgn PRIVATE kiebitz::sql)
 kiebitz_set_warnings(kiebitz_library)

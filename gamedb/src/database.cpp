@@ -1,6 +1,7 @@
 #include "kiebitz/gamedb/database.hpp"
 
 #include "codec.hpp"
+#include "kiebitz/sql/sqlite.hpp"
 
 #include <queue>
 
@@ -109,45 +110,9 @@ template <typename T> bool writeFile(const std::string& path, const std::vector<
 
 // ---- SQLite ------------------------------------------------------------------------------------
 
-struct Statement {
-    sqlite3_stmt* handle = nullptr;
-    Statement() = default;
-    Statement(sqlite3* db, const char* sql) {
-        if (sqlite3_prepare_v2(db, sql, -1, &handle, nullptr) != SQLITE_OK) {
-            handle = nullptr;
-        }
-    }
-    Statement(const Statement&) = delete;
-    Statement& operator=(const Statement&) = delete;
-    Statement(Statement&& other) noexcept : handle(std::exchange(other.handle, nullptr)) {}
-    Statement& operator=(Statement&& other) noexcept {
-        std::swap(handle, other.handle);
-        return *this;
-    }
-    ~Statement() { sqlite3_finalize(handle); }
-};
-
-bool exec(sqlite3* db, const char* sql) {
-    return sqlite3_exec(db, sql, nullptr, nullptr, nullptr) == SQLITE_OK;
-}
-
-void bindText(sqlite3_stmt* statement, int index, std::string_view text) {
-    if (text.empty()) {
-        sqlite3_bind_null(statement, index);
-    } else {
-        sqlite3_bind_text(statement, index, text.data(), static_cast<int>(text.size()),
-                          SQLITE_TRANSIENT);
-    }
-}
-
-std::string columnText(sqlite3_stmt* statement, int column) {
-    // As a blob: the same bytes, given as char (text comes as unsigned char).
-    const auto* text = static_cast<const char*>(sqlite3_column_blob(statement, column));
-    return text == nullptr
-               ? std::string()
-               : std::string(text,
-                             static_cast<std::size_t>(sqlite3_column_bytes(statement, column)));
-}
+using sql::columnText;
+using sql::exec;
+using sql::Statement;
 
 /// The columns every game query selects, in GameInfo's order.
 constexpr const char* kGameColumns =
@@ -262,7 +227,7 @@ struct DatabaseWriter::Impl {
         const auto id = static_cast<std::int64_t>(names.size()) + 1;
         names.emplace(name, id);
         sqlite3_bind_int64(insertName.handle, 1, id);
-        bindText(insertName.handle, 2, name);
+        sql::bindTextOrNull(insertName.handle, 2, name);
         sqlite3_step(insertName.handle);
         sqlite3_reset(insertName.handle);
         return id;
@@ -280,8 +245,7 @@ core::Result<std::unique_ptr<DatabaseWriter>> DatabaseWriter::create(const std::
     const std::string path = pathIn(folder, "games.sqlite");
     if (sqlite3_open_v2(path.c_str(), &impl->db, SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE,
                         nullptr) != SQLITE_OK) {
-        return core::Error{"Couldn't create the database: " +
-                           std::string(impl->db != nullptr ? sqlite3_errmsg(impl->db) : "")};
+        return core::Error{"Couldn't create the database: " + sql::errorOf(impl->db)};
     }
     // While importing nothing else reads the file: no journal, writes in big steps.
     if (!exec(impl->db,
@@ -337,13 +301,13 @@ void DatabaseWriter::add(const ScannedGame& game) {
     bindId(3, game.whiteElo);
     bindId(4, game.blackElo);
     sqlite3_bind_int(insert, 5, static_cast<int>(game.result));
-    bindText(insert, 6, game.date);
+    sql::bindTextOrNull(insert, 6, game.date);
     bindId(7, d.nameId(game.event));
     bindId(8, d.nameId(game.site));
-    bindText(insert, 9, game.round);
-    bindText(insert, 10, game.eco);
+    sql::bindTextOrNull(insert, 9, game.round);
+    sql::bindTextOrNull(insert, 10, game.eco);
     sqlite3_bind_int(insert, 11, static_cast<int>(game.moves.size()));
-    bindText(insert, 12, game.fen);
+    sql::bindTextOrNull(insert, 12, game.fen);
     sqlite3_step(insert);
     sqlite3_reset(insert);
 
@@ -1045,14 +1009,14 @@ std::vector<GameInfo> Database::find(const GameQuery& query, std::size_t limit,
         const std::string text = with + from + filters + extra + " ORDER BY " + order + " LIMIT ?5";
         const Statement statement(db, text.c_str());
         if (!query.text.empty()) {
-            bindText(statement.handle, 1, pattern);
-            bindText(statement.handle, 2, query.text);
+            sql::bindTextOrNull(statement.handle, 1, pattern);
+            sql::bindTextOrNull(statement.handle, 2, query.text);
         }
         if (!query.fromDate.empty()) {
-            bindText(statement.handle, 3, query.fromDate);
+            sql::bindTextOrNull(statement.handle, 3, query.fromDate);
         }
         if (!query.toDate.empty()) {
-            bindText(statement.handle, 4, query.toDate + "~");
+            sql::bindTextOrNull(statement.handle, 4, query.toDate + "~");
         }
         sqlite3_bind_int64(statement.handle, 5, static_cast<sqlite3_int64>(count));
         return readGames(statement.handle);
