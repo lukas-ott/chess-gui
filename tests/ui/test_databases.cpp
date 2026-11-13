@@ -14,6 +14,7 @@
 
 #include <QApplication>
 #include <QCalendarWidget>
+#include <QComboBox>
 #include <QDate>
 #include <QDir>
 #include <QFile>
@@ -23,6 +24,7 @@
 #include <QListWidget>
 #include <QProcess>
 #include <QPushButton>
+#include <QSettings>
 #include <QSignalSpy>
 #include <QTableView>
 #include <QTemporaryDir>
@@ -258,6 +260,65 @@ TEST_F(DatabasesTest, ColumnsSortAndDatesFilter) {
     }
     ASSERT_TRUE(QTest::qWaitFor([&] { return whites().size() == 3; }, 5000));
     EXPECT_EQ(dates->text(), QStringLiteral("Any date"));
+}
+
+TEST_F(DatabasesTest, EachExplorerSourceKeepsItsOwnFilter) {
+    const kiebitz::app::AppStyle style(*qApp);
+    DatabaseManager manager(path("dbs"));
+    kiebitz::app::Library library;
+    kiebitz::app::RepertoireStore repertoires(library);
+    kiebitz::app::ProfileStore profiles(path("profiles"));
+    kiebitz::app::LichessLogin lichess{kiebitz::app::LichessLogin::Storage{}};
+    kiebitz::app::ExplorerPanel explorer(manager, profiles, repertoires, lichess, style);
+    explorer.show();
+    write(path("games.pgn"), kGames);
+    ASSERT_EQ(importAndWait(manager, path("games.pgn"), QStringLiteral("Club games")), QString());
+    const kiebitz::core::Game game;
+    QSignalSpy updated(&explorer, &kiebitz::app::ExplorerPanel::updated);
+    explorer.setPosition(&game, kiebitz::core::Game::root(), kiebitz::core::Color::White);
+    ASSERT_TRUE(updated.wait(5000));
+    ASSERT_FALSE(explorer.moveTexts().isEmpty());
+
+    auto* source = explorer.findChild<QComboBox*>(QStringLiteral("explorerSource"));
+    const auto* filterTab = explorer.findChild<QPushButton*>(QStringLiteral("explorerShowFilter"));
+    QPushButton* bullet = nullptr;
+    for (auto* button : explorer.findChildren<QPushButton*>()) {
+        if (button->text() == u"Bullet") {
+            bullet = button;
+        }
+    }
+    ASSERT_NE(bullet, nullptr);
+    const auto choose = [&](const QString& key) {
+        source->setCurrentIndex(source->findData(key));
+        emit source->activated(source->currentIndex());
+    };
+    const QString database = source->currentData().toString();
+    ASSERT_TRUE(database.startsWith(u"db:"));
+
+    // Bullet for Lichess: the database's games stay, unfiltered.
+    choose(QStringLiteral("lichess:lichess"));
+    EXPECT_FALSE(bullet->isChecked());
+    bullet->click();
+    EXPECT_TRUE(filterTab->text().contains(u"•"));
+    choose(database);
+    EXPECT_FALSE(bullet->isChecked());
+    EXPECT_FALSE(filterTab->text().contains(u"•"));
+    ASSERT_TRUE(QTest::qWaitFor([&] { return !explorer.moveTexts().isEmpty(); }, 5000));
+
+    // Back on Lichess, its filter is still there; and in a new window too (remembered).
+    choose(QStringLiteral("lichess:lichess"));
+    EXPECT_TRUE(bullet->isChecked());
+    const kiebitz::app::ExplorerPanel again(manager, profiles, repertoires, lichess, style);
+    QPushButton* bulletAgain = nullptr;
+    for (auto* button : again.findChildren<QPushButton*>()) {
+        if (button->text() == u"Bullet") {
+            bulletAgain = button;
+        }
+    }
+    ASSERT_NE(bulletAgain, nullptr);
+    EXPECT_TRUE(bulletAgain->isChecked()); // it opens on Lichess, the source chosen last
+    bullet->click();                       // the other tests start without a filter
+    QSettings().remove(QStringLiteral("explorer/source"));
 }
 
 TEST(AddDatabase, AChosenFileNamesTheDatabase) {

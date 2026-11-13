@@ -31,6 +31,7 @@
 #include <QVBoxLayout>
 #include <QtConcurrent/QtConcurrentRun>
 
+#include <algorithm>
 #include <array>
 #include <tuple>
 #include <utility>
@@ -130,6 +131,7 @@ ExplorerPanel::ExplorerPanel(DatabaseManager& databases, ProfileStore& profiles,
     connect(m_source, &QComboBox::activated, this, [this] {
         m_sourceChosen = true;
         QSettings().setValue(QString::fromLatin1(kSourceKey), m_source->currentData());
+        loadFilter(); // each source has its own
         refreshParts();
         filterChanged(); // "Filter •" may change with the parts
     });
@@ -280,6 +282,12 @@ ExplorerPanel::ExplorerPanel(DatabaseManager& databases, ProfileStore& profiles,
     });
     connect(&m_repertoires, &RepertoireStore::changed, this, &ExplorerPanel::refresh);
     connect(&m_lichess, &LichessLogin::changed, this, &ExplorerPanel::refresh);
+    // The filter used to be one for every source; now each has its own, and the old one goes.
+    QSettings old;
+    for (const char* key :
+         {"minRating", "maxRating", "fromYear", "toYear", "speeds", "white", "black"}) {
+        old.remove(QStringLiteral("explorer/") + QLatin1String(key));
+    }
     refreshSources();
     refresh();
 }
@@ -322,6 +330,10 @@ void ExplorerPanel::refreshSources() {
     }
     m_sourceChosen = index >= 0;
     m_source->setCurrentIndex(index >= 0 ? index : 0);
+    if (m_source->currentData().toString() != m_filterSource) {
+        loadFilter();
+        filterChanged();
+    }
     refreshParts();
 }
 
@@ -600,16 +612,8 @@ void ExplorerPanel::showAnswer(const gamedb::Explored& explored,
 }
 
 QWidget* ExplorerPanel::buildFilter() {
-    // Rating, years, time control and (for a profile) the colour it played; remembered.
-    const QSettings settings;
-    m_filter.minRating = settings.value(QStringLiteral("explorer/minRating"), 0).toInt();
-    m_filter.maxRating = settings.value(QStringLiteral("explorer/maxRating"), 0).toInt();
-    m_filter.fromYear = settings.value(QStringLiteral("explorer/fromYear"), 0).toInt();
-    m_filter.toYear = settings.value(QStringLiteral("explorer/toYear"), 0).toInt();
-    m_filter.speeds =
-        static_cast<std::uint8_t>(settings.value(QStringLiteral("explorer/speeds"), 0).toUInt());
-    m_filter.white = settings.value(QStringLiteral("explorer/white")).toString().toStdString();
-    m_filter.black = settings.value(QStringLiteral("explorer/black")).toString().toStdString();
+    // Rating, years, time control and (for a profile) the colour it played; remembered for
+    // each source (loadFilter() puts a source's into the controls).
 
     auto* page = new QWidget;
     page->setObjectName(QStringLiteral("explorerFilter"));
@@ -768,22 +772,36 @@ QWidget* ExplorerPanel::buildFilter() {
     auto* reset = new QPushButton(tr("Reset"));
     reset->setObjectName(QStringLiteral("explorerFilterReset"));
     reset->setProperty("role", "secondary");
-    m_resetFilter = [this, ratings, years, speedButtons, sideButtons, whiteName, blackName] {
+    // The controls showing m_filter (another source's, or none after Reset).
+    m_showFilter = [this, ratings, years, speedButtons, sideButtons, whiteName, blackName] {
+        const gamedb::ExploreFilter filter = m_filter; // the controls write into m_filter
+        const auto number = [](int value) {
+            return value > 0 ? QString::number(value) : QString();
+        };
+        whiteName->setText(QString::fromStdString(filter.white));
+        blackName->setText(QString::fromStdString(filter.black));
+        ratings[0]->setText(number(filter.minRating));
+        ratings[1]->setText(number(filter.maxRating));
+        years[0]->setText(number(filter.fromYear));
+        years[1]->setText(number(filter.toYear));
+        for (std::size_t k = 0; k < speedButtons.size(); ++k) {
+            const auto speed = static_cast<unsigned>(gamedb::Speed::Bullet) + k;
+            speedButtons[k]->setChecked((filter.speeds & (1U << speed)) != 0);
+        }
+        for (std::size_t k = 0; k < sideButtons.size(); ++k) {
+            sideButtons[k]->setChecked(static_cast<std::size_t>(filter.side) == k);
+        }
+        m_filter = filter;
+    };
+    connect(reset, &QPushButton::clicked, this, [this] {
         m_part.clear();
         refreshParts();
-        whiteName->clear();
-        blackName->clear();
-        m_filter.white.clear();
-        m_filter.black.clear();
-        for (QLineEdit* field : {ratings[0], ratings[1], years[0], years[1]}) {
-            field->clear();
-        }
-        for (QPushButton* chip : speedButtons) {
-            chip->setChecked(false);
-        }
-        sideButtons.front()->click();
-    };
-    connect(reset, &QPushButton::clicked, this, [this] { m_resetFilter(); });
+        m_filter = {};
+        m_loadingFilter = true;
+        m_showFilter();
+        m_loadingFilter = false;
+        filterChanged();
+    });
     auto* resetRow = new QHBoxLayout;
     resetRow->addWidget(reset);
     resetRow->addStretch();
@@ -800,15 +818,51 @@ QWidget* ExplorerPanel::buildFilter() {
     return scroll;
 }
 
-void ExplorerPanel::filterChanged() {
+QString ExplorerPanel::filterGroup(const QString& source) {
+    // A source's key has slashes ("db:/Users/…"), which QSettings reads as groups: encoded.
+    return QStringLiteral("explorer/filters/") +
+           QString::fromLatin1(source.toUtf8().toBase64(QByteArray::Base64UrlEncoding |
+                                                        QByteArray::OmitTrailingEquals));
+}
+
+void ExplorerPanel::loadFilter() {
+    m_filterSource = m_source->currentData().toString();
     QSettings settings;
-    settings.setValue(QStringLiteral("explorer/minRating"), m_filter.minRating);
-    settings.setValue(QStringLiteral("explorer/maxRating"), m_filter.maxRating);
-    settings.setValue(QStringLiteral("explorer/fromYear"), m_filter.fromYear);
-    settings.setValue(QStringLiteral("explorer/toYear"), m_filter.toYear);
-    settings.setValue(QStringLiteral("explorer/speeds"), m_filter.speeds);
-    settings.setValue(QStringLiteral("explorer/white"), QString::fromStdString(m_filter.white));
-    settings.setValue(QStringLiteral("explorer/black"), QString::fromStdString(m_filter.black));
+    settings.beginGroup(filterGroup(m_filterSource));
+    gamedb::ExploreFilter filter;
+    filter.minRating = settings.value(QStringLiteral("minRating"), 0).toInt();
+    filter.maxRating = settings.value(QStringLiteral("maxRating"), 0).toInt();
+    filter.fromYear = settings.value(QStringLiteral("fromYear"), 0).toInt();
+    filter.toYear = settings.value(QStringLiteral("toYear"), 0).toInt();
+    filter.speeds = static_cast<std::uint8_t>(settings.value(QStringLiteral("speeds"), 0).toUInt());
+    filter.white = settings.value(QStringLiteral("white")).toString().toStdString();
+    filter.black = settings.value(QStringLiteral("black")).toString().toStdString();
+    filter.side = static_cast<gamedb::ExploreFilter::Side>(
+        std::clamp(settings.value(QStringLiteral("side"), 0).toInt(), 0, 2));
+    m_filter = std::move(filter);
+    if (m_showFilter) {
+        m_loadingFilter = true; // the controls follow without saving or asking each time
+        m_showFilter();
+        m_loadingFilter = false;
+    }
+}
+
+void ExplorerPanel::filterChanged() {
+    if (m_loadingFilter) {
+        return;
+    }
+    if (!m_filterSource.isEmpty()) {
+        QSettings settings;
+        settings.beginGroup(filterGroup(m_filterSource));
+        settings.setValue(QStringLiteral("minRating"), m_filter.minRating);
+        settings.setValue(QStringLiteral("maxRating"), m_filter.maxRating);
+        settings.setValue(QStringLiteral("fromYear"), m_filter.fromYear);
+        settings.setValue(QStringLiteral("toYear"), m_filter.toYear);
+        settings.setValue(QStringLiteral("speeds"), m_filter.speeds);
+        settings.setValue(QStringLiteral("white"), QString::fromStdString(m_filter.white));
+        settings.setValue(QStringLiteral("black"), QString::fromStdString(m_filter.black));
+        settings.setValue(QStringLiteral("side"), static_cast<int>(m_filter.side));
+    }
     const bool active =
         m_filter.active() || m_filter.side != gamedb::ExploreFilter::Side::Any || !m_part.isEmpty();
     if (m_filterTab != nullptr) {

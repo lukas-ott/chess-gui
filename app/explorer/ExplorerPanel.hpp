@@ -67,6 +67,10 @@ private:
     void refreshSources();
     QWidget* buildFilter();
     void filterChanged();
+    /// The chosen source's own filter, into m_filter and the controls.
+    void loadFilter();
+    /// Where a source's filter is kept in the settings.
+    [[nodiscard]] static QString filterGroup(const QString& source);
     /// The "Games from" choices for the profile chosen (none for a database).
     void refreshParts();
     /// The database of the chosen source (a database, a profile, or a part of one), or null.
@@ -107,7 +111,9 @@ private:
     QWidget* m_partTitle = nullptr;
     QComboBox* m_partBox = nullptr; ///< in m_partRow
     QString m_part;                 ///< a profile's part shown: "" (all), an account's id, or "otb"
-    std::function<void()> m_resetFilter; ///< puts the filter's controls back
+    std::function<void()> m_showFilter; ///< puts m_filter into the filter's controls
+    QString m_filterSource;             ///< the source m_filter belongs to
+    bool m_loadingFilter = false;       ///< the controls are being set: no saving meanwhile
 };
 
 } // namespace kiebitz::app

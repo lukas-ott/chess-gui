@@ -639,7 +639,8 @@ QTreeWidget#explorerMoves QHeaderView::section, QTreeWidget#profileTheory QHeade
     color: @muted;
     border: none;
     border-bottom: 1px solid @border;
-    padding: 2px 4px 6px 4px;
+    /* right: room for the sort arrow, so it never covers a right-aligned title */
+    padding: 2px 14px 6px 4px;
     font-size: 10px;
     font-weight: 600;
 }
