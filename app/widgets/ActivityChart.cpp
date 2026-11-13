@@ -121,6 +121,15 @@ void ActivityChart::paintEvent(QPaintEvent* /*event*/) {
                                  color);
                 below += count;
             }
+            // A thin gap of the card's colour between the parts, so they don't run together.
+            below = 0;
+            for (const std::uint64_t count : {bar.won, bar.drawn}) {
+                below += count;
+                if (count > 0 && below < bar.games()) {
+                    const double y = barRect(i, below).top();
+                    painter.fillRect(QRectF(whole.left(), y - 1, whole.width(), 2), c.surface);
+                }
+            }
             painter.restore();
         }
         if (i % every == 0 || i + 1 == m_bars.size()) {

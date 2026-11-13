@@ -5,7 +5,30 @@
 #include <QPainter>
 #include <QPainterPath>
 
+#include <algorithm>
+#include <cmath>
+
 namespace kiebitz::app {
+namespace {
+
+/// WCAG relative luminance of a colour.
+double luminance(const QColor& colour) {
+    const auto linear = [](int channel) {
+        const double v = channel / 255.0;
+        return v <= 0.04045 ? v / 12.92 : std::pow((v + 0.055) / 1.055, 2.4);
+    };
+    return (0.2126 * linear(colour.red())) + (0.7152 * linear(colour.green())) +
+           (0.0722 * linear(colour.blue()));
+}
+
+/// WCAG contrast ratio of two colours (1 to 21).
+double contrast(const QColor& a, const QColor& b) {
+    const double x = luminance(a);
+    const double y = luminance(b);
+    return (std::max(x, y) + 0.05) / (std::min(x, y) + 0.05);
+}
+
+} // namespace
 
 ResultBar::ResultBar(const AppStyle& style, int height, Kind kind, QWidget* parent)
     : QWidget(parent), m_style(style), m_kind(kind) {
@@ -35,9 +58,11 @@ void ResultBar::paintEvent(QPaintEvent* /*event*/) {
     const std::array<QColor, 3> colors =
         record ? std::array<QColor, 3>{c.good, c.draws, c.bad}
                : std::array<QColor, 3>{c.whiteWins, c.draws, c.blackWins};
-    const std::array<QColor, 3> texts =
-        record ? std::array<QColor, 3>{c.blackWins, c.whiteWins, c.whiteWins}
-               : std::array<QColor, 3>{c.blackWins, c.whiteWins, c.whiteWins};
+    // The percentage in dark or light ink, whichever contrasts more with its part.
+    const auto inkOn = [&c](const QColor& fill) {
+        return contrast(fill, c.blackWins) >= contrast(fill, c.whiteWins) ? c.blackWins
+                                                                          : c.whiteWins;
+    };
     QFont font = painter.font();
     font.setPixelSize(height() <= 14 ? 9 : 10);
     font.setWeight(QFont::DemiBold);
@@ -49,7 +74,7 @@ void ResultBar::paintEvent(QPaintEvent* /*event*/) {
         painter.fillRect(part, colors[k]);
         const QString text = QStringLiteral("%1%").arg(qRound(share * 100));
         if (part.width() > painter.fontMetrics().horizontalAdvance(text) + 6) {
-            painter.setPen(texts[k]);
+            painter.setPen(inkOn(colors[k]));
             painter.drawText(part, Qt::AlignCenter, text);
         }
         x += part.width();

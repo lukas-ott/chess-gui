@@ -34,10 +34,13 @@ AppStyle::Colors AppStyle::darkColors() {
         .dimmed = QColor(0x5C, 0x5F, 0x66),
         .accent = QColor(0x4D, 0xAB, 0xF7),
         .accentText = QColor(0x10, 0x11, 0x13),
-        .good = QColor(0x51, 0xCF, 0x66),
-        .bad = QColor(0xFF, 0x6B, 0x6B),
+        // Wins and losses: a calm green leaning to teal and a soft red, apart in lightness as
+        // well as hue (so they stay apart for red-green colour blindness); draws a darker grey
+        // than both. Checked with the dataviz palette validator (CVD, contrast).
+        .good = QColor(0x63, 0xC2, 0xA0),
+        .bad = QColor(0xDB, 0x68, 0x72),
         .whiteWins = QColor(0xE8, 0xE6, 0xE1),
-        .draws = QColor(0x80, 0x83, 0x89),
+        .draws = QColor(0x56, 0x59, 0x60),
         .blackWins = QColor(0x10, 0x11, 0x13),
     };
 }
@@ -53,10 +56,11 @@ AppStyle::Colors AppStyle::lightColors() {
         .dimmed = QColor(0xAD, 0xB5, 0xBD),
         .accent = QColor(0x22, 0x8B, 0xE6),
         .accentText = QColor(0xFF, 0xFF, 0xFF),
-        .good = QColor(0x2F, 0x9E, 0x44),
-        .bad = QColor(0xE0, 0x31, 0x31),
+        // As in dark, with draws the lightest of the three.
+        .good = QColor(0x2E, 0x9E, 0x78),
+        .bad = QColor(0xB0, 0x36, 0x43),
         .whiteWins = QColor(0xFF, 0xFF, 0xFF),
-        .draws = QColor(0xAD, 0xB5, 0xBD),
+        .draws = QColor(0xC2, 0xC7, 0xCD),
         .blackWins = QColor(0x34, 0x3A, 0x40),
     };
 }
