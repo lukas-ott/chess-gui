@@ -69,6 +69,8 @@ void puzzlePickAndLoad(benchmark::State& state) {
         state.SkipWithError("run puzzleImport first");
         return;
     }
+    // The same picks every run, so runs compare.
+    // NOLINTNEXTLINE(cert-msc32-c,cert-msc51-cpp,bugprone-random-generator-seed)
     std::mt19937_64 random(7);
     for ([[maybe_unused]] const auto _ : state) {
         const auto index = db->pick(1400, 1800, 1, random);
@@ -91,7 +93,7 @@ void puzzleImportLichess(benchmark::State& state) {
             state.SkipWithError("can't read KIEBITZ_PUZZLE_CSV");
             return;
         }
-        auto result = puzzles::importLichess(
+        const auto result = puzzles::importLichess(
             [&](char* buffer, std::size_t size) { return std::fread(buffer, 1, size, in); }, path);
         std::fclose(in);
         if (!result.error.empty()) {
