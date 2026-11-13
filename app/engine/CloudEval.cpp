@@ -1,6 +1,7 @@
 #include "CloudEval.hpp"
 
-#include <QCoreApplication>
+#include "net/Lichess.hpp"
+
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -63,10 +64,9 @@ void CloudEval::request() {
     if (!m_position) {
         return;
     }
-    if (m_pausedUntil.isValid() && QDateTime::currentDateTimeUtc() < m_pausedUntil) {
+    if (const qint64 left = lichess::pauseLeftMs(); left > 0) {
         emit statusChanged(tr("Lichess asked for a short break"));
-        m_debounce.start(
-            static_cast<int>(QDateTime::currentDateTimeUtc().msecsTo(m_pausedUntil) + kDebounceMs));
+        m_debounce.start(static_cast<int>(left + kDebounceMs));
         return;
     }
     QUrl url(QStringLiteral("https://lichess.org/api/cloud-eval"));
@@ -74,12 +74,7 @@ void CloudEval::request() {
     query.addQueryItem(QStringLiteral("fen"), QString::fromStdString(m_position->fen()));
     query.addQueryItem(QStringLiteral("multiPv"), QString::number(m_multiPv));
     url.setQuery(query);
-    QNetworkRequest request(url);
-    // A plain client name: no personal details go to Lichess.
-    request.setHeader(QNetworkRequest::UserAgentHeader,
-                      QStringLiteral("Kiebitz/%1").arg(QCoreApplication::applicationVersion()));
-    request.setTransferTimeout(kTimeoutMs);
-    m_reply = m_network->get(request);
+    m_reply = m_network->get(lichess::request(url, {}, kTimeoutMs));
     QNetworkReply* reply = m_reply;
     const core::Position position = *m_position;
     const QString requestKey = key();
@@ -91,7 +86,7 @@ void CloudEval::request() {
         if (reply->error() == QNetworkReply::OperationCanceledError) {
             return; // replaced by a newer position, or stopped
         }
-        const int status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+        const int status = lichess::status(reply); // a 429 starts the minute's pause
         const bool current = m_position && requestKey == key();
         if (status == 200) {
             auto lines = parse(reply->readAll(), position);
@@ -106,8 +101,6 @@ void CloudEval::request() {
                 emit statusChanged(tr("Not in the Lichess cloud"));
             }
         } else if (status == 429) {
-            // Lichess's rule for API clients: after a 429, wait a full minute.
-            m_pausedUntil = QDateTime::currentDateTimeUtc().addSecs(60);
             if (current) {
                 emit statusChanged(tr("Lichess asked for a short break"));
                 m_debounce.start();

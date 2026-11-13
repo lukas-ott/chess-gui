@@ -62,6 +62,8 @@ qt_add_library(kiebitz_ui STATIC
     library/LibraryView.hpp
     library/NewFileDialog.cpp
     library/NewFileDialog.hpp
+    net/Lichess.cpp
+    net/Lichess.hpp
     notation/NotationView.cpp
     notation/NotationView.hpp
     notation/MovesCard.cpp

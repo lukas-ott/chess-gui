@@ -1,6 +1,7 @@
 #include "LichessPuzzles.hpp"
 
 #include "kiebitz/puzzles/store.hpp"
+#include "net/Lichess.hpp"
 
 #include <QDir>
 #include <QFile>
@@ -105,9 +106,7 @@ void LichessPuzzles::download() {
     m_fraction = 0;
     m_status = tr("Downloading…");
     setState(State::Downloading);
-    QNetworkRequest request{QUrl(QString::fromLatin1(kUrl))};
-    request.setHeader(QNetworkRequest::UserAgentHeader, QStringLiteral("Kiebitz"));
-    m_reply = m_network->get(request);
+    m_reply = m_network->get(lichess::request(QUrl(QString::fromLatin1(kUrl))));
     connect(m_reply, &QNetworkReply::readyRead, this, [this] {
         const QByteArray chunk = m_reply->readAll();
         if (m_download->write(chunk) != chunk.size()) {

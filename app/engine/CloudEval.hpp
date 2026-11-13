@@ -3,7 +3,6 @@
 #include "AnalysisSource.hpp"
 
 #include <QByteArray>
-#include <QDateTime>
 #include <QHash>
 #include <QTimer>
 
@@ -47,7 +46,6 @@ private:
     std::optional<core::Position> m_position;
     int m_multiPv = 3;
     QHash<QString, std::vector<engine::Info>> m_cache; ///< by FEN and line count; empty = absent
-    QDateTime m_pausedUntil;                           ///< after Lichess said "too many requests"
 };
 
 } // namespace kiebitz::app

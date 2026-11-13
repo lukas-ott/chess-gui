@@ -1,6 +1,7 @@
 #include "LichessLogin.hpp"
 
-#include <QCoreApplication>
+#include "net/Lichess.hpp"
+
 #include <QCryptographicHash>
 #include <QDesktopServices>
 #include <QDir>
@@ -39,11 +40,6 @@ QByteArray randomText(int bytes) {
         byte = static_cast<char>(QRandomGenerator::system()->bounded(256));
     }
     return data.toBase64(QByteArray::Base64UrlEncoding | QByteArray::OmitTrailingEquals);
-}
-
-QByteArray userAgent() {
-    // A plain client name: no personal details go to Lichess.
-    return QByteArray("Kiebitz/") + QCoreApplication::applicationVersion().toUtf8();
 }
 
 } // namespace
@@ -286,10 +282,10 @@ void LichessLogin::request(QTcpSocket* socket) {
 
 void LichessLogin::exchange(QTcpSocket* socket, const QString& code, const Pending& pending) {
     // The code and the verifier for a token; the browser waits meanwhile.
-    QNetworkRequest request(m_lichess.resolved(QUrl(QStringLiteral("/api/token"))));
+    QNetworkRequest request =
+        lichess::request(m_lichess.resolved(QUrl(QStringLiteral("/api/token"))));
     request.setHeader(QNetworkRequest::ContentTypeHeader,
                       QStringLiteral("application/x-www-form-urlencoded"));
-    request.setHeader(QNetworkRequest::UserAgentHeader, userAgent());
     QUrlQuery form;
     form.addQueryItem(QStringLiteral("grant_type"), QStringLiteral("authorization_code"));
     form.addQueryItem(QStringLiteral("code"), code);
@@ -319,10 +315,8 @@ void LichessLogin::exchange(QTcpSocket* socket, const QString& code, const Pendi
 
 void LichessLogin::finish(QTcpSocket* socket, const QByteArray& token, const QString& wanted) {
     // Who it is: the account the token belongs to.
-    QNetworkRequest request(m_lichess.resolved(QUrl(QStringLiteral("/api/account"))));
-    request.setRawHeader("Authorization", "Bearer " + token);
-    request.setHeader(QNetworkRequest::UserAgentHeader, userAgent());
-    QNetworkReply* reply = m_network->get(request);
+    QNetworkReply* reply = m_network->get(
+        lichess::request(m_lichess.resolved(QUrl(QStringLiteral("/api/account"))), token));
     const QPointer<QTcpSocket> browser(socket);
     connect(reply, &QNetworkReply::finished, this, [this, reply, token, browser, wanted] {
         reply->deleteLater();
@@ -394,10 +388,8 @@ void LichessLogin::forget(const QString& username) {
 void LichessLogin::signOut(const QString& username) {
     const QByteArray old = token(username);
     if (!old.isEmpty()) { // Lichess forgets the token too
-        QNetworkRequest request(m_lichess.resolved(QUrl(QStringLiteral("/api/token"))));
-        request.setRawHeader("Authorization", "Bearer " + old);
-        request.setHeader(QNetworkRequest::UserAgentHeader, userAgent());
-        const QNetworkReply* reply = m_network->deleteResource(request);
+        const QNetworkReply* reply = m_network->deleteResource(
+            lichess::request(m_lichess.resolved(QUrl(QStringLiteral("/api/token"))), old));
         connect(reply, &QNetworkReply::finished, reply, &QObject::deleteLater);
     }
     forget(username);

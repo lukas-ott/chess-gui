@@ -5,6 +5,7 @@
 #include "explorer/ExplorerPanel.hpp"
 #include "explorer/LichessExplorer.hpp"
 #include "library/Library.hpp"
+#include "net/Lichess.hpp"
 #include "profiles/Fide.hpp"
 #include "profiles/LichessLogin.hpp"
 #include "profiles/ProfileStore.hpp"
@@ -83,10 +84,14 @@ public:
                 const QByteArray path = target.split('?').value(0);
                 const auto found = pages.find(path);
                 const QByteArray body = found != pages.end() ? found->second : "Not found";
-                socket->write(
-                    (found != pages.end() ? "HTTP/1.1 200 OK\r\n" : "HTTP/1.1 404 Not Found\r\n") +
-                    QByteArray("Content-Length: ") + QByteArray::number(body.size()) +
-                    "\r\nConnection: close\r\n\r\n" + body);
+                QByteArray statusLine =
+                    found != pages.end() ? "HTTP/1.1 200 OK\r\n" : "HTTP/1.1 404 Not Found\r\n";
+                if (const auto status = statuses.find(path); status != statuses.end()) {
+                    statusLine = "HTTP/1.1 " + QByteArray::number(status->second) + " X\r\n";
+                }
+                socket->write(statusLine + QByteArray("Content-Length: ") +
+                              QByteArray::number(body.size()) + "\r\nConnection: close\r\n\r\n" +
+                              body);
                 socket->disconnectFromHost();
             });
         });
@@ -95,6 +100,7 @@ public:
         return {QStringLiteral("http://127.0.0.1:%1").arg(m_server.serverPort())};
     }
     std::map<QByteArray, QByteArray> pages;
+    std::map<QByteArray, int> statuses; ///< paths answered with this status instead
     QStringList asked;
     QByteArrayList requests; ///< whole: method, headers, body
 
@@ -765,6 +771,46 @@ TEST_F(ProfilesTest, TheExplorerShowsLichessOnceSignedIn) {
     emit games->itemDoubleClicked(games->topLevelItem(0), 0);
     EXPECT_TRUE(opened.wait(5000));
     QSettings().remove(QStringLiteral("explorer/source")); // other tests start without a choice
+}
+
+TEST_F(ProfilesTest, AfterTooManyRequestsLichessIsLeftAloneForAMinute) {
+    using kiebitz::app::LichessExplorer;
+    namespace lichess = kiebitz::app::lichess;
+    lichess::endPause();
+    // A download Lichess answers with 429: it says to wait, and the minute's pause starts.
+    server.statuses["/api/games/user/alice"] = 429;
+    server.pages["/api/user/alice"] = R"({"perfs":{}})";
+    ProfileStore store(folder.path());
+    store.setServers(server.url(), server.url(), server.url());
+    const QString me = store.profiles()[0].id;
+    QSignalSpy failed(&store, &ProfileStore::failed);
+    store.addAccount(me, AccountSite::Lichess, QStringLiteral("alice"));
+    waitFor(store, me);
+    ASSERT_GE(failed.count(), 1);
+    EXPECT_TRUE(failed.front().at(1).toString().contains(u"wait a minute"));
+    EXPECT_GT(lichess::pauseLeftMs(), 50'000);
+    // Kiebitz says who it is, and nothing about the user.
+    EXPECT_TRUE(std::any_of(server.requests.begin(), server.requests.end(),
+                            [](const auto& r) { return r.contains("User-Agent: Kiebitz/"); }));
+
+    // Meanwhile the explorer doesn't ask Lichess at all: it says to wait.
+    FakeKeychain keychain;
+    kiebitz::app::LichessLogin login(keychain.storage());
+    LichessExplorer explorer(login);
+    explorer.setServers(server.url(), server.url());
+    const qsizetype asked = server.asked.size();
+    std::optional<LichessExplorer::Answer> answer;
+    explorer.ask(LichessExplorer::Kind::Masters, {}, {},
+                 [&](const LichessExplorer::Answer& a) { answer = a; });
+    ASSERT_TRUE(QTest::qWaitFor([&] { return answer.has_value(); }, 5000));
+    EXPECT_TRUE(answer->error.contains(u"slow down"));
+    EXPECT_EQ(server.asked.size(), asked);
+
+    // And a second download waits too, without asking.
+    store.sync(me);
+    waitFor(store, me);
+    EXPECT_EQ(server.asked.size(), asked);
+    lichess::endPause(); // the other tests in this process
 }
 
 TEST(LiveNetwork, LichessKnowsFidePlayersByName) {

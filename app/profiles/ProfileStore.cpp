@@ -1,8 +1,8 @@
 #include "ProfileStore.hpp"
 
-#include "kiebitz/core/version.hpp"
 #include "kiebitz/gamedb/import.hpp"
 #include "kiebitz/pgn/pgn.hpp"
+#include "net/Lichess.hpp"
 
 #include <QDir>
 #include <QDirIterator>
@@ -40,14 +40,6 @@ constexpr auto kAll = "all";
 
 QString siteName(AccountSite site) {
     return site == AccountSite::Lichess ? QStringLiteral("lichess") : QStringLiteral("chesscom");
-}
-
-QByteArray userAgent() {
-    // Lichess and chess.com ask API clients to say who they are.
-    const std::string_view version = core::version();
-    return QByteArray("Kiebitz/") +
-           QByteArray(version.data(), static_cast<qsizetype>(version.size())) +
-           " (+https://github.com/lukas-ott/kiebitz)";
 }
 
 QJsonObject ratingsJson(const std::map<QString, int>& ratings) {
@@ -490,11 +482,15 @@ void ProfileStore::checkAccount(
     std::function<void(const QString& name, const QString& error)> done) {
     // Lichess: /api/user/<name>; chess.com: /pub/player/<name>. A 404: no such account.
     const QString user = username.trimmed();
+    if (site == AccountSite::Lichess && lichess::pauseLeftMs() > 0) {
+        done({}, downloadError(QStringLiteral("Lichess"), user, 429, QString()));
+        return;
+    }
     QNetworkRequest request(
         site == AccountSite::Lichess
             ? m_lichess.resolved(QUrl(QStringLiteral("/api/user/") + user))
             : m_chessCom.resolved(QUrl(QStringLiteral("/pub/player/") + user.toLower())));
-    request.setHeader(QNetworkRequest::UserAgentHeader, userAgent());
+    request.setHeader(QNetworkRequest::UserAgentHeader, lichess::userAgent());
     request.setTransferTimeout(15000);
     QNetworkReply* reply = m_network->get(request);
     const QString siteName =
@@ -502,8 +498,11 @@ void ProfileStore::checkAccount(
     connect(reply, &QNetworkReply::finished, this,
             [reply, site, user, siteName, done = std::move(done)] {
                 reply->deleteLater();
+                // From Lichess, a 429 starts the minute's pause.
                 const int status =
-                    reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+                    site == AccountSite::Lichess
+                        ? lichess::status(reply)
+                        : reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
                 if (status == 404) {
                     done({}, {});
                     return;
@@ -691,7 +690,7 @@ void ProfileStore::lookUpFide(const QString& profileId) {
     url.setQuery(query);
     QNetworkRequest request(url);
     request.setRawHeader("Accept", "application/json");
-    request.setHeader(QNetworkRequest::UserAgentHeader, userAgent());
+    request.setHeader(QNetworkRequest::UserAgentHeader, lichess::userAgent());
     request.setTransferTimeout(15000);
     QNetworkReply* reply = m_network->get(request);
     const QString name = profile->name;
@@ -804,14 +803,16 @@ void ProfileStore::downloadLichess(const std::shared_ptr<Job>& job, Account& acc
     query.addQueryItem(QStringLiteral("evals"), QStringLiteral("false"));
     query.addQueryItem(QStringLiteral("opening"), QStringLiteral("true"));
     url.setQuery(query);
-    QNetworkRequest request(url);
-    request.setRawHeader("Accept", "application/x-chess-pgn");
-    request.setHeader(QNetworkRequest::UserAgentHeader, userAgent());
-    // Signed in, Lichess sends games faster (and your own games faster still).
-    if (const QByteArray token = m_lichessToken ? m_lichessToken(account.username) : QByteArray();
-        !token.isEmpty()) {
-        request.setRawHeader("Authorization", "Bearer " + token);
+    if (lichess::pauseLeftMs() > 0) { // Lichess asked for a minute's break
+        emit failed(job->profileId,
+                    downloadError(QStringLiteral("Lichess"), account.username, 429, QString()));
+        next(job);
+        return;
     }
+    // Signed in, Lichess sends games faster (and your own games faster still).
+    QNetworkRequest request =
+        lichess::request(url, m_lichessToken ? m_lichessToken(account.username) : QByteArray());
+    request.setRawHeader("Accept", "application/x-chess-pgn");
     const qint64 started = QDateTime::currentMSecsSinceEpoch();
     const QString target = QDir(QDir(folderOf(job->profileId)).filePath(account.id))
                                .filePath(QStringLiteral("%1.pgn").arg(started));
@@ -839,8 +840,7 @@ void ProfileStore::downloadLichess(const std::shared_ptr<Job>& job, Account& acc
                 reply->deleteLater();
                 file->write(reply->readAll());
                 file->close();
-                const int status =
-                    reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+                const int status = lichess::status(reply); // a 429 starts the minute's pause
                 if (reply->error() != QNetworkReply::NoError || status >= 400) {
                     file->remove();
                     emit failed(job->profileId, downloadError(QStringLiteral("Lichess"), name,
@@ -877,7 +877,7 @@ void ProfileStore::downloadChessCom(const std::shared_ptr<Job>& job, Account& ac
     const QString user = account.username.toLower();
     QNetworkRequest request(
         m_chessCom.resolved(QUrl(QStringLiteral("/pub/player/%1/games/archives").arg(user))));
-    request.setHeader(QNetworkRequest::UserAgentHeader, userAgent());
+    request.setHeader(QNetworkRequest::UserAgentHeader, lichess::userAgent());
     QNetworkReply* reply = m_network->get(request);
     const QString accountId = account.id;
     const QString name = account.username;
@@ -956,7 +956,7 @@ void ProfileStore::downloadChessCom(const std::shared_ptr<Job>& job, Account& ac
                                           .arg(++*done)
                                           .arg(total));
             QNetworkRequest monthRequest(QUrl(url + QStringLiteral("/pgn")));
-            monthRequest.setHeader(QNetworkRequest::UserAgentHeader, userAgent());
+            monthRequest.setHeader(QNetworkRequest::UserAgentHeader, lichess::userAgent());
             QNetworkReply* monthReply = m_network->get(monthRequest);
             connect(
                 monthReply, &QNetworkReply::finished, this, [monthReply, url, folder, fetchNext] {
@@ -993,15 +993,22 @@ void ProfileStore::fetchRatings(const std::shared_ptr<Job>& job, const QString& 
         return;
     }
     const bool lichess = account->site == AccountSite::Lichess;
+    if (lichess && lichess::pauseLeftMs() > 0) { // Lichess asked for a minute's break
+        next(job);
+        return;
+    }
     const QUrl url =
         lichess ? m_lichess.resolved(QUrl(QStringLiteral("/api/user/") + account->username))
                 : m_chessCom.resolved(QUrl(
                       QStringLiteral("/pub/player/%1/stats").arg(account->username.toLower())));
     QNetworkRequest request(url);
-    request.setHeader(QNetworkRequest::UserAgentHeader, userAgent());
+    request.setHeader(QNetworkRequest::UserAgentHeader, lichess::userAgent());
     QNetworkReply* reply = m_network->get(request);
     connect(reply, &QNetworkReply::finished, this, [this, reply, job, accountId, lichess] {
         reply->deleteLater();
+        if (lichess) {
+            lichess::status(reply); // a 429 starts the minute's pause
+        }
         Profile* found = find(job->profileId);
         if (found != nullptr && reply->error() == QNetworkReply::NoError) {
             const QJsonObject object = QJsonDocument::fromJson(reply->readAll()).object();

@@ -1,9 +1,9 @@
 #include "LichessExplorer.hpp"
 
 #include "kiebitz/pgn/pgn.hpp"
+#include "net/Lichess.hpp"
 #include "profiles/LichessLogin.hpp"
 
-#include <QCoreApplication>
 #include <QEventLoop>
 #include <QJsonArray>
 #include <QJsonDocument>
@@ -21,23 +21,10 @@
 namespace kiebitz::app {
 namespace {
 
-constexpr int kTimeoutMs = 15000;
 constexpr qsizetype kCacheSize = 500;
 
 /// Lichess's rating groups: each is from its number up to the next.
 constexpr std::array kRatingGroups{0, 1000, 1200, 1400, 1600, 1800, 2000, 2200, 2500};
-
-QNetworkRequest request(const QUrl& url, const QByteArray& token) {
-    QNetworkRequest result(url);
-    // A plain client name: no personal details go to Lichess.
-    result.setHeader(QNetworkRequest::UserAgentHeader,
-                     QStringLiteral("Kiebitz/%1").arg(QCoreApplication::applicationVersion()));
-    result.setTransferTimeout(kTimeoutMs);
-    if (!token.isEmpty()) {
-        result.setRawHeader("Authorization", "Bearer " + token);
-    }
-    return result;
-}
 
 gamedb::GameResult winner(const QJsonValue& value) {
     if (value.toString() == u"white") {
@@ -200,7 +187,14 @@ void LichessExplorer::ask(Kind kind, const std::vector<core::Move>& line,
     for (const core::Move& move : line) {
         position.play(move);
     }
-    QNetworkReply* reply = m_network->get(request(address, m_login.token()));
+    if (lichess::pauseLeftMs() > 0) { // Lichess asked for a minute's break: not yet
+        Answer answer;
+        answer.error = tr("Lichess asks Kiebitz to slow down. Try again in a minute.");
+        done(answer);
+        return;
+    }
+    QNetworkReply* reply =
+        m_network->get(lichess::request(address, m_login.token(), lichess::kTimeoutMs));
     m_pending = reply;
     connect(reply, &QNetworkReply::finished, this,
             [this, reply, key, position, done = std::move(done)] {
@@ -208,8 +202,7 @@ void LichessExplorer::ask(Kind kind, const std::vector<core::Move>& line,
                 if (reply->error() == QNetworkReply::OperationCanceledError) {
                     return; // asked again meanwhile
                 }
-                const int status =
-                    reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+                const int status = lichess::status(reply);
                 Answer answer;
                 if (status == 200) {
                     answer = parse(reply->readAll(), position);
@@ -234,7 +227,7 @@ void LichessExplorer::fetchGame(Kind kind, const QString& id,
     const QUrl address = kind == Kind::Masters
                              ? m_explorer.resolved(QUrl(QStringLiteral("/masters/pgn/") + id))
                              : m_lichess.resolved(QUrl(QStringLiteral("/game/export/") + id));
-    QNetworkRequest pgnRequest = request(address, m_login.token());
+    QNetworkRequest pgnRequest = lichess::request(address, m_login.token(), lichess::kTimeoutMs);
     pgnRequest.setRawHeader("Accept", "application/x-chess-pgn");
     QNetworkReply* reply = m_network->get(pgnRequest);
     connect(reply, &QNetworkReply::finished, this, [reply, done = std::move(done)] {
@@ -260,15 +253,17 @@ repertoire::Explore LichessExplorer::blocking(Kind kind, const gamedb::ExploreFi
         // This thread's own network access, waited for right here.
         QNetworkAccessManager network;
         for (int attempt = 0; attempt < 3; ++attempt) {
-            QNetworkReply* reply = network.get(request(url(server, kind, moves, filter), token));
+            // After a 429 (here or anywhere in Kiebitz) Lichess wants a minute's pause.
+            QThread::msleep(static_cast<unsigned long>(lichess::pauseLeftMs()));
+            QNetworkReply* reply = network.get(
+                lichess::request(url(server, kind, moves, filter), token, lichess::kTimeoutMs));
             QEventLoop wait;
             QObject::connect(reply, &QNetworkReply::finished, &wait, &QEventLoop::quit);
             wait.exec();
             reply->deleteLater();
-            const int status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+            const int status = lichess::status(reply);
             if (status == 429) {
-                QThread::sleep(60); // Lichess asks for a minute's pause
-                continue;
+                continue; // after the pause, once more
             }
             std::vector<repertoire::MoveCount> result;
             if (status == 200) {
