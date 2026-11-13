@@ -578,7 +578,9 @@ void PuzzlesView::openLichess() {
         }
     }
     showLichessState();
-    if (m_db && !m_solve) {
+    if (m_db && m_trainingTheme) {
+        applyTrainingTheme(); // training asked for a theme: its first puzzle
+    } else if (m_db && !m_solve) {
         nextPuzzle();
     }
 }
@@ -1142,6 +1144,37 @@ QStringList PuzzlesView::listRows() const {
         rows << parts.join(QStringLiteral("  "));
     }
     return rows;
+}
+
+void PuzzlesView::train(const QString& theme) {
+    m_trainingTheme = theme;
+    if (!isLichess()) {
+        setSource(QString::fromLatin1(kLichess)); // opens the database, then applies the theme
+    } else {
+        activate();
+    }
+    if (m_db && m_trainingTheme) {
+        applyTrainingTheme();
+    }
+}
+
+void PuzzlesView::applyTrainingTheme() {
+    const QString theme = m_trainingTheme.value_or(QString());
+    m_trainingTheme.reset();
+    int index = 0; // "All themes"
+    for (int i = 1; i < m_theme->count(); ++i) {
+        const int id = m_theme->itemData(i).toInt();
+        if (id >= 0 && std::cmp_less(id, m_db->themes().size()) &&
+            QString::fromStdString(m_db->themes()[static_cast<std::size_t>(id)]) == theme) {
+            index = i;
+        }
+    }
+    {
+        const QSignalBlocker block(m_theme);
+        m_theme->setCurrentIndex(index);
+    }
+    saveFilters();
+    nextPuzzle();
 }
 
 void PuzzlesView::saveFilters() const {

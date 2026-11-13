@@ -18,6 +18,7 @@
 #include "profiles/ProfileStore.hpp"
 #include "profiles/ProfilesView.hpp"
 #include "style/AppStyle.hpp"
+#include "training/TrainingSession.hpp"
 
 #include <QApplication>
 #include <QComboBox>
@@ -436,14 +437,49 @@ TEST_F(LayoutTest, TheProfilesPageStaysPutWhileSyncingSearchingAndChoosing) {
     store->removeProfile(magnus);
 }
 
+// ---- Training
+// ------------------------------------------------------------------------------------
+
+TEST_F(LayoutTest, ATrainingSessionMovesNothing) {
+    // Self-study only: the session stays on the Training page.
+    QSettings settings;
+    for (const char* part : {"openings", "middlegame", "tactics", "endgames"}) {
+        settings.setValue(QStringLiteral("training/%1/on").arg(QLatin1String(part)), false);
+    }
+    auto* session = window->findChild<app::TrainingSession*>();
+    ASSERT_NE(session, nullptr);
+    const Layout boardBefore = now();
+    window->showSection(MainWindow::Section::Training);
+    const Layout idle = now();
+    // Its row says the time left, the button says Stop, the status bar shows the session.
+    ASSERT_TRUE(session->start());
+    const Layout running = now();
+    EXPECT_TRUE(moved(idle, running).isEmpty()) << text(moved(idle, running));
+    session->advance(qint64{20} * 60'000);
+    const Layout up = now();
+    // The session's text and today's minutes grow: that is the change.
+    const QStringList texts{QStringLiteral("trainingBar"), QStringLiteral("pageSubtitle")};
+    EXPECT_TRUE(moved(running, up, texts).isEmpty()) << text(moved(running, up, texts));
+    // The board page with the session in the status bar is as it was without.
+    window->showSection(MainWindow::Section::Board);
+    const Layout boardDuring = now();
+    EXPECT_TRUE(moved(boardBefore, boardDuring).isEmpty()) << text(moved(boardBefore, boardDuring));
+    window->showSection(MainWindow::Section::Training);
+    session->stop();
+    const Layout stopped = now();
+    EXPECT_TRUE(moved(idle, stopped, texts).isEmpty()) << text(moved(idle, stopped, texts));
+    settings.remove(QStringLiteral("training"));
+}
+
 // ---- The other pages: each, then back to the board
 // -----------------------------------------------
 
 TEST_F(LayoutTest, SwitchingPagesAndBackLeavesTheBoardPageAsItWas) {
     const Layout board = now();
-    for (const auto section : {MainWindow::Section::Library, MainWindow::Section::Puzzles,
-                               MainWindow::Section::Databases, MainWindow::Section::Profiles,
-                               MainWindow::Section::Engines, MainWindow::Section::Settings}) {
+    for (const auto section :
+         {MainWindow::Section::Library, MainWindow::Section::Training, MainWindow::Section::Puzzles,
+          MainWindow::Section::Databases, MainWindow::Section::Profiles,
+          MainWindow::Section::Engines, MainWindow::Section::Settings}) {
         window->showSection(section);
         settle();
         window->showSection(MainWindow::Section::Board);

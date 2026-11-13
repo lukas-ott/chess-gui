@@ -34,6 +34,7 @@ add_subdirectory(library)
 add_subdirectory(repertoire)
 add_subdirectory(gamedb)
 add_subdirectory(puzzles)
+add_subdirectory(training)
 
 if(KIEBITZ_BUILD_APP)
     add_subdirectory(app)

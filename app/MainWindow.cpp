@@ -8,9 +8,11 @@
 #include "explorer/ExplorerPanel.hpp"
 #include "kiebitz/core/annotations.hpp"
 #include "kiebitz/repertoire/drill.hpp"
+#include "library/LibraryView.hpp"
 #include "library/NewFileDialog.hpp"
 #include "notation/MovesCard.hpp"
 #include "notation/NotationView.hpp"
+#include "notify/Notifications.hpp"
 #include "panels/GameInfoPanel.hpp"
 #include "puzzles/PuzzlesView.hpp"
 #include "repertoire/Practice.hpp"
@@ -21,6 +23,9 @@
 #include "sound/Sounds.hpp"
 #include "style/AppStyle.hpp"
 #include "style/Icons.hpp"
+#include "training/TrainingHistory.hpp"
+#include "training/TrainingSession.hpp"
+#include "training/TrainingView.hpp"
 #include "util/WhenReady.hpp"
 #include "widgets/Message.hpp"
 
@@ -99,6 +104,7 @@ void MainWindow::resizeEvent(QResizeEvent* event) {
 }
 
 void MainWindow::closeEvent(QCloseEvent* event) {
+    m_training->stop(); // a session's time so far goes into the log
     // No questions when quitting either: games from files are saved (as autosave would), new
     // games that aren't in a file just go.
     if (!m_documents->saveAll()) {
@@ -150,6 +156,9 @@ void MainWindow::showSection(Section section) {
         button->setChecked(true);
     }
     updatePage();
+    if (section == Section::Training) {
+        m_trainingView->activate();
+    }
     if (section == Section::Puzzles) {
         m_puzzlesView->activate(); // the puzzles of last time, opened when first wanted
         m_puzzlesView->board()->setFocus();
@@ -189,6 +198,8 @@ void MainWindow::updateSidebarIcons() {
         IconKind kind = IconKind::Board;
         if (section == Section::Library) {
             kind = IconKind::Library;
+        } else if (section == Section::Training) {
+            kind = IconKind::Stopwatch;
         } else if (section == Section::Puzzles) {
             kind = IconKind::Puzzle;
         } else if (section == Section::Databases) {
@@ -208,7 +219,9 @@ void MainWindow::updateWindowTitle() {
     const GameDocument* d = doc();
     if (d == nullptr) {
         QString page = tr("Library");
-        if (m_section == Section::Puzzles) {
+        if (m_section == Section::Training) {
+            page = tr("Training");
+        } else if (m_section == Section::Puzzles) {
             page = tr("Puzzles");
         } else if (m_section == Section::Engines) {
             page = tr("Engines");
@@ -793,6 +806,42 @@ void MainWindow::practiceWholeRepertoire(int depth) {
             showSection(Section::Board); // shows it
             startPractice(false, depth);
         });
+}
+
+void MainWindow::onTrainingPart(training::Part part) {
+    if (m_training->session() != nullptr && m_training->session()->index() == 0) {
+        notifications::requestPermission(); // macOS asks you the first time
+    }
+    switch (part) {
+    case training::Part::Openings: {
+        // The Library with your repertoire files (one side's, or all), in their folders: you
+        // pick the one to practise.
+        std::optional<core::Color> side;
+        if (TrainingSession::openingsSide() == TrainingSession::Side::White) {
+            side = core::Color::White;
+        } else if (TrainingSession::openingsSide() == TrainingSession::Side::Black) {
+            side = core::Color::Black;
+        }
+        m_libraryView->showRepertoires(side);
+        showSection(Section::Library);
+        break;
+    }
+    case training::Part::Middlegame:
+        m_puzzlesView->train(QStringLiteral("middlegame"));
+        showSection(Section::Puzzles);
+        break;
+    case training::Part::Tactics:
+        m_puzzlesView->train({});
+        showSection(Section::Puzzles);
+        break;
+    case training::Part::Endgames:
+        m_puzzlesView->train(QStringLiteral("endgame"));
+        showSection(Section::Puzzles);
+        break;
+    case training::Part::SelfStudy:
+        showSection(Section::Training); // the timer runs; the board's practice, if any, ends
+        break;
+    }
 }
 
 void MainWindow::onPracticeStarted(core::Color side) {

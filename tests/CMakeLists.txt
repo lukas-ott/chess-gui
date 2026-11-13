@@ -12,10 +12,11 @@ add_executable(kiebitz_tests
     test_puzzles.cpp
     test_repertoire.cpp
     test_san.cpp
+    test_training.cpp
     test_types.cpp
     test_version.cpp)
 target_link_libraries(kiebitz_tests PRIVATE kiebitz::engine kiebitz::gamedb kiebitz::library
-    kiebitz::repertoire kiebitz::puzzles kiebitz::pgn thirdparty::zstd
+    kiebitz::repertoire kiebitz::puzzles kiebitz::training kiebitz::pgn thirdparty::zstd
     GTest::gtest_main)
 target_compile_definitions(kiebitz_tests PRIVATE
     KIEBITZ_OPENINGS_TSV="${PROJECT_SOURCE_DIR}/app/resources/openings/openings.tsv")
@@ -39,7 +40,8 @@ if(KIEBITZ_BUILD_APP)
         ui/test_profiles.cpp
         ui/test_puzzles.cpp
         ui/test_settings.cpp
-        ui/test_tablebase.cpp)
+        ui/test_tablebase.cpp
+        ui/test_training.cpp)
     find_package(Qt6 REQUIRED COMPONENTS Test)
     target_link_libraries(kiebitz_ui_tests PRIVATE kiebitz_ui Qt6::Test GTest::gtest)
     kiebitz_set_warnings(kiebitz_ui_tests)

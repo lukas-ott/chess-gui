@@ -67,6 +67,9 @@ public:
 
     /// Selects a file by path (e.g. after opening a game from it). Does nothing if it isn't there.
     void selectFile(const QString& path);
+    /// Only the repertoire files (of one side, or of both), in their folders: training's
+    /// openings part, to pick one to practise.
+    void showRepertoires(std::optional<core::Color> side);
 
     /// The preview board uses the same colours and pieces as the main board.
     void setBoardLook(const BoardTheme& theme, const QString& pieceSet);

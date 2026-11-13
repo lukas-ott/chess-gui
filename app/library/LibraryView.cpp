@@ -75,6 +75,9 @@ constexpr int kSideRole = Qt::UserRole + 4;     ///< file: the side a repertoire
 constexpr int kNameRole = Qt::UserRole + 5;     ///< the name on disk (to notice a rename)
 constexpr int kFolder = 1;
 constexpr int kFile = 2;
+/// The type filter's entries for one side's repertoires (the others are FileKind values).
+constexpr int kWhiteRepertoires = 100;
+constexpr int kBlackRepertoires = 101;
 
 // The selection card's pages
 constexpr int kNothing = 0;
@@ -582,6 +585,8 @@ LibraryView::LibraryView(Library& library, RepertoireStore& store, const AppStyl
     m_typeFilter->addItem(tr("All types"), -1);
     m_typeFilter->addItem(tr("Games"), static_cast<int>(FileKind::Game));
     m_typeFilter->addItem(tr("Repertoires"), static_cast<int>(FileKind::Repertoire));
+    m_typeFilter->addItem(tr("White repertoires"), kWhiteRepertoires);
+    m_typeFilter->addItem(tr("Black repertoires"), kBlackRepertoires);
     m_typeFilter->addItem(tr("Tournaments"), static_cast<int>(FileKind::Tournament));
     m_typeFilter->addItem(tr("Puzzles"), static_cast<int>(FileKind::Puzzle));
     m_typeFilter->addItem(tr("Other"), static_cast<int>(FileKind::Other));
@@ -1037,6 +1042,15 @@ LibraryView::~LibraryView() {
     disconnect(m_focusOutline);
 }
 
+void LibraryView::showRepertoires(std::optional<core::Color> side) {
+    int wanted = static_cast<int>(FileKind::Repertoire);
+    if (side) {
+        wanted = *side == core::Color::White ? kWhiteRepertoires : kBlackRepertoires;
+    }
+    m_fileSearch->clear();
+    m_typeFilter->setCurrentIndex(m_typeFilter->findData(wanted)); // filtersChanged() follows
+}
+
 void LibraryView::filtersChanged() {
     if (m_fileSearch->text().trimmed().isEmpty() && m_typeFilter->currentData().toInt() < 0) {
         refreshFiles(); // nothing filtered: the folders as they were folded
@@ -1056,7 +1070,12 @@ void LibraryView::applyFilters() {
     const std::function<bool(QTreeWidgetItem*)> show = [&](QTreeWidgetItem* item) {
         bool visible = false;
         if (item->data(0, kKindRole).toInt() == kFile) {
-            visible = (wanted < 0 || item->data(0, kFileKindRole).toInt() == wanted) &&
+            // A repertoire for one side: the kind and the side.
+            const bool oneSide = wanted == kWhiteRepertoires || wanted == kBlackRepertoires;
+            const int kind = oneSide ? static_cast<int>(FileKind::Repertoire) : wanted;
+            const bool sideFits = !oneSide || item->data(0, kSideRole).toInt() ==
+                                                  (wanted == kWhiteRepertoires ? 0 : 1);
+            visible = (wanted < 0 || item->data(0, kFileKindRole).toInt() == kind) && sideFits &&
                       (search.isEmpty() || item->text(0).contains(search, Qt::CaseInsensitive) ||
                        contains(fileOf(item), search));
         } else {

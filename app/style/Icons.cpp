@@ -260,6 +260,14 @@ void draw(QPainter& painter, IconKind kind, const QColor& color, int size) {
         painter.drawPolygon(QPolygonF{QPointF(5.0, 3.5), QPointF(12.5, 8.0), QPointF(5.0, 12.5)});
         break;
     }
+    case IconKind::Stopwatch: { // the face, the button on top, one hand
+        painter.setPen(QPen(color, 1.3, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
+        painter.drawEllipse(QPointF(8.0, 9.0), 5.2, 5.2);
+        painter.drawLine(QPointF(8.0, 3.8), QPointF(8.0, 2.4));
+        painter.drawLine(QPointF(6.4, 2.0), QPointF(9.6, 2.0));
+        painter.drawLine(QPointF(8.0, 9.0), QPointF(10.2, 6.8));
+        break;
+    }
     case IconKind::Gear: { // one outline with eight square teeth, and a round hole
         painter.setPen(QPen(color, 1.3, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
         const QPointF centre(8.0, 8.0);

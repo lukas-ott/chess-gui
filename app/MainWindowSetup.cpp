@@ -19,6 +19,7 @@
 #include "library/LibraryView.hpp"
 #include "notation/MovesCard.hpp"
 #include "notation/NotationView.hpp"
+#include "notify/Notifications.hpp"
 #include "panels/GameInfoPanel.hpp"
 #include "profiles/LichessLogin.hpp"
 #include "profiles/ProfileStore.hpp"
@@ -37,6 +38,9 @@
 #include "sound/Sounds.hpp"
 #include "style/AppStyle.hpp"
 #include "style/Icons.hpp"
+#include "training/TrainingHistory.hpp"
+#include "training/TrainingSession.hpp"
+#include "training/TrainingView.hpp"
 #include "widgets/Card.hpp"
 #include "widgets/Message.hpp"
 
@@ -131,6 +135,13 @@ MainWindow::MainWindow(AppStyle& style, QWidget* parent)
     m_shortcuts->load();
     m_settingsView->addSection(tr("Keyboard"), new ShortcutsPage(*m_shortcuts), tr("Folders"));
     statusBar()->setSizeGripEnabled(false);
+    // Always this tall, whatever it shows: the pages above never move.
+    statusBar()->setFixedHeight(24);
+    // A training session runs on every page: its part, time, Pause, Next and Stop.
+    m_trainingBar = new TrainingBar(*m_training, m_style);
+    connect(m_trainingBar, &TrainingBar::showRequested, this,
+            [this] { showSection(Section::Training); });
+    statusBar()->addPermanentWidget(m_trainingBar);
 
     // The library loads in the background; the window is up before it's done.
     m_library->setCacheFile(Library::defaultCacheFile());
@@ -171,6 +182,8 @@ void MainWindow::buildFileMenu() {
                     [this] { showSection(Section::Library); });
     menu->addAction(tr("&Board"), QKeySequence(Qt::CTRL | Qt::Key_1), this,
                     [this] { showSection(Section::Board); });
+    menu->addAction(tr("&Training"), QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_T), this,
+                    [this] { showSection(Section::Training); });
     menu->addAction(tr("P&uzzles"), QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_U), this,
                     [this] { showSection(Section::Puzzles); });
     menu->addAction(tr("&Databases"), QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_D), this,
@@ -436,6 +449,7 @@ void MainWindow::buildLayout() {
     m_pages = new QStackedWidget; // in Section order
     m_pages->addWidget(boardPage);
     m_pages->addWidget(m_libraryView);
+    m_pages->addWidget(m_trainingView);
     m_pages->addWidget(m_puzzlesView);
     m_pages->addWidget(m_databasesView);
     m_pages->addWidget(m_profilesView);
@@ -607,6 +621,27 @@ void MainWindow::buildPages() {
         showSection(Section::Puzzles);
     });
 
+    // Training: the plan run in order, each part on its own page, the time kept.
+    m_trainingHistory = new TrainingHistory({}, this);
+    m_training = new TrainingSession(*m_trainingHistory, this);
+    m_trainingView = new TrainingView(*m_training, *m_trainingHistory, m_style);
+    connect(m_training, &TrainingSession::partStarted, this, &MainWindow::onTrainingPart);
+    // A part's time is up: a sound, and a notification (seen in any app, e.g. over a book's
+    // PDF during self-study).
+    connect(m_training, &TrainingSession::timeUp, this, [this](training::Part part) {
+        m_sounds->play(Sounds::Kind::Check);
+        const training::Step* upcoming =
+            m_training->session() != nullptr ? m_training->session()->upcoming() : nullptr;
+        notifications::post(tr("%1: time's up").arg(TrainingSession::name(part)),
+                            upcoming != nullptr
+                                ? tr("Next: %1").arg(TrainingSession::name(upcoming->part))
+                                : tr("That was the last part of today's plan."));
+    });
+    connect(m_training, &TrainingSession::ended, this, [this] {
+        showSection(Section::Training);
+        m_trainingView->activate();
+    });
+
     m_enginesView = new EnginesView(*m_engineRegistry, m_style);
     m_enginesView->setObjectName(QStringLiteral("enginesView"));
 }
@@ -635,6 +670,7 @@ QWidget* MainWindow::buildSidebar() {
     for (const auto& [section, name, tip] :
          {std::tuple{Section::Board, "sideBoard", tr("Board (⌘1)")},
           std::tuple{Section::Library, "sideLibrary", tr("Library (⌘L)")},
+          std::tuple{Section::Training, "sideTraining", tr("Training (⇧⌘T)")},
           std::tuple{Section::Puzzles, "sidePuzzles", tr("Puzzles (⇧⌘U)")},
           std::tuple{Section::Databases, "sideDatabases", tr("Databases (⇧⌘D)")},
           std::tuple{Section::Profiles, "sideProfiles", tr("Profiles (⇧⌘P)")},

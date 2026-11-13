@@ -2,6 +2,7 @@
 
 #include <QWidget>
 
+class QLabel;
 class QLineEdit;
 
 namespace kiebitz::app {
@@ -16,7 +17,8 @@ public:
 
     void setRange(int minimum, int maximum);
     void setSingleStep(int step) { m_step = step; }
-    /// Shown after the number ("256 MB"); typing it is optional.
+    /// Shown after the number ("256 MB"); a label of its own, so typing changes only the
+    /// number.
     void setSuffix(const QString& suffix);
     void setValue(int value);
     [[nodiscard]] int value() const noexcept { return m_value; }
@@ -30,7 +32,10 @@ private:
     void commit(int value);
     void showValue();
 
+    void fitEdit();
+
     QLineEdit* m_edit = nullptr;
+    QLabel* m_suffixLabel = nullptr;
     int m_value = 0;
     int m_minimum = 0;
     int m_maximum = 99;

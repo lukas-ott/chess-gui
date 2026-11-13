@@ -73,6 +73,9 @@ public:
     void nextPuzzle();
     /// For a puzzle file: that puzzle (its index in the file).
     void showFilePuzzle(int index);
+    /// Training: the Lichess puzzles of a theme (Lichess's key: "endgame", "middlegame"; empty:
+    /// every theme), chosen in the theme box for you to see, and a new puzzle.
+    void train(const QString& theme);
 
     // For tests
     [[nodiscard]] BoardView* board() const { return m_board; }
@@ -120,6 +123,8 @@ private:
     [[nodiscard]] qint64 clockMillis() const;
     void fitClock();
     void saveFilters() const;
+    /// A theme training asked for, once the themes are there (after the database opens).
+    void applyTrainingTheme();
     void stepReview(int plies);
     [[nodiscard]] bool isLichess() const;
 
@@ -153,6 +158,7 @@ private:
     Stepper* m_low = nullptr;
     Stepper* m_high = nullptr;
     QComboBox* m_theme = nullptr;
+    std::optional<QString> m_trainingTheme; ///< asked for before the themes were there
     Toggle* m_progressive = nullptr;
     Toggle* m_autoNext = nullptr;
     Toggle* m_hideRating = nullptr;

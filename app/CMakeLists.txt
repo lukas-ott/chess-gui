@@ -1,4 +1,7 @@
 find_package(Qt6 6.5 REQUIRED COMPONENTS Concurrent Network Svg Widgets)
+if(APPLE)
+    enable_language(OBJCXX) # notify/Notifications.mm
+endif()
 qt_standard_project_setup()
 
 # The UI as a library, so UI tests and benchmarks can use it without the app's main().
@@ -116,6 +119,14 @@ qt_add_library(kiebitz_ui STATIC
     style/Layout.hpp
     style/PageHeader.cpp
     style/PageHeader.hpp
+    training/ActivityGrid.cpp
+    training/ActivityGrid.hpp
+    training/TrainingSession.cpp
+    training/TrainingSession.hpp
+    training/TrainingHistory.cpp
+    training/TrainingHistory.hpp
+    training/TrainingView.cpp
+    training/TrainingView.hpp
     widgets/ActivityChart.cpp
     widgets/ActivityChart.hpp
     widgets/Card.hpp
@@ -135,15 +146,25 @@ qt_add_library(kiebitz_ui STATIC
     widgets/Stepper.cpp
     widgets/Toggle.cpp
     widgets/Toggle.hpp
+    notify/Notifications.hpp
     util/WhenReady.hpp
     widgets/Stepper.hpp)
 target_include_directories(kiebitz_ui PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")
 target_link_libraries(kiebitz_ui PUBLIC Qt6::Widgets Qt6::Svg Qt6::Concurrent Qt6::Network
     kiebitz::pgn kiebitz::engine kiebitz::gamedb kiebitz::library kiebitz::repertoire
-    kiebitz::puzzles)
+    kiebitz::puzzles kiebitz::training)
 if(APPLE)
     # The board's sounds play as macOS sound effects (no audio stream of our own).
-    target_link_libraries(kiebitz_ui PUBLIC "-framework AudioToolbox" "-framework CoreFoundation")
+    target_link_libraries(kiebitz_ui PUBLIC "-framework AudioToolbox" "-framework CoreFoundation"
+        "-framework Foundation" "-framework UserNotifications")
+    # Notifications through macOS's own Notification Centre: Objective-C++.
+    target_sources(kiebitz_ui PRIVATE notify/Notifications.mm)
+    # Plain objc_msgSend calls: Homebrew's clang (the debug preset) would emit selector stubs
+    # that the system linker doesn't resolve.
+    set_source_files_properties(notify/Notifications.mm PROPERTIES COMPILE_OPTIONS
+        "-fobjc-arc;-fno-objc-msgsend-selector-stubs")
+else()
+    target_sources(kiebitz_ui PRIVATE notify/NotificationsNone.cpp)
 endif()
 kiebitz_set_warnings(kiebitz_ui)
 

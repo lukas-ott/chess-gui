@@ -1,6 +1,8 @@
 #include "Stepper.hpp"
 
 #include <QHBoxLayout>
+#include <QIntValidator>
+#include <QLabel>
 #include <QLineEdit>
 #include <QPushButton>
 
@@ -24,24 +26,31 @@ Stepper::Stepper(QWidget* parent) : QWidget(parent) {
                 [this, direction] { commit(m_value + (direction * m_step)); });
         return button;
     };
+    // The number (typed digits only) and its unit beside it, centred together between − and +.
     m_edit = new QLineEdit;
     m_edit->setProperty("role", "stepperValue");
-    m_edit->setAlignment(Qt::AlignCenter);
-    m_edit->setFixedWidth(72);
+    m_edit->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
+    m_edit->setValidator(new QIntValidator(0, 999'999'999, m_edit));
+    connect(m_edit, &QLineEdit::textEdited, this, [this] { fitEdit(); });
     connect(m_edit, &QLineEdit::editingFinished, this, [this] {
-        // Only the digits count: "256 MB", "256" and "256MB" all mean 256.
-        QString digits;
-        for (const QChar c : m_edit->text()) {
-            if (c.isDigit()) {
-                digits += c;
-            }
-        }
         bool ok = false;
-        const int typed = digits.toInt(&ok);
+        const int typed = m_edit->text().toInt(&ok);
         commit(ok ? typed : m_value);
     });
+    m_suffixLabel = new QLabel;
+    m_suffixLabel->setProperty("role", "stepperSuffix");
+    m_suffixLabel->hide();
+    auto* value = new QWidget;
+    value->setFixedWidth(72);
+    auto* valueRow = new QHBoxLayout(value);
+    valueRow->setContentsMargins(0, 0, 0, 0);
+    valueRow->setSpacing(0);
+    valueRow->addStretch();
+    valueRow->addWidget(m_edit);
+    valueRow->addWidget(m_suffixLabel);
+    valueRow->addStretch();
     row->addWidget(step(QStringLiteral("−"), QStringLiteral("stepDown"), -1));
-    row->addWidget(m_edit);
+    row->addWidget(value);
     row->addWidget(step(QStringLiteral("+"), QStringLiteral("stepUp"), 1));
     showValue();
 }
@@ -50,12 +59,30 @@ void Stepper::setRange(int minimum, int maximum) {
     m_minimum = minimum;
     m_maximum = std::max(minimum, maximum);
     m_value = std::clamp(m_value, m_minimum, m_maximum);
+    fitEdit();
     showValue();
 }
 
 void Stepper::setSuffix(const QString& suffix) {
     m_suffix = suffix;
+    m_suffixLabel->setText(suffix);
+    m_suffixLabel->setVisible(!suffix.isEmpty());
+    fitEdit();
     showValue();
+}
+
+void Stepper::fitEdit() {
+    // Without a unit: the whole width. With one: as wide as the digits, so number and unit
+    // stay centred together (the stepper itself never changes width).
+    if (m_suffix.isEmpty()) {
+        m_edit->setFixedWidth(72);
+        m_edit->setAlignment(Qt::AlignCenter);
+        return;
+    }
+    const QString digits = m_edit->text().isEmpty() ? QStringLiteral("0") : m_edit->text();
+    const int room = 72 - m_suffixLabel->sizeHint().width();
+    m_edit->setFixedWidth(std::min(room, m_edit->fontMetrics().horizontalAdvance(digits) + 4));
+    m_edit->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
 }
 
 void Stepper::setValue(int value) {
@@ -74,7 +101,8 @@ void Stepper::commit(int value) {
 }
 
 void Stepper::showValue() {
-    m_edit->setText(QString::number(m_value) + m_suffix);
+    m_edit->setText(QString::number(m_value));
+    fitEdit();
 }
 
 } // namespace kiebitz::app

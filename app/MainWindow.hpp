@@ -1,6 +1,7 @@
 #pragma once
 
 #include "document/GameDocument.hpp"
+#include "kiebitz/training/session.hpp"
 
 #include <QMainWindow>
 #include <QTimer>
@@ -37,6 +38,10 @@ class ProfilesView;
 class SettingsView;
 class Shortcuts;
 class Sounds;
+class TrainingBar;
+class TrainingSession;
+class TrainingHistory;
+class TrainingView;
 class ExplorerPanel;
 class GameInfoPanel;
 class Library;
@@ -61,6 +66,7 @@ public:
     enum class Section : std::uint8_t {
         Board,
         Library,
+        Training,
         Puzzles,
         Databases,
         Profiles,
@@ -174,6 +180,8 @@ private:
     void startPractice(bool fromHere, int depth, bool mistakes = false);
     /// Every repertoire file of the shown one's side, merged in a tab of its own, practised.
     void practiceWholeRepertoire(int depth);
+    /// Training: a part starts; its page.
+    void onTrainingPart(training::Part part);
     void onPracticeStarted(core::Color side);
     void onPracticeStopped();
 
@@ -230,6 +238,10 @@ private:
     EngineRegistry* m_engineRegistry = nullptr;
     EnginesView* m_enginesView = nullptr;
     Sounds* m_sounds = nullptr; ///< the board's move sounds
+    TrainingHistory* m_trainingHistory = nullptr;
+    TrainingSession* m_training = nullptr;
+    TrainingView* m_trainingView = nullptr;
+    TrainingBar* m_trainingBar = nullptr; ///< the running session, in the status bar
 
     // The board page
     BoardPage* m_boardPage = nullptr;

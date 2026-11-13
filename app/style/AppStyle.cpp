@@ -451,6 +451,7 @@ QLineEdit[role="stepperValue"] {
     min-height: 26px;
     font-weight: 600;
 }
+QLabel[role="stepperSuffix"] { color: @text; font-weight: 600; }
 QPushButton[role="step"] {
     background: transparent;
     color: @muted;
@@ -695,6 +696,21 @@ QProgressBar#accountProgress::chunk { background: @accent; border-radius: 2px; }
 
 /* Library: a repertoire's numbers in tiles, and the openings in it */
 QFrame[statTile="true"] { background: @raised; border: none; border-radius: 8px; }
+
+/* Training: the plan's rows (the running part tinted) and the session in the status bar */
+QFrame[trainingPart="true"] { background: transparent; border: none; border-radius: 8px; }
+QFrame[trainingPart="true"][current="true"] { background: @accentTint; }
+QToolButton[role="statusAction"] {
+    background: transparent;
+    border: none;
+    border-radius: 4px;
+    color: @muted;
+    padding: 0 6px;
+    font-size: 12px;
+}
+QToolButton[role="statusAction"]:hover { background: @raised; color: @text; }
+QToolButton#trainingBarPart { color: @text; font-weight: 600; }
+QToolButton#trainingBarPart[up="true"] { color: @accent; }
 QLabel[role="statCaption"] { color: @muted; font-size: 11px; }
 QLabel[role="statValue"] { color: @text; font-size: 20px; font-weight: 600; }
 QTreeWidget#repertoireOpenings, QTreeWidget#repertoireGaps {
