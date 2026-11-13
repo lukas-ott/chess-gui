@@ -1,4 +1,4 @@
-find_package(Qt6 6.5 REQUIRED COMPONENTS Concurrent Network Svg Widgets)
+find_package(Qt6 6.5 REQUIRED COMPONENTS Concurrent Network Svg Widgets LinguistTools)
 if(APPLE)
     enable_language(OBJCXX) # notify/Notifications.mm
 endif()
@@ -102,6 +102,8 @@ qt_add_library(kiebitz_ui STATIC
     repertoire/GapSource.hpp
     repertoire/RepertoirePanel.cpp
     repertoire/RepertoirePanel.hpp
+    settings/Language.cpp
+    settings/Language.hpp
     settings/Settings.cpp
     settings/Settings.hpp
     settings/SettingsView.cpp
@@ -189,6 +191,14 @@ qt_add_resources(kiebitz_ui "sounds"
     PREFIX "/sounds"
     BASE "${CMAKE_CURRENT_SOURCE_DIR}/resources/sounds"
     FILES ${sound_files})
+
+# Translations: German and Norwegian (Bokmål). `cmake --build <dir> --target update_translations`
+# collects the texts from the sources into the .ts files; the build compiles them into the app
+# (":/i18n/kiebitz_de.qm"), and main.cpp loads the one for the language chosen.
+qt_add_translations(kiebitz_ui
+    TS_FILES translations/kiebitz_de.ts translations/kiebitz_nb.ts
+    RESOURCE_PREFIX /i18n
+    LUPDATE_OPTIONS -no-obsolete -locations none)
 
 # The app icon (made from resources/icon/Kiebitz.svg by scripts/make_icon.sh).
 set(kiebitz_icon "${CMAKE_CURRENT_SOURCE_DIR}/resources/icon/Kiebitz.icns")

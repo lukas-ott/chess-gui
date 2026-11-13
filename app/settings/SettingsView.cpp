@@ -379,6 +379,14 @@ QWidget* SettingsView::appearanceSection() {
                                   {QStringLiteral("light"), tr("Light")},
                                   {QStringLiteral("dark"), tr("Dark")}},
                                  QStringLiteral("settingsAppearance"))));
+    // The app's language (each language names itself); it changes on the next start.
+    look->addWidget(row(tr("Language"), tr("As macOS is set, or one of these. After a restart."),
+                        segments(Settings::kLanguage,
+                                 {{QStringLiteral("system"), tr("System")},
+                                  {QStringLiteral("en"), QStringLiteral("English")},
+                                  {QStringLiteral("de"), QStringLiteral("Deutsch")},
+                                  {QStringLiteral("nb"), QStringLiteral("Norsk")}},
+                                 QStringLiteral("settingsLanguage"))));
 
     // The accent colour: round swatches, and one of your own.
     auto* colours = new QWidget;

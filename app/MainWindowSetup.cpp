@@ -914,6 +914,17 @@ void MainWindow::applySetting(const QString& key) {
         m_style.setAccent(accent.isEmpty() ? QColor() : QColor(accent));
     } else if (is(Settings::kTextSize)) {
         m_style.setTextScale(settings.number(Settings::kTextSize));
+    } else if (is(Settings::kLanguage)) {
+        askToRestart();
+    }
+}
+
+void MainWindow::askToRestart() {
+    // Every text is made in the language Kiebitz starts with: a restart shows the new one.
+    if (confirm(this, tr("Restart Kiebitz?"),
+                tr("Kiebitz shows the new language when it starts again."), tr("Restart Now")) &&
+        close()) {
+        emit restartRequested();
     }
 }
 

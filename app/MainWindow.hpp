@@ -100,6 +100,9 @@ signals:
     void fileOpened(const QString& path);
     void fileSaved(const QString& path);
     void fileError(const QString& message);
+    /// The language changed and you chose to restart: the window has closed; main() starts
+    /// Kiebitz again.
+    void restartRequested();
 
 protected:
     void closeEvent(QCloseEvent* event) override;
@@ -122,6 +125,8 @@ private:
     void restoreState();
     /// A setting changed (or at the start): applied wherever it shows.
     void applySetting(const QString& key);
+    /// The language changed: asks to restart now (then restartRequested()).
+    void askToRestart();
     /// The Settings page's Folders section: where the library, databases, ... are.
     void showFolders();
     void showAbout();

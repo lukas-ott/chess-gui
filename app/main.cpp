@@ -1,14 +1,17 @@
 #include "MainWindow.hpp"
 #include "Migration.hpp"
 #include "kiebitz/core/version.hpp"
+#include "settings/Language.hpp"
 #include "settings/Settings.hpp"
 #include "style/AppStyle.hpp"
 
 #include <QApplication>
 #include <QElapsedTimer>
 #include <QIcon>
+#include <QProcess>
 #include <QSettings>
 #include <QTimer>
+#include <QTranslator>
 
 #include <cstdio>
 
@@ -45,9 +48,13 @@ int main(int argc, char* argv[]) {
     QApplication::setApplicationVersion(QString::fromUtf8(
         kiebitz::core::version().data(), static_cast<qsizetype>(kiebitz::core::version().size())));
 
+    // The language, before any text is made.
+    const auto& settings = kiebitz::app::Settings::instance();
+    QTranslator translator;
+    kiebitz::app::language::install(translator);
+
     // Style first, with the saved appearance, so the window never flashes in the wrong colours.
     kiebitz::app::AppStyle style(app);
-    const auto& settings = kiebitz::app::Settings::instance();
     if (const QString accent = settings.string(kiebitz::app::Settings::kAccent);
         !accent.isEmpty()) {
         style.setAccent(QColor(accent));
@@ -57,6 +64,9 @@ int main(int argc, char* argv[]) {
         kiebitz::app::AppStyle::fromString(settings.string(kiebitz::app::Settings::kAppearance)));
 
     kiebitz::app::MainWindow window(style);
+    bool restart = false;
+    QObject::connect(&window, &kiebitz::app::MainWindow::restartRequested, &app,
+                     [&restart] { restart = true; });
     window.show();
 
     if (envFlag("KIEBITZ_STARTUP_TIMING") || envFlag("KIEBITZ_STARTUP_EXIT")) {
@@ -69,5 +79,10 @@ int main(int argc, char* argv[]) {
         });
     }
 
-    return QApplication::exec();
+    const int result = QApplication::exec();
+    if (restart) { // the language changed: the same app again, which reads it at its start
+        QProcess::startDetached(QApplication::applicationFilePath(),
+                                QApplication::arguments().mid(1));
+    }
+    return result;
 }

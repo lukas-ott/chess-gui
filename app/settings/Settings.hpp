@@ -17,6 +17,7 @@ public:
     static constexpr auto kAppearance = "app/appearance"; ///< "system", "light", "dark"
     static constexpr auto kAccent = "app/accent";         ///< "#rrggbb", or "" for the default
     static constexpr auto kTextSize = "app/textSize";     ///< percent: 90, 100, 110, 120
+    static constexpr auto kLanguage = "app/language";     ///< "system", "en", "de", "nb"
     // Board
     static constexpr auto kTheme = "board/theme";
     static constexpr auto kPieces = "board/pieces";

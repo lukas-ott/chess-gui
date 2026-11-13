@@ -41,7 +41,8 @@ if(KIEBITZ_BUILD_APP)
         ui/test_puzzles.cpp
         ui/test_settings.cpp
         ui/test_tablebase.cpp
-        ui/test_training.cpp)
+        ui/test_training.cpp
+        ui/test_translations.cpp)
     find_package(Qt6 REQUIRED COMPONENTS Test)
     target_link_libraries(kiebitz_ui_tests PRIVATE kiebitz_ui Qt6::Test GTest::gtest)
     kiebitz_set_warnings(kiebitz_ui_tests)
@@ -51,7 +52,8 @@ if(KIEBITZ_BUILD_APP)
     kiebitz_set_warnings(kiebitz_fake_engine)
     add_dependencies(kiebitz_ui_tests kiebitz_fake_engine)
     target_compile_definitions(kiebitz_ui_tests PRIVATE
-        KIEBITZ_FAKE_ENGINE="$<TARGET_FILE:kiebitz_fake_engine>")
+        KIEBITZ_FAKE_ENGINE="$<TARGET_FILE:kiebitz_fake_engine>"
+        KIEBITZ_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
     gtest_discover_tests(kiebitz_ui_tests
         DISCOVERY_TIMEOUT 30
         PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")

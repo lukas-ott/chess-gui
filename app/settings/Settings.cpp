@@ -12,6 +12,7 @@ namespace {
 const std::map<std::string_view, QVariant>& defaults() {
     static const std::map<std::string_view, QVariant> values{
         {Settings::kAppearance, QStringLiteral("system")},
+        {Settings::kLanguage, QStringLiteral("system")},
         {Settings::kAccent, QString()},
         {Settings::kTextSize, 100},
         {Settings::kTheme, QString()},
