@@ -84,12 +84,11 @@ private:
         SideMove,
         Comment,
         Author, ///< who wrote the comment after it
-        Clock,  ///< time left after the move, small and quiet
         Bracket,
         Result,
         Hint,
     };
-    static constexpr std::size_t kKinds = 9;
+    static constexpr std::size_t kKinds = 8;
     /// How a word joins the one before it.
     enum class Join : std::uint8_t {
         Space, ///< a space; the line may break here

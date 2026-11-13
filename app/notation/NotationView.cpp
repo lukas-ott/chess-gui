@@ -102,9 +102,7 @@ void NotationView::updateFonts() {
             const auto kind = static_cast<Kind>(k);
             QFont f = font();
             int pixels = small ? kVariationPixels : kMainPixels;
-            if (kind == Kind::Clock) {
-                pixels -= 4;
-            } else if (kind == Kind::Author) {
+            if (kind == Kind::Author) {
                 pixels -= 2;
             }
             f.setPixelSize(pixels);
@@ -214,18 +212,14 @@ void NotationView::rebuild() {
         spaceOwed = false;
         nbspOwed = false;
     };
-    // A comment as people read it: the clock right after the move, then who wrote it (from a
-    // Lichess study's [%anno]), then the text, without the [%...] commands tools put in. True
+    // A comment as people read it: who wrote it (from a Lichess study's [%anno]), then the
+    // text, without the [%...] commands tools put in (the clocks show beside the board). True
     // if it showed some text (then the next move gets its number again).
     const auto comment = [&](const std::string& value) {
         if (value.empty()) {
             return false;
         }
         const core::CommentDisplay shown = core::displayComment(value);
-        if (!shown.clock.empty()) {
-            nbspOwed = spaceOwed; // stays with its move
-            add(QString::fromStdString(shown.clock), Kind::Clock);
-        }
         if (!shown.author.empty()) {
             add(QString::fromStdString(shown.author) + QLatin1Char(':'), Kind::Author);
         }
@@ -561,8 +555,6 @@ void NotationView::paintEvent(QPaintEvent* event) {
             QColor color = c.muted;
             if (word.kind == Kind::MainMove) {
                 color = c.text;
-            } else if (word.kind == Kind::Clock) {
-                color = c.dimmed;
             }
             if (i == currentWord) { // accent text on a soft accent tint
                 const QFontMetricsF metrics(

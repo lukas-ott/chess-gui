@@ -275,4 +275,62 @@ CommentDisplay displayComment(std::string_view comment) {
     return result;
 }
 
+namespace {
+
+/// A comment's [%...] commands and the text around them, both as written.
+struct Split {
+    std::string commands; ///< "[%clk 0:03:00] [%eval 0.3]"
+    std::string text;
+};
+
+Split split(std::string_view comment) {
+    Split result;
+    std::size_t pos = 0;
+    while (pos < comment.size()) {
+        const auto start = comment.find("[%", pos);
+        const auto end = start == std::string_view::npos ? start : comment.find(']', start);
+        if (end == std::string_view::npos) { // no (complete) command left
+            result.text += comment.substr(pos);
+            break;
+        }
+        result.text += comment.substr(pos, start - pos);
+        if (!result.commands.empty()) {
+            result.commands += ' ';
+        }
+        result.commands += comment.substr(start, end + 1 - start);
+        pos = end + 1;
+        // The space the command took: one stays between the words around it.
+        const bool spaceBefore =
+            !result.text.empty() && (result.text.back() == ' ' || result.text.back() == '\t');
+        if (spaceBefore && pos < comment.size() && (comment[pos] == ' ' || comment[pos] == '\t')) {
+            ++pos;
+        }
+    }
+    return result;
+}
+
+std::string_view trimmed(std::string_view text) {
+    const auto first = text.find_first_not_of(" \t\r\n");
+    if (first == std::string_view::npos) {
+        return {};
+    }
+    const auto last = text.find_last_not_of(" \t\r\n");
+    return text.substr(first, last + 1 - first);
+}
+
+} // namespace
+
+std::string commentText(std::string_view comment) {
+    return std::string(trimmed(split(comment).text));
+}
+
+std::string withCommentText(std::string_view comment, std::string_view text) {
+    std::string result = split(comment).commands;
+    if (!result.empty() && !trimmed(text).empty()) {
+        result += ' ';
+    }
+    result += trimmed(text).empty() ? std::string_view() : text;
+    return result;
+}
+
 } // namespace kiebitz::core

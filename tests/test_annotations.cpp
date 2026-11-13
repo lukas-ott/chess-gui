@@ -139,3 +139,24 @@ TEST(CommentDisplay, PlainTextIsTidied) {
               (CommentDisplay{"Unfinished [%clk 1:00", "", ""}));
     EXPECT_EQ(displayComment(""), CommentDisplay{});
 }
+
+TEST(Annotations, CommentTextLeavesOutCommandsAndKeepsLineBreaks) {
+    EXPECT_EQ(commentText("[%clk 0:03:00]"), "");
+    EXPECT_EQ(commentText("[%clk 0:03:00] Best by test"), "Best by test");
+    EXPECT_EQ(commentText("Best by test [%clk 0:05:00]"), "Best by test");
+    EXPECT_EQ(commentText("Good [%eval 0.3] idea"), "Good idea");
+    EXPECT_EQ(commentText("First line\nsecond [%clk 0:01:00]"), "First line\nsecond");
+    EXPECT_EQ(commentText("No commands at all"), "No commands at all");
+}
+
+TEST(Annotations, EditedTextKeepsTheCommands) {
+    EXPECT_EQ(withCommentText("[%clk 0:03:00]", "Best by test"), "[%clk 0:03:00] Best by test");
+    EXPECT_EQ(withCommentText("Old words [%clk 0:05:00] [%eval 0.3]", "New"),
+              "[%clk 0:05:00] [%eval 0.3] New");
+    EXPECT_EQ(withCommentText("[%clk 0:05:00] Old", ""), "[%clk 0:05:00]"); // text cleared
+    EXPECT_EQ(withCommentText("Old", "New\nlines"), "New\nlines");
+    // Round trip: the text shown, edited back unchanged, is the same comment's text.
+    const std::string comment = "[%clk 1:24:00] Keeps its clock";
+    EXPECT_EQ(commentText(withCommentText(comment, commentText(comment))), "Keeps its clock");
+    EXPECT_EQ(displayComment(withCommentText(comment, "Edited")).clock, "1:24:00");
+}

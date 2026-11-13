@@ -916,7 +916,9 @@ void MainWindow::onCommentEdited(const QString& text) {
     if (d == nullptr) {
         return;
     }
-    d->game.setComment(d->current, text.toStdString());
+    // The words typed, with the comment's commands ([%clk ...]) kept as they were.
+    d->game.setComment(d->current,
+                       core::withCommentText(d->game.node(d->current).comment, text.toStdString()));
     setModified();
     m_notationRefresh.start(); // re-render once typing pauses
 }

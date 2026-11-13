@@ -1085,8 +1085,9 @@ TEST_F(DocumentsTest, ClosingATabSavesItsChangesWithoutAsking) {
     EXPECT_EQ(game->mainLine().size(), 5U);
 }
 
-TEST_F(DocumentsTest, MoveListShowsClocksAndWhoWroteAComment) {
+TEST_F(DocumentsTest, MoveListShowsWhoWroteACommentButNoClocks) {
     // As exported from a Lichess study: clocks after every move, a friend's note with [%anno].
+    // The clocks show beside the board, not in the list.
     QFile file(path("study.pgn"));
     ASSERT_TRUE(file.open(QIODevice::WriteOnly));
     file.write("[Event \"Study\"]\n[Result \"*\"]\n\n1. e4 { [%clk 1:24:00] } e5 { [%eval 0.3] "
@@ -1096,8 +1097,8 @@ TEST_F(DocumentsTest, MoveListShowsClocksAndWhoWroteAComment) {
     open(path("study.pgn"));
     notation->resize(420, 200);
     const QString text = notation->plainText().replace(QChar(0xA0), QLatin1Char(' '));
-    EXPECT_EQ(text, QStringLiteral("1. e4 1:24:00 e5 47:00 jonathanlund123: trengte du å bruke en "
-                                   "halvtime på a6? 2. Nf3 1:23:30"));
+    EXPECT_EQ(text, QStringLiteral("1. e4 e5 jonathanlund123: trengte du å bruke en "
+                                   "halvtime på a6? 2. Nf3"));
     if (const QString dir = qEnvironmentVariable("KIEBITZ_SNAPSHOT_DIR"); !dir.isEmpty()) {
         QImage image(notation->size() * 2, QImage::Format_ARGB32_Premultiplied);
         image.setDevicePixelRatio(2);
@@ -1267,6 +1268,27 @@ TEST_F(DocumentsTest, CommentBoxEditsTheCurrentMoveAndKeepsItsArrowKeys) {
     window.saveCurrentAs(path("comment.pgn"));
     ASSERT_TRUE(saved.wait(5000));
     EXPECT_NE(readFile(path("comment.pgn")).find("1. e4 {Best by test}"), std::string::npos);
+}
+
+TEST_F(DocumentsTest, CommentBoxShowsTheWordsAndKeepsTheClock) {
+    writeFile(path("timed.pgn"), "[White \"A\"]\n[Black \"B\"]\n\n"
+                                 "1. e4 { [%clk 0:03:00] Best by test } e5 { [%clk 0:02:59] } *\n");
+    open(path("timed.pgn"));
+    auto* box = window.findChild<QPlainTextEdit*>(QStringLiteral("commentBox"));
+    ASSERT_NE(box, nullptr);
+    action(window, QStringLiteral("Forward"))->trigger();
+    EXPECT_EQ(box->toPlainText(), QStringLiteral("Best by test")); // no [%clk]
+    action(window, QStringLiteral("Forward"))->trigger();
+    EXPECT_TRUE(box->toPlainText().isEmpty()); // only a clock: nothing to read
+    // Words added to a move with a clock: the clock stays in the file.
+    box->setFocus();
+    QTest::keyClicks(box, QStringLiteral("Solid"));
+    QSignalSpy saved(&window, &MainWindow::fileSaved);
+    window.saveCurrentAs(path("timed2.pgn"));
+    ASSERT_TRUE(saved.wait(5000));
+    const std::string text = readFile(path("timed2.pgn"));
+    EXPECT_NE(text.find("{[%clk 0:02:59] Solid}"), std::string::npos) << text;
+    EXPECT_NE(text.find("[%clk 0:03:00] Best by test"), std::string::npos) << text;
 }
 
 TEST_F(DocumentsTest, MenuShortcutsLeaveTheCommentBoxAlone) {

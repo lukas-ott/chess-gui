@@ -1,5 +1,6 @@
 #include "MovesCard.hpp"
 
+#include "kiebitz/core/annotations.hpp"
 #include "notation/NotationView.hpp"
 #include "settings/Settings.hpp"
 #include "style/AppStyle.hpp"
@@ -152,7 +153,9 @@ void MovesCard::setRows(bool rows) {
 void MovesCard::showComment(const core::Game& game, core::NodeId id) {
     {
         const QSignalBlocker block(m_commentBox);
-        m_commentBox->setPlainText(QString::fromStdString(game.node(id).comment));
+        // The words only: [%clk ...] and other tools' commands stay in the game, unseen.
+        m_commentBox->setPlainText(
+            QString::fromStdString(core::commentText(game.node(id).comment)));
         m_commentBox->setPlaceholderText(id == core::Game::root()
                                              ? tr("Add a comment about the game…")
                                              : tr("Add a comment about this move…"));

@@ -57,6 +57,13 @@ struct CommentDisplay {
 };
 [[nodiscard]] CommentDisplay displayComment(std::string_view comment);
 
+/// What a person wrote in a comment, for editing: the [%...] commands left out, the text's own
+/// line breaks kept. "[%clk 0:03:00] Best by test" → "Best by test".
+[[nodiscard]] std::string commentText(std::string_view comment);
+/// The comment with its text replaced and its commands kept (first, in their order): what an
+/// edited comment becomes, so editing the words never loses the clock or the engine's eval.
+[[nodiscard]] std::string withCommentText(std::string_view comment, std::string_view text);
+
 /// What drawing on the board does, as on Lichess: drawing an arrow (or marking a square) that is
 /// already there in the same colour removes it; in another colour it changes the colour;
 /// otherwise it is added.
