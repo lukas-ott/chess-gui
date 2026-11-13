@@ -4,6 +4,8 @@
 #import <UserNotifications/UserNotifications.h>
 #include <objc/runtime.h>
 
+#include <QCoreApplication>
+#include <QMetaObject>
 #include <QUuid>
 
 #include <utility>
@@ -54,7 +56,7 @@ UNUserNotificationCenter* center() {
 
 } // namespace
 
-void requestPermission() {
+void requestPermission(std::function<void(const QString& why)> denied) {
     if (sink()) {
         return;
     }
@@ -63,10 +65,28 @@ void requestPermission() {
         return;
     }
     // No sound of its own: Kiebitz plays one when it posts (also without permission).
+    auto* callback = new std::function<void(const QString&)>(std::move(denied));
     [notifications requestAuthorizationWithOptions:UNAuthorizationOptionAlert
                                  completionHandler:^(BOOL granted, NSError* error) {
-                                   (void)granted;
-                                   (void)error;
+                                   QString why;
+                                   if (error != nil) {
+                                       why = QString::fromNSString(error.localizedDescription);
+                                   } else if (!granted) {
+                                       why = QStringLiteral("off");
+                                   }
+                                   if (!why.isEmpty()) {
+                                       qWarning("Kiebitz notifications: %s", qPrintable(why));
+                                   }
+                                   // Back on the UI thread for the window.
+                                   QMetaObject::invokeMethod(
+                                       qApp,
+                                       [callback, why] {
+                                           if (!why.isEmpty() && *callback) {
+                                               (*callback)(why);
+                                           }
+                                           delete callback;
+                                       },
+                                       Qt::QueuedConnection);
                                  }];
 }
 

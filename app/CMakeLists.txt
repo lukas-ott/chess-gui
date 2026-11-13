@@ -204,6 +204,15 @@ set_target_properties(kiebitz PROPERTIES
     MACOSX_BUNDLE_SHORT_VERSION_STRING "${PROJECT_VERSION}")
 
 target_link_libraries(kiebitz PRIVATE kiebitz_ui)
+if(APPLE)
+    # The linker signs the binary alone, as "Kiebitz", with the Info.plist not bound to it; macOS
+    # then doesn't know the app by its bundle id and silently ignores its notifications. Signed
+    # again as a bundle (ad hoc, as scripts/package_macos.sh does), it is com.lukasott.kiebitz.
+    add_custom_command(TARGET kiebitz POST_BUILD
+        COMMAND codesign --force --sign - "$<TARGET_BUNDLE_DIR:kiebitz>"
+        COMMENT "Signing Kiebitz.app (ad hoc, as a bundle)"
+        VERBATIM)
+endif()
 qt_add_resources(kiebitz "icon"
     PREFIX "/icon"
     BASE "${CMAKE_CURRENT_SOURCE_DIR}/resources/icon"

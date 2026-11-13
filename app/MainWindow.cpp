@@ -810,7 +810,11 @@ void MainWindow::practiceWholeRepertoire(int depth) {
 
 void MainWindow::onTrainingPart(training::Part part) {
     if (m_training->session() != nullptr && m_training->session()->index() == 0) {
-        notifications::requestPermission(); // macOS asks you the first time
+        // macOS asks you the first time; if they're off, say where to switch them on.
+        notifications::requestPermission([this](const QString& /*why*/) {
+            showStatus(tr("Notifications for Kiebitz are off: System Settings › Notifications"),
+                       8000);
+        });
     }
     switch (part) {
     case training::Part::Openings: {

@@ -15,7 +15,7 @@ std::function<void(const QString&, const QString&)>& sink() {
 
 } // namespace
 
-void requestPermission() {}
+void requestPermission(std::function<void(const QString& why)> /*denied*/) {}
 
 void post(const QString& title, const QString& body) {
     if (sink()) {
