@@ -5,28 +5,36 @@ with Qt 6 Widgets.
 It opens instantly, keeps your PGN files as the source of truth, and focuses on building
 and training opening repertoires.
 
-> Status: **M6, repertoires; M7, practice.** A sidebar switches between the board (games in
-> tabs), the Library and the Engines page. The Library shows every PGN file in your library folder
-> (`~/Documents/Kiebitz` by default) as a tree, searchable and filterable by type (game,
-> repertoire, tournament, puzzle, other). A file shows its games and a preview; a repertoire file
-> an overview (positions, lines, openings) with a Practice button. On the board you can edit
-> variations, comments and NAGs (as flowing text or in rows), and changes save themselves. A
-> repertoire file opens from its side; its Repertoire tab counts the positions to practise and
-> starts a drill in which the app plays the opponent. Mistakes are remembered per position (on
-> this Mac, not in the file) and can be practised on their own; `[%depth n]` in a move's comment
-> ends the lines below it at move n. Other games are checked against the repertoire of the side
-> you view the board from. The Databases page holds game databases of millions of games
-> (Lumbra's Gigabase, Caissabase or your own PGN, also in .7z/.zip), and the Explorer tab shows
-> what is played in a position, how it scores and both sides' average rating. Profiles (you,
-> friends, opponents) collect a player's Lichess and chess.com games and over-the-board PGNs
-> into a database of their own, also for the Explorer, with ratings, results by colour and
-> their FIDE player (looked up by name). The Explorer can be filtered by rating, years, time
-> control and, for a profile, the colour it played; signed in to Lichess, it also shows Lichess's
-> and the masters' games. The gap check finds the common opponent moves a repertoire file
-> doesn't answer yet, judged by the Explorer's games, and a profile's Repertoire tab shows where
-> its games left your repertoire, grouped by opening. Every games list sorts by any column and
-> filters by date. The Engine tab
-> analyses with Stockfish (one-click download) or the Lichess cloud.
+Latest release: **[0.2.0](https://github.com/lukas-ott/kiebitz/releases/tag/v0.2.0)** (pre-release,
+Apple silicon).
+
+## What it does
+
+- **Board and PGN editor:** games in tabs; variations, comments, NAGs, arrows and clocks, as
+  flowing text or in rows. Changes save themselves.
+- **Library:** every PGN file in your library folder (`~/Documents/Kiebitz` by default) as a tree,
+  searchable (players, events, openings) and filterable by type: game, repertoire, tournament,
+  puzzle, other. A file shows its games with a preview; every list sorts by any column and
+  filters by date.
+- **Repertoires:** a repertoire file opens from its side and has a starting position (right-click
+  a move). Practice the whole file, from any position, just the positions you got wrong, or
+  every file of a side together, with the app playing the opponent. `[%depth n]` in a comment
+  ends the lines below it at move n. Other games are checked against your repertoire as you go
+  through them.
+- **Gap check and theory check:** the common opponent moves a repertoire file doesn't answer yet,
+  judged by the Explorer's games; and, on a profile, where its games left your repertoire.
+- **Puzzles:** the Lichess puzzle database (over 6 million puzzles, one download) by rating and
+  theme, starting around your own rating, or the puzzle files of your Library. Hints, the
+  solution, and stats for solved, clean, streak and time.
+- **Game databases and Explorer:** millions of games (Lumbra's Gigabase, Caissabase or your own
+  PGN, also .7z/.zip); the Explorer shows what's played, how it scores and both sides' average
+  rating, filtered by rating, years, time control and players. Signed in to Lichess, it also
+  shows Lichess's and the masters' games.
+- **Profiles:** you, friends and opponents, each with their Lichess and chess.com games and
+  over-the-board PGNs as a database of their own, with ratings, results by colour and their
+  FIDE player.
+- **Engine:** Stockfish (one-click download) or the Lichess cloud.
+- **Settings:** board, pieces, moves, appearance, sounds and your own keyboard shortcuts.
 
 ## Requirements (macOS)
 
@@ -35,7 +43,7 @@ xcode-select --install                     # or full Xcode (adds Instruments for
 brew install cmake ninja ccache qt llvm    # llvm: clang-format/-tidy, clangd, debug-preset compiler
 ```
 
-All other dependencies (chess-library, SQLite, GoogleTest, Google Benchmark) are fetched by CMake
+All other dependencies (chess-library, SQLite, zstd, GoogleTest, Google Benchmark) are fetched by CMake
 at pinned versions on first configure.
 
 ## Build and run
@@ -94,10 +102,15 @@ repertoire/ Repertoire trees (games merged by position), practice drills and ope
           No Qt.
 gamedb/   Game databases of millions of games: a compact store (one byte per move), a
           streaming parallel PGN import and an opening explorer over it. No Qt.
+puzzles/  Tactics puzzles: solving one, the Lichess puzzle database (imported into one
+          compact file, picked by rating and theme) and your puzzle history. No Qt.
 app/      Qt Widgets application: main window, board/ (board widget, themes, piece sets),
-          library/ (library folder scan and Library tab), databases/ (Databases page,
-          imports), explorer/ (Explorer tab), profiles/ (Profiles page, game downloads), document/ (open games, background
-          file loading and saving), notation/ (move list editor), panels/ (game info),
+          library/ (library folder scan and Library tab), repertoire/ (repertoire files,
+          practice, the Repertoire tab), puzzles/ (Puzzles page, the Lichess download),
+          databases/ (Databases page, imports), explorer/ (Explorer tab), profiles/ (Profiles
+          page, game downloads, the Lichess login), settings/ (Settings page, shortcuts),
+          document/ (open games, background file loading and saving), notation/ (move list
+          editor), panels/ (game info),
           engine/ (engine processes, Lichess cloud, Stockfish download, Engines page and
           Engine tab),
           style/ (app colours and style sheet, light and dark),
@@ -108,14 +121,12 @@ scripts/  Dev scripts (startup timing).
 cmake/    Compiler options and pinned dependencies.
 ```
 
-Planned modules (`gamedb/`, `online/`) are added
-with their milestones.
-
 ## Roadmap
 
-- **v1 (MVP):** board, PGN viewer/editor, UCI engine analysis
-- **v2:** repertoire builder, depth-limited subtree training, Lichess explorer gap check
-- **v3:** Lichess/Chess.com import, compare with my games, large local game database
+- **v1:** board, PGN viewer and editor, UCI engine analysis (done)
+- **v2:** repertoires, practice, game databases, Explorer, profiles, gap check, puzzles (done)
+- **Next:** an endgame tablebase in the Explorer, game review (your mistakes as puzzles), a
+  training plan, position search in big databases
 
 ## Why "Kiebitz"?
 
