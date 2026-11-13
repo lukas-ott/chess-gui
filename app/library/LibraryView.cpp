@@ -6,6 +6,7 @@
 #include "document/PgnIo.hpp"
 #include "kiebitz/gamedb/database.hpp"
 #include "kiebitz/repertoire/gaps.hpp"
+#include "kiebitz/repertoire/openings.hpp"
 #include "kiebitz/repertoire/summary.hpp"
 #include "repertoire/RepertoireStore.hpp"
 #include "settings/Settings.hpp"
@@ -805,20 +806,63 @@ LibraryView::LibraryView(Library& library, RepertoireStore& store, const AppStyl
         tileBox->addWidget(m_repStats[i]);
         stats->addWidget(tile, 1);
     }
-    m_repStatus = label(QString(), "emptyHint");
-    m_repOpenings = new QTreeWidget;
-    m_repOpenings->setObjectName(QStringLiteral("repertoireOpenings"));
-    m_repOpenings->setColumnCount(2);
-    m_repOpenings->setHeaderHidden(true);
-    m_repOpenings->setRootIsDecorated(false);
-    m_repOpenings->setFrameShape(QFrame::NoFrame);
-    m_repOpenings->setSelectionMode(QAbstractItemView::NoSelection);
-    m_repOpenings->setFocusPolicy(Qt::NoFocus);
-    m_repOpenings->setUniformRowHeights(true);
-    m_repOpenings->setTextElideMode(Qt::ElideRight);
-    m_repOpenings->header()->setStretchLastSection(false);
-    m_repOpenings->header()->setSectionResizeMode(0, QHeaderView::Stretch);
-    m_repOpenings->header()->setSectionResizeMode(1, QHeaderView::ResizeToContents);
+    // A preview of the file, as a game's: its main line, from where the file starts.
+    m_startBoard = new BoardView;
+    m_startBoard->setObjectName(QStringLiteral("repertoireStartBoard"));
+    m_startBoard->setInteractive(false);
+    m_startBoard->setFocusPolicy(Qt::StrongFocus); // a click on it takes the arrow keys
+    m_startBoard->installEventFilter(this);
+    m_startBoard->setShowCoordinates(false);
+    m_startBoard->setFixedSize(212, 212);
+    m_repName = label(QString(), "previewPlayers");
+    m_repName->setObjectName(QStringLiteral("repertoireName"));
+    m_repName->setWordWrap(true);
+    m_startLine = label(QString(), "emptyHint");
+    m_startLine->setObjectName(QStringLiteral("repertoireStartLine"));
+    m_startLine->setWordWrap(true);
+    m_repMove = label(QString(), "emptyHint");
+    m_repMove->setObjectName(QStringLiteral("repertoireMove"));
+    auto* repStepRow = new QHBoxLayout;
+    repStepRow->setSpacing(6);
+    for (const auto& [tip, plies] :
+         {std::pair{tr("Start (Home)"), -10000}, std::pair{tr("Back (←)"), -1},
+          std::pair{tr("Forward (→)"), 1}, std::pair{tr("End (End)"), 10000}}) {
+        auto* button = new QPushButton;
+        button->setProperty("role", "nav");
+        button->setToolTip(tip);
+        button->setFocusPolicy(Qt::NoFocus);
+        button->setIconSize(QSize(14, 14));
+        connect(button, &QPushButton::clicked, this, [this, plies] {
+            m_startBoard->setFocus();
+            stepRepertoire(plies);
+        });
+        repStepRow->addWidget(button);
+        m_repButtons.push_back(button);
+    }
+    repStepRow->addStretch();
+    auto* openHere = new QPushButton(tr("Open Here"));
+    openHere->setObjectName(QStringLiteral("repertoireOpenHere"));
+    openHere->setProperty("role", "secondary");
+    connect(openHere, &QPushButton::clicked, this, &LibraryView::openRepertoireHere);
+    auto* openHereRow = new QHBoxLayout;
+    openHereRow->addWidget(openHere);
+    openHereRow->addStretch();
+    auto* repInfo = new QVBoxLayout;
+    repInfo->setSpacing(6);
+    repInfo->addWidget(m_repName);
+    repInfo->addWidget(m_startLine);
+    repInfo->addSpacing(6);
+    repInfo->addWidget(m_repMove);
+    repInfo->addLayout(repStepRow);
+    repInfo->addStretch();
+    repInfo->addLayout(openHereRow);
+    auto* repPreview = new QWidget;
+    repPreview->setFixedHeight(212);
+    auto* repPreviewRow = new QHBoxLayout(repPreview);
+    repPreviewRow->setContentsMargins(0, 0, 0, 0);
+    repPreviewRow->setSpacing(16);
+    repPreviewRow->addWidget(m_startBoard, 0, Qt::AlignTop);
+    repPreviewRow->addLayout(repInfo, 1);
 
     auto* repertoirePage = new QWidget;
     auto* repBox = new QVBoxLayout(repertoirePage);
@@ -828,33 +872,7 @@ LibraryView::LibraryView(Library& library, RepertoireStore& store, const AppStyl
     repBox->addSpacing(4);
     repBox->addLayout(stats);
     repBox->addSpacing(8);
-    // The openings, and beside them where the file starts (set with "Start Here" on a move).
-    auto* openings = new QVBoxLayout;
-    openings->setSpacing(layout::kCardSpacing);
-    openings->addWidget(label(tr("OPENINGS IN THIS FILE"), "cardTitle"));
-    openings->addWidget(m_repStatus);
-    openings->addWidget(m_repOpenings, 1);
-    m_startBoard = new BoardView;
-    m_startBoard->setObjectName(QStringLiteral("repertoireStartBoard"));
-    m_startBoard->setInteractive(false);
-    m_startBoard->setFocusPolicy(Qt::NoFocus);
-    m_startBoard->setShowCoordinates(false);
-    m_startBoard->setFixedSize(212, 212);
-    m_startLine = label(QString(), "emptyHint");
-    m_startLine->setObjectName(QStringLiteral("repertoireStartLine"));
-    m_startLine->setWordWrap(true);
-    m_startLine->setFixedWidth(212);
-    auto* start = new QVBoxLayout;
-    start->setSpacing(layout::kCardSpacing);
-    start->addWidget(label(tr("STARTS AT"), "cardTitle"));
-    start->addWidget(m_startBoard);
-    start->addWidget(m_startLine);
-    start->addStretch();
-    auto* openingsRow = new QHBoxLayout;
-    openingsRow->setSpacing(layout::kPageSpacing);
-    openingsRow->addLayout(openings, 1);
-    openingsRow->addLayout(start);
-    repBox->addLayout(openingsRow, 1);
+    repBox->addWidget(repPreview);
 
     // Gaps: common opponent moves the file doesn't answer yet, by the Explorer's games.
     m_checkGaps = new QPushButton(tr("Check"));
@@ -903,7 +921,7 @@ LibraryView::LibraryView(Library& library, RepertoireStore& store, const AppStyl
     });
     connect(&m_store, &RepertoireStore::openingsReady, this, [this] {
         if (m_detail->currentIndex() == kRepertoirePage) {
-            refreshRepertoire();
+            showRepertoirePly(false); // the opening's name
         }
     });
 
@@ -986,9 +1004,9 @@ LibraryView::LibraryView(Library& library, RepertoireStore& store, const AppStyl
     // The card that has the keyboard gets an accent border, so it's clear where ↑ ↓ ← → go.
     m_focusOutline =
         connect(qApp, &QApplication::focusChanged, this, [this](QWidget*, QWidget* now) {
-            const std::array<bool, 2> focused{now != nullptr && now == m_files,
-                                              now != nullptr &&
-                                                  (now == m_games || now == m_previewBoard)};
+            const std::array<bool, 2> focused{
+                now != nullptr && now == m_files,
+                now != nullptr && (now == m_games || now == m_previewBoard || now == m_startBoard)};
             for (std::size_t i = 0; i < m_cards.size(); ++i) {
                 if (m_cards[i]->property("focused").toBool() != focused[i]) {
                     m_cards[i]->setProperty("focused", focused[i]);
@@ -1065,6 +1083,7 @@ void LibraryView::updateIcons() {
                                         IconKind::Last};
     for (std::size_t i = 0; i < m_previewButtons.size(); ++i) {
         m_previewButtons[i]->setIcon(makeIcon(kinds[i], c.text, c.dimmed, 14));
+        m_repButtons[i]->setIcon(makeIcon(kinds[i], c.text, c.dimmed, 14));
     }
     const QIcon folder = makeIcon(IconKind::Folder, c.muted, c.dimmed);
     for (QTreeWidgetItemIterator it(m_files); *it != nullptr; ++it) {
@@ -1484,21 +1503,129 @@ QString LibraryView::gapsStatus() const {
 }
 
 void LibraryView::showStart() {
+    m_repGame.reset();
+    m_repLine.clear();
+    m_repPly = 0;
+    m_startPly = 0;
     const RepertoireFile* built = m_file ? m_store.builtFile(m_file->path) : nullptr;
     m_startBoard->setFlipped(m_file && RepertoireStore::sideOf(*m_file) == core::Color::Black);
-    if (built == nullptr) {
+    if (built == nullptr || built->games.empty()) {
         m_startBoard->setPosition(core::Position());
         m_startLine->clear();
+        showRepertoirePly(false);
         return;
     }
     const std::vector<core::Move> start = RepertoireStore::startOf(*built);
-    core::Position position;
-    for (const core::Move move : start) {
-        position.play(move);
+    m_startLine->setText(
+        start.empty()
+            ? tr("Starts at the beginning")
+            : tr("Starts after %1").arg(QString::fromStdString(repertoire::lineText(start))));
+    // The line shown: the first chapter that reaches the start, along it, then on along its
+    // first moves to the end.
+    const auto follow = [&](const core::Game& game) {
+        std::vector<core::NodeId> line{core::Game::root()};
+        for (const core::Move move : start) {
+            const std::vector<core::NodeId> children = game.children(line.back());
+            const auto it = std::find_if(children.begin(), children.end(), [&](core::NodeId child) {
+                return game.node(child).move == move;
+            });
+            if (it == children.end()) {
+                return std::vector<core::NodeId>{};
+            }
+            line.push_back(*it);
+        }
+        for (core::NodeId next = game.mainChild(line.back()); next != core::kNoNode;
+             next = game.mainChild(next)) {
+            line.push_back(next);
+        }
+        return line;
+    };
+    for (const core::Game& game : built->games) {
+        if (std::vector<core::NodeId> line = follow(game); !line.empty()) {
+            m_repGame = game;
+            m_repLine = std::move(line);
+            m_startPly = start.size();
+            break;
+        }
     }
-    m_startBoard->setPosition(position, start.empty() ? std::nullopt : std::optional(start.back()));
-    m_startLine->setText(start.empty() ? tr("The starting position")
-                                       : QString::fromStdString(repertoire::lineText(start)));
+    if (!m_repGame) {
+        m_repGame = built->games.front();
+        m_repLine = m_repGame->mainLine();
+    }
+    m_repPly = m_startPly;
+    showRepertoirePly(false);
+}
+
+void LibraryView::stepRepertoire(int plies) {
+    if (!m_repGame || m_repLine.empty()) {
+        return;
+    }
+    const auto current = static_cast<long long>(m_repPly);
+    const auto last = static_cast<long long>(m_repLine.size()) - 1;
+    const long long target = std::clamp(current + plies, 0LL, last);
+    if (target == current) {
+        return;
+    }
+    m_repPly = static_cast<std::size_t>(target);
+    showRepertoirePly(target == current + 1);
+}
+
+void LibraryView::showRepertoirePly(bool animate) {
+    const bool shown = m_repGame.has_value() && !m_repLine.empty();
+    for (QPushButton* button : m_repButtons) {
+        button->setEnabled(false);
+    }
+    if (!shown) {
+        m_repName->setText(m_file ? QFileInfo(m_file->path).completeBaseName() : QString());
+        m_repMove->clear();
+        return;
+    }
+    const core::Game& game = *m_repGame;
+    const core::NodeId node = m_repLine[m_repPly];
+    const auto lastMove =
+        node == core::Game::root() ? std::nullopt : std::optional(game.node(node).move);
+    m_startBoard->setPosition(game.positionAt(node), lastMove, animate);
+    // The opening the line is in by now, else the file's name.
+    std::vector<core::Move> moves;
+    for (std::size_t i = 1; i <= m_repPly; ++i) {
+        moves.push_back(game.node(m_repLine[i]).move);
+    }
+    const auto names = m_store.sharedOpenings();
+    const repertoire::Opening* opening = names ? names->along(core::Position(), moves) : nullptr;
+    m_repName->setText(opening != nullptr ? QString::fromStdString(opening->name)
+                                          : QFileInfo(m_file->path).completeBaseName());
+    QString text;
+    if (node == core::Game::root()) {
+        text = tr("Start position");
+    } else {
+        const bool white = game.mover(node) == core::Color::White;
+        text = tr("After %1")
+                   .arg(QStringLiteral("%1%2 %3")
+                            .arg(game.moveNumber(node))
+                            .arg(white ? QStringLiteral(".") : QStringLiteral("…"))
+                            .arg(QString::fromStdString(game.node(node).san)));
+    }
+    if (m_repPly == m_startPly) {
+        text += QStringLiteral("  ·  ") + tr("where the file starts");
+    }
+    m_repMove->setText(text);
+    const bool atStart = m_repPly == 0;
+    const bool atEnd = m_repPly + 1 == m_repLine.size();
+    m_repButtons[0]->setEnabled(!atStart);
+    m_repButtons[1]->setEnabled(!atStart);
+    m_repButtons[2]->setEnabled(!atEnd);
+    m_repButtons[3]->setEnabled(!atEnd);
+}
+
+void LibraryView::openRepertoireHere() {
+    if (!m_file || !m_repGame || m_repLine.empty()) {
+        return;
+    }
+    std::vector<core::Move> line;
+    for (std::size_t i = 1; i <= m_repPly; ++i) {
+        line.push_back(m_repGame->node(m_repLine[i]).move);
+    }
+    emit positionRequested(m_file->path, line);
 }
 
 void LibraryView::refreshRepertoire() {
@@ -1513,52 +1640,28 @@ void LibraryView::refreshRepertoire() {
         for (QLabel* stat : m_repStats) {
             stat->setText(QStringLiteral("…"));
         }
-        m_repOpenings->clear();
-        m_repStatus->setText(tr("Reading the repertoire…"));
-        m_repStatus->show();
         return;
     }
     // Summed up in the background, from copies (the store may rebuild meanwhile).
     std::vector<core::Game> games = built->games;
     const core::Color side = RepertoireStore::sideOf(*m_file);
-    const auto names = m_store.sharedOpenings();
     // Owned by the view and deleted when done (deleteLater); the analyzer can't see that.
     auto* watcher = new QFutureWatcher<repertoire::Summary>(
         this); // NOLINT(clang-analyzer-cplusplus.NewDeleteLeaks)
-    connect(watcher, &QFutureWatcher<repertoire::Summary>::finished, this,
-            [this, watcher, request, named = names != nullptr] {
-                watcher->deleteLater();
-                if (request != m_summaryRequest) {
-                    return;
-                }
-                const repertoire::Summary summary = watcher->result();
-                m_repStats[0]->setText(number(summary.positions));
-                m_repStats[1]->setText(number(summary.lines));
-                m_repStats[2]->setText(summary.deepestMove > 0
-                                           ? tr("move %1").arg(summary.deepestMove)
-                                           : QStringLiteral("–"));
-                m_repOpenings->clear();
-                for (const auto& opening : summary.openings) {
-                    auto* item = new QTreeWidgetItem(m_repOpenings);
-                    item->setText(0, QString::fromStdString(opening.name));
-                    item->setToolTip(0, item->text(0));
-                    item->setText(1, opening.positions == 1
-                                         ? tr("1 position")
-                                         : tr("%1 positions").arg(number(opening.positions)));
-                    item->setForeground(1, m_style.colors().muted);
-                }
-                QString status;
-                if (!named) {
-                    status = tr("Looking up the opening names…");
-                } else if (summary.openings.empty()) {
-                    status = tr("No named openings in this file yet.");
-                }
-                m_repStatus->setText(status);
-                m_repStatus->setVisible(!m_repStatus->text().isEmpty());
-            });
-    watcher->setFuture(QtConcurrent::run([games = std::move(games), side, names] {
-        return repertoire::summarize(games, side, names.get());
-    }));
+    connect(
+        watcher, &QFutureWatcher<repertoire::Summary>::finished, this, [this, watcher, request] {
+            watcher->deleteLater();
+            if (request != m_summaryRequest) {
+                return;
+            }
+            const repertoire::Summary summary = watcher->result();
+            m_repStats[0]->setText(number(summary.positions));
+            m_repStats[1]->setText(number(summary.lines));
+            m_repStats[2]->setText(summary.deepestMove > 0 ? tr("move %1").arg(summary.deepestMove)
+                                                           : QStringLiteral("–"));
+        });
+    watcher->setFuture(QtConcurrent::run(
+        [games = std::move(games), side] { return repertoire::summarize(games, side, nullptr); }));
 } // NOLINT(clang-analyzer-cplusplus.NewDeleteLeaks)
 
 // ---- New folders, moving -----------------------------------------------------------------------
@@ -1684,15 +1787,6 @@ QStringList LibraryView::repertoireStats() const {
     return result;
 }
 
-QStringList LibraryView::repertoireOpenings() const {
-    QStringList result;
-    for (int i = 0; i < m_repOpenings->topLevelItemCount(); ++i) {
-        const auto* item = m_repOpenings->topLevelItem(i);
-        result << item->text(0) + QStringLiteral("  ") + item->text(1);
-    }
-    return result;
-}
-
 // ---- Keyboard ----------------------------------------------------------------------------------
 
 bool LibraryView::eventFilter(QObject* watched, QEvent* event) {
@@ -1702,6 +1796,30 @@ bool LibraryView::eventFilter(QObject* watched, QEvent* event) {
     const auto* key = dynamic_cast<QKeyEvent*>(event);
     if (key == nullptr) {
         return QWidget::eventFilter(watched, event);
+    }
+    if (watched == m_startBoard) { // the repertoire's preview
+        switch (key->key()) {
+        case Qt::Key_Left:
+            stepRepertoire(-1);
+            return true;
+        case Qt::Key_Right:
+            stepRepertoire(1);
+            return true;
+        case Qt::Key_Up:
+        case Qt::Key_Home:
+            stepRepertoire(-10000);
+            return true;
+        case Qt::Key_Down:
+        case Qt::Key_End:
+            stepRepertoire(10000);
+            return true;
+        case Qt::Key_Return:
+        case Qt::Key_Enter:
+            openRepertoireHere();
+            return true;
+        default:
+            return false;
+        }
     }
     // The keys go to whatever was clicked last; they never move the focus themselves.
     const bool onPreview = watched == m_previewBoard;

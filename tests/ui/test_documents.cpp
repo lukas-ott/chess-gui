@@ -682,11 +682,16 @@ TEST_F(DocumentsTest, FileTypesShowInTheLibraryAndFilterIt) {
         QTest::qWaitFor([&] { return view->repertoireStats().value(0) == u"1"; }, 5000)); // 1... c5
     EXPECT_EQ(view->repertoireStats(),
               (QStringList{QStringLiteral("1"), QStringLiteral("1"), QStringLiteral("move 1")}));
-    // The opening names load in the background (slow under ASan with other tests running).
-    ASSERT_TRUE(QTest::qWaitFor([&] { return !view->repertoireOpenings().isEmpty(); }, 20000));
-    // The one position to practise is after 1. e4 (your answer: 1... c5).
-    EXPECT_EQ(view->repertoireOpenings(),
-              QStringList{QStringLiteral("King's Pawn Game  1 position")});
+    // The preview: from the start (one line: the file starts there), named by the file until
+    // a move names the opening; the names load in the background (slow under ASan).
+    const auto* name = window.findChild<QLabel*>(QStringLiteral("repertoireName"));
+    ASSERT_NE(name, nullptr);
+    EXPECT_EQ(name->text(), QStringLiteral("najdorf"));
+    auto* board =
+        window.findChild<kiebitz::app::BoardView*>(QStringLiteral("repertoireStartBoard"));
+    QTest::mouseClick(board, Qt::LeftButton);
+    QTest::keyClick(board, Qt::Key_End);
+    ASSERT_TRUE(QTest::qWaitFor([&] { return name->text() == u"Sicilian Defense"; }, 20000));
     if (const QString dir = qEnvironmentVariable("KIEBITZ_SNAPSHOT_DIR"); !dir.isEmpty()) {
         window.resize(1200, 760);
         QTest::qWait(100);
@@ -1408,7 +1413,7 @@ TEST_F(DocumentsTest, TheGapCheckListsUnansweredMovesAndOpensOne) {
     EXPECT_TRUE(view->gapsStatus().startsWith(u"2 gaps against Test games"));
     // One line, never parting: it starts at the start.
     EXPECT_EQ(window.findChild<QLabel*>(QStringLiteral("repertoireStartLine"))->text(),
-              QStringLiteral("The starting position"));
+              QStringLiteral("Starts at the beginning"));
     if (const QString dir = qEnvironmentVariable("KIEBITZ_SNAPSHOT_DIR"); !dir.isEmpty()) {
         window.resize(1200, 760);
         QTest::qWait(100);
@@ -1464,10 +1469,22 @@ TEST_F(DocumentsTest, TheGapCheckStartsWhereTheFileDoes) {
         window.findChild<kiebitz::app::BoardView*>(QStringLiteral("repertoireStartBoard"));
     ASSERT_NE(startLine, nullptr);
     ASSERT_NE(startBoard, nullptr);
-    ASSERT_TRUE(QTest::qWaitFor([&] { return startLine->text() == u"1. e4 c6"; }, 5000));
+    ASSERT_TRUE(
+        QTest::qWaitFor([&] { return startLine->text() == u"Starts after 1. e4 c6"; }, 5000));
     const std::string afterC6 = "rnbqkbnr/pp1ppppp/2p5/8/4P3/8/PPPP1PPP/RNBQKBNR w KQkq - 0 2";
     EXPECT_EQ(startBoard->position().fen(), afterC6);
     EXPECT_TRUE(startBoard->isFlipped()); // Black's file, Black's side
+    const auto* move = window.findChild<QLabel*>(QStringLiteral("repertoireMove"));
+    EXPECT_EQ(move->text(), QStringLiteral("After 1… c6  ·  where the file starts"));
+    const auto* name = window.findChild<QLabel*>(QStringLiteral("repertoireName"));
+    ASSERT_TRUE(QTest::qWaitFor([&] { return name->text() == u"Caro-Kann Defense"; }, 20000));
+    // Stepped through with the arrow keys, along its first moves.
+    QTest::mouseClick(startBoard, Qt::LeftButton);
+    QTest::keyClick(startBoard, Qt::Key_Right);
+    EXPECT_EQ(move->text(), QStringLiteral("After 2. d4"));
+    QTest::keyClick(startBoard, Qt::Key_Home);
+    EXPECT_EQ(move->text(), QStringLiteral("Start position"));
+    EXPECT_EQ(name->text(), QStringLiteral("caro"));
 
     QSignalSpy checked(view, &kiebitz::app::LibraryView::gapsChecked);
     view->checkGaps();
@@ -1503,7 +1520,7 @@ TEST_F(DocumentsTest, TheGapCheckStartsWhereTheFileDoes) {
     ASSERT_TRUE(QTest::qWaitFor([&] { return notation->start() == core::kNoNode; }, 5000));
     window.showSection(MainWindow::Section::Library);
     ASSERT_TRUE(
-        QTest::qWaitFor([&] { return startLine->text() == u"The starting position"; }, 5000));
+        QTest::qWaitFor([&] { return startLine->text() == u"Starts at the beginning"; }, 5000));
     view->checkGaps();
     ASSERT_TRUE(checked.wait(5000));
     EXPECT_EQ(view->repertoireGaps().value(0), QStringLiteral("1. d4  40%  40% of games"));
@@ -1515,6 +1532,18 @@ TEST_F(DocumentsTest, TheGapCheckStartsWhereTheFileDoes) {
     ASSERT_TRUE(QTest::qWaitFor(
         [&] { return readFile(path("caro.pgn")).find("StartsAt") == std::string::npos; }, 5000));
     ASSERT_TRUE(QTest::qWaitFor([&] { return notation->start() != core::kNoNode; }, 5000));
+
+    // The preview's "Open Here": the file at the position shown (after 2... d5).
+    window.showSection(MainWindow::Section::Library);
+    ASSERT_TRUE(
+        QTest::qWaitFor([&] { return startLine->text() == u"Starts after 1. e4 c6"; }, 5000));
+    QTest::mouseClick(startBoard, Qt::LeftButton);
+    QTest::keyClick(startBoard, Qt::Key_End);
+    QTest::mouseClick(window.findChild<QPushButton*>(QStringLiteral("repertoireOpenHere")),
+                      Qt::LeftButton);
+    ASSERT_TRUE(QTest::qWaitFor(
+        [&] { return fen() == "rnbqkbnr/pp2pppp/2p5/3p4/3PP3/8/PPP2PPP/RNBQKBNR w KQkq - 0 3"; },
+        5000));
 }
 
 TEST_F(DocumentsTest, LibraryGamesSortByAnyColumnAndFilterByDate) {

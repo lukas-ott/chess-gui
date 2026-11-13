@@ -535,6 +535,14 @@ void MainWindow::buildLayout() {
                 m_playOnJump = move;
                 jumpToLine(path, position.hash());
             });
+    connect(m_libraryView, &LibraryView::positionRequested, this,
+            [this](const QString& path, const std::vector<core::Move>& line) {
+                core::Position position;
+                for (const core::Move& played : line) {
+                    position.play(played);
+                }
+                jumpToLine(path, position.hash());
+            });
     connect(this, &MainWindow::fileOpened, this, [this](const QString& path) {
         if (m_jumpOnOpen && path == m_jumpOnOpen->first) {
             const std::uint64_t position = m_jumpOnOpen->second;

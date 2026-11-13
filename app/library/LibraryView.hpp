@@ -44,8 +44,8 @@ class Library;
 ///     - a folder: its name and what's in it;
 ///     - a game, tournament or other file: its games (a table that fits the type: a
 ///       tournament has rounds, puzzles show who is to move) and a preview board below;
-///     - a repertoire file: an overview (positions to practise, lines, the openings in it)
-///       with buttons to open and to practise it.
+///     - a repertoire file: an overview (positions to practise, lines), a preview of its line
+///       from where it starts, and buttons to open and to practise it.
 /// No paths are shown: the folder button shows the folder's name and picks another one.
 ///
 /// Keyboard: the arrow keys act on whatever was clicked last (that card is outlined):
@@ -89,10 +89,8 @@ public:
     QString moveToTrash(const QString& path);
     void setTrashForTests(std::function<bool(const QString&)> trash) { m_trash = std::move(trash); }
 
-    /// For tests: what the repertoire overview shows ("1,840", "412", "move 24"), and the
-    /// openings listed ("Benko Gambit Accepted  210").
+    /// For tests: what the repertoire overview shows ("1,840", "412", "move 24").
     [[nodiscard]] QStringList repertoireStats() const;
-    [[nodiscard]] QStringList repertoireOpenings() const;
     /// For tests: the gaps listed ("8… h6  14%  3% of games"), and the status above them.
     [[nodiscard]] QStringList repertoireGaps() const;
     [[nodiscard]] QString gapsStatus() const;
@@ -122,6 +120,8 @@ signals:
                       kiebitz::core::Move move);
     /// The gap check is done (tests).
     void gapsChecked();
+    /// The repertoire preview's "Open Here": the file at the position after `line`.
+    void positionRequested(const QString& path, const std::vector<kiebitz::core::Move>& line);
 
 private:
     void refreshFiles();
@@ -194,15 +194,24 @@ private:
     ElidedLabel* m_repTitle = nullptr;
     QLabel* m_repSubtitle = nullptr;
     std::array<QLabel*, 3> m_repStats{}; ///< positions, lines, deepest line
-    QLabel* m_repStatus = nullptr;       ///< "Reading the repertoire…"
-    QTreeWidget* m_repOpenings = nullptr;
     int m_summaryRequest = 0;
     // The gap check
     std::function<GapSource()> m_gapSource;
     QPushButton* m_checkGaps = nullptr;
-    BoardView* m_startBoard = nullptr; ///< where the repertoire file starts
-    QLabel* m_startLine = nullptr;     ///< ... and the moves to get there
+    // The repertoire's preview: its line from the start, stepped through as a game's
+    BoardView* m_startBoard = nullptr;
+    QLabel* m_repName = nullptr;   ///< the opening shown ("Caro-Kann Defense"), else the file
+    QLabel* m_startLine = nullptr; ///< "Starts after 1. e4 c6"
+    QLabel* m_repMove = nullptr;   ///< "After 2. d4"
+    std::vector<QPushButton*> m_repButtons; ///< start, back, forward, end
+    std::optional<core::Game> m_repGame;
+    std::vector<core::NodeId> m_repLine; ///< root first
+    std::size_t m_repPly = 0;            ///< index into m_repLine
+    std::size_t m_startPly = 0;          ///< where the file starts, in m_repLine
     void showStart();
+    void stepRepertoire(int plies);
+    void showRepertoirePly(bool animate);
+    void openRepertoireHere();
     QLabel* m_gapsStatus = nullptr;
     QTreeWidget* m_gaps = nullptr;
     std::vector<repertoire::Gap> m_gapList;
