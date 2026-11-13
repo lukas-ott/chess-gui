@@ -13,7 +13,10 @@ QString GameDocument::title() const {
     };
 
     QString name;
-    if (known(white) || known(black)) {
+    if (wholeRepertoire) {
+        name = *wholeRepertoire == core::Color::White ? QObject::tr("White Repertoire")
+                                                      : QObject::tr("Black Repertoire");
+    } else if (known(white) || known(black)) {
         name = (known(white) ? white : QStringLiteral("?")) + QStringLiteral(" – ") +
                (known(black) ? black : QStringLiteral("?"));
     } else if (file && !file->path.isEmpty()) {

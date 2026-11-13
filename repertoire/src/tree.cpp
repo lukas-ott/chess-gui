@@ -13,6 +13,48 @@ std::size_t mainMoves(const Entry& entry) {
 
 } // namespace
 
+core::Game mergeGames(std::span<const core::Game> games) {
+    core::Game merged;
+    const std::uint64_t standard = core::Position().hash();
+    struct Step {
+        core::NodeId from; ///< in the game being merged
+        core::NodeId to;   ///< the same place in `merged`
+        core::Position position;
+    };
+    for (const core::Game& game : games) {
+        if (game.startPosition().hash() != standard) {
+            continue;
+        }
+        std::vector<Step> stack{{core::Game::root(), core::Game::root(), game.startPosition()}};
+        while (!stack.empty()) {
+            const Step step = std::move(stack.back());
+            stack.pop_back();
+            // In order, so the main continuation is added (and stays) first.
+            for (const core::NodeId child : game.children(step.from)) {
+                const core::Node& node = game.node(child);
+                const core::NodeId target = merged.addMove(step.to, step.position, node.move);
+                const core::Node& kept = merged.node(target);
+                if (kept.comment.empty() && !node.comment.empty()) {
+                    merged.setComment(target, node.comment);
+                }
+                if (kept.commentBefore.empty() && !node.commentBefore.empty()) {
+                    merged.setCommentBefore(target, node.commentBefore);
+                }
+                if (kept.nags.empty() && !node.nags.empty()) {
+                    merged.setNags(target, node.nags);
+                }
+                if (kept.arrows.empty() && !node.arrows.empty()) {
+                    merged.setArrows(target, node.arrows);
+                }
+                core::Position next = step.position;
+                next.play(node.move);
+                stack.push_back({child, target, std::move(next)});
+            }
+        }
+    }
+    return merged;
+}
+
 Tree::Tree(core::Color side) : m_side(side) {}
 
 void Tree::add(const core::Game& game, int file, int index) {

@@ -226,11 +226,23 @@ RepertoirePanel::RepertoirePanel(RepertoireStore& store, const AppStyle& style, 
         tr("The lines through positions you got wrong and haven't answered right twice since"));
     m_practiceMistakes->hide();
     connect(m_practiceMistakes, &QPushButton::clicked, this, &RepertoirePanel::mistakesRequested);
+    m_practiceRepertoire = new QPushButton(tr("Practice Whole Repertoire"));
+    m_practiceRepertoire->setObjectName(QStringLiteral("practiceRepertoire"));
+    m_practiceRepertoire->setProperty("role", "secondary");
+    m_practiceRepertoire->setFocusPolicy(Qt::NoFocus);
+    connect(m_practiceRepertoire, &QPushButton::clicked, this,
+            [this] { emit wholeRepertoireRequested(practiceDepth()); });
     practiceButtons->addWidget(m_practiceAll);
     practiceButtons->addWidget(m_practiceHere);
-    practiceButtons->addWidget(m_practiceMistakes);
     practiceButtons->addStretch();
     practiceLayout->addLayout(practiceButtons);
+    // The wider ones below: this file's mistakes, and every file of the side together.
+    auto* moreButtons = new QHBoxLayout;
+    moreButtons->setSpacing(6);
+    moreButtons->addWidget(m_practiceMistakes);
+    moreButtons->addWidget(m_practiceRepertoire);
+    moreButtons->addStretch();
+    practiceLayout->addLayout(moreButtons);
     practiceLayout->addStretch();
     m_pages->addWidget(practice);
 
@@ -239,8 +251,11 @@ RepertoirePanel::RepertoirePanel(RepertoireStore& store, const AppStyle& style, 
 }
 
 void RepertoirePanel::setGame(const core::Game* game, core::NodeId current, bool repertoireFile,
-                              core::Color side, const std::unordered_set<std::uint64_t>* mistakes) {
+                              core::Color side, const std::unordered_set<std::uint64_t>* mistakes,
+                              core::NodeId start, bool whole) {
     m_mistakes = mistakes;
+    m_start = start;
+    m_whole = whole;
     m_game = game;
     m_current = current;
     m_repertoireFile = repertoireFile;
@@ -291,14 +306,16 @@ void RepertoirePanel::refreshPractice() {
     if (m_game == nullptr) {
         return;
     }
-    const repertoire::Drill all(*m_game, m_side, core::Game::root(), practiceDepth(), 0);
+    // The whole file from where it starts (the flag in the moves); From Here may be earlier.
+    const repertoire::Drill all(*m_game, m_side, m_start, practiceDepth(), 0);
     const repertoire::Drill here(*m_game, m_side, m_current, practiceDepth(), 0);
     const QLocale locale;
     m_practiceCount->setText(
         all.trainable() == 1 ? tr("1 position to practice")
                              : tr("%1 positions to practice")
                                    .arg(locale.toString(static_cast<qulonglong>(all.trainable()))));
-    m_practiceAll->setText(tr("Practice Whole File"));
+    m_practiceAll->setText(m_whole ? tr("Practice Whole Repertoire") : tr("Practice Whole File"));
+    m_practiceRepertoire->setVisible(!m_whole);
     m_practiceAll->setEnabled(all.trainable() > 0);
     m_practiceHere->setText(tr("Practice From Here (%1)")
                                 .arg(locale.toString(static_cast<qulonglong>(here.trainable()))));
@@ -306,8 +323,7 @@ void RepertoirePanel::refreshPractice() {
     // Your mistakes in this file (any depth): only shown when there are some.
     std::size_t mistakes = 0;
     if (m_mistakes != nullptr && !m_mistakes->empty()) {
-        mistakes =
-            repertoire::Drill(*m_game, m_side, core::Game::root(), 0, 0, m_mistakes).trainable();
+        mistakes = repertoire::Drill(*m_game, m_side, m_start, 0, 0, m_mistakes).trainable();
     }
     m_practiceMistakes->setText(
         tr("Practice Mistakes (%1)").arg(locale.toString(static_cast<qulonglong>(mistakes))));

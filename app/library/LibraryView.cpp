@@ -828,9 +828,33 @@ LibraryView::LibraryView(Library& library, RepertoireStore& store, const AppStyl
     repBox->addSpacing(4);
     repBox->addLayout(stats);
     repBox->addSpacing(8);
-    repBox->addWidget(label(tr("OPENINGS IN THIS FILE"), "cardTitle"));
-    repBox->addWidget(m_repStatus);
-    repBox->addWidget(m_repOpenings, 1);
+    // The openings, and beside them where the file starts (set with "Start Here" on a move).
+    auto* openings = new QVBoxLayout;
+    openings->setSpacing(layout::kCardSpacing);
+    openings->addWidget(label(tr("OPENINGS IN THIS FILE"), "cardTitle"));
+    openings->addWidget(m_repStatus);
+    openings->addWidget(m_repOpenings, 1);
+    m_startBoard = new BoardView;
+    m_startBoard->setObjectName(QStringLiteral("repertoireStartBoard"));
+    m_startBoard->setInteractive(false);
+    m_startBoard->setFocusPolicy(Qt::NoFocus);
+    m_startBoard->setShowCoordinates(false);
+    m_startBoard->setFixedSize(212, 212);
+    m_startLine = label(QString(), "emptyHint");
+    m_startLine->setObjectName(QStringLiteral("repertoireStartLine"));
+    m_startLine->setWordWrap(true);
+    m_startLine->setFixedWidth(212);
+    auto* start = new QVBoxLayout;
+    start->setSpacing(layout::kCardSpacing);
+    start->addWidget(label(tr("STARTS AT"), "cardTitle"));
+    start->addWidget(m_startBoard);
+    start->addWidget(m_startLine);
+    start->addStretch();
+    auto* openingsRow = new QHBoxLayout;
+    openingsRow->setSpacing(layout::kPageSpacing);
+    openingsRow->addLayout(openings, 1);
+    openingsRow->addLayout(start);
+    repBox->addLayout(openingsRow, 1);
 
     // Gaps: common opponent moves the file doesn't answer yet, by the Explorer's games.
     m_checkGaps = new QPushButton(tr("Check"));
@@ -1028,6 +1052,8 @@ void LibraryView::applyFilters() {
 void LibraryView::setBoardLook(const BoardTheme& theme, const QString& pieceSet) {
     m_previewBoard->setTheme(theme);
     m_previewBoard->setPieceSet(pieceSet);
+    m_startBoard->setTheme(theme);
+    m_startBoard->setPieceSet(pieceSet);
 }
 
 void LibraryView::updateIcons() {
@@ -1431,6 +1457,7 @@ void LibraryView::checkGaps() {
             });
     // The limits from Settings: how rare a move may be, and how few games, to be no gap.
     repertoire::GapOptions options;
+    options.start = RepertoireStore::startOf(*built);
     options.minShare = Settings::instance().number(Settings::kGapShare) / 100.0;
     options.minGames = static_cast<std::uint64_t>(Settings::instance().number(Settings::kGapGames));
     watcher->setFuture(QtConcurrent::run([games = std::move(games), side, options,
@@ -1456,11 +1483,30 @@ QString LibraryView::gapsStatus() const {
     return m_gapsStatus->text();
 }
 
+void LibraryView::showStart() {
+    const RepertoireFile* built = m_file ? m_store.builtFile(m_file->path) : nullptr;
+    m_startBoard->setFlipped(m_file && RepertoireStore::sideOf(*m_file) == core::Color::Black);
+    if (built == nullptr) {
+        m_startBoard->setPosition(core::Position());
+        m_startLine->clear();
+        return;
+    }
+    const std::vector<core::Move> start = RepertoireStore::startOf(*built);
+    core::Position position;
+    for (const core::Move move : start) {
+        position.play(move);
+    }
+    m_startBoard->setPosition(position, start.empty() ? std::nullopt : std::optional(start.back()));
+    m_startLine->setText(start.empty() ? tr("The starting position")
+                                       : QString::fromStdString(repertoire::lineText(start)));
+}
+
 void LibraryView::refreshRepertoire() {
     if (!m_file) {
         return;
     }
     const int request = ++m_summaryRequest;
+    showStart();
     const RepertoireFile* built = m_store.builtFile(m_file->path);
     if (built == nullptr) {
         // Not read yet (or its type just changed): the store says when it's there.

@@ -1,6 +1,7 @@
 #include "RepertoireStore.hpp"
 
 #include "document/PgnIo.hpp"
+#include "kiebitz/repertoire/gaps.hpp"
 #include "library/Library.hpp"
 
 #include <QFile>
@@ -340,6 +341,54 @@ RepertoireStore::Added RepertoireStore::addLine(core::Color side, std::span<cons
     emit fileEdited(target.file->path, target.file);
     emit changed(side);
     return result;
+}
+
+// ---- Where a file starts ----
+
+namespace {
+
+repertoire::Tree fileTree(const RepertoireFile& file) {
+    repertoire::Tree tree(file.file ? RepertoireStore::sideOf(*file.file) : core::Color::White);
+    for (std::size_t i = 0; i < file.games.size(); ++i) {
+        tree.add(file.games[i], 0, static_cast<int>(i));
+    }
+    return tree;
+}
+
+} // namespace
+
+std::vector<core::Move> RepertoireStore::trunkOf(const RepertoireFile& file) {
+    return repertoire::trunk(fileTree(file));
+}
+
+std::optional<std::vector<core::Move>> RepertoireStore::chosenStartOf(const RepertoireFile& file) {
+    for (const core::Game& game : file.games) {
+        for (const auto& [name, value] : game.headers()) {
+            if (name == kStartHeader) {
+                return repertoire::parseLine(value);
+            }
+        }
+    }
+    return std::nullopt;
+}
+
+std::vector<core::Move> RepertoireStore::startOf(const RepertoireFile& file) {
+    if (auto chosen = chosenStartOf(file)) {
+        return std::move(*chosen);
+    }
+    return trunkOf(file);
+}
+
+void RepertoireStore::setStart(const QString& path,
+                               const std::optional<std::vector<core::Move>>& line) {
+    std::optional<std::string> value;
+    if (line) {
+        value = repertoire::lineText(*line);
+    }
+    // NOLINTNEXTLINE(bugprone-exception-escape): runs on a worker; out of memory ends the app
+    editHeaders({path}, [value](const std::string& text) {
+        return pgn::setHeaderInAllGames(text, kStartHeader, value);
+    });
 }
 
 // ---- File types --------------------------------------------------------------------------------

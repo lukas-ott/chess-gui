@@ -78,6 +78,19 @@ public:
     void setKind(const QStringList& paths, library::FileKind kind,
                  std::optional<core::Color> side = std::nullopt);
 
+    /// Where a repertoire file starts, for the gap check and when it's opened: the line set in
+    /// its [StartsAt] header ("1. e4 c6"; "" is the starting position), else the line all its
+    /// games share (repertoire::trunk), so a file about the Caro-Kann starts after 1. e4 c6.
+    static constexpr auto kStartHeader = "StartsAt";
+    [[nodiscard]] static std::vector<core::Move> startOf(const RepertoireFile& file);
+    [[nodiscard]] static std::vector<core::Move> trunkOf(const RepertoireFile& file);
+    /// The line in [StartsAt], if the file has one that can be read.
+    [[nodiscard]] static std::optional<std::vector<core::Move>>
+    chosenStartOf(const RepertoireFile& file);
+    /// Sets [StartsAt] in every game of the file and saves it; nothing: the header goes (the
+    /// shared line, as worked out, is the start again).
+    void setStart(const QString& path, const std::optional<std::vector<core::Move>>& line);
+
     /// Adding a line (moves from the starting position) to a side's repertoire.
     enum class Outcome : std::uint8_t {
         Added,

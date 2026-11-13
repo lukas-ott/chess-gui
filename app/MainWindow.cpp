@@ -76,6 +76,7 @@
 #include <QUrl>
 #include <QVBoxLayout>
 #include <QWheelEvent>
+#include <QtConcurrent/QtConcurrentRun>
 
 #include <algorithm>
 #include <optional>
@@ -209,6 +210,7 @@ MainWindow::MainWindow(AppStyle& style, QWidget* parent)
     connect(m_repertoires, &RepertoireStore::changed, this, [this] {
         if (const GameDocument* d = doc()) {
             showNode(d->current, false); // the Repertoire tab's book status
+            showFileStart();             // the whole file read: where it starts may differ
         }
     });
 
@@ -538,10 +540,11 @@ void MainWindow::buildLayout() {
             const std::uint64_t position = m_jumpOnOpen->second;
             m_jumpOnOpen.reset();
             goToPosition(position);
-        }
-        if (!m_practiceOnOpen.isEmpty() && path == m_practiceOnOpen) {
+        } else if (!m_practiceOnOpen.isEmpty() && path == m_practiceOnOpen) {
             m_practiceOnOpen.clear();
             startPractice(false, m_repertoirePanel->practiceDepth());
+        } else {
+            goToFileStart(); // a repertoire file opens where it starts (after 1. e4 c6)
         }
     });
     connect(m_libraryView, &LibraryView::fileKindRequested, this,
@@ -824,6 +827,7 @@ QWidget* MainWindow::buildMovesCard() {
     connect(m_notation, &NotationView::nagToggled, this, &MainWindow::toggleNag);
     connect(m_notation, &NotationView::nagsCleared, this, &MainWindow::clearNags);
     connect(m_notation, &NotationView::commentEditRequested, this, &MainWindow::editComment);
+    connect(m_notation, &NotationView::startRequested, this, &MainWindow::setFileStart);
     m_notation->setMinimumHeight(200); // always room for a good few lines of moves
     m_notation->setRows(rows);
     connect(viewGroup, &QButtonGroup::idClicked, this,
@@ -928,6 +932,8 @@ QWidget* MainWindow::buildPanelsCard() {
             });
     connect(m_repertoirePanel, &RepertoirePanel::practiceRequested, this,
             [this](bool fromHere, int depth) { startPractice(fromHere, depth); });
+    connect(m_repertoirePanel, &RepertoirePanel::wholeRepertoireRequested, this,
+            &MainWindow::practiceWholeRepertoire);
     connect(m_repertoirePanel, &RepertoirePanel::mistakesRequested, this,
             [this] { startPractice(false, 0, true); });
     panels->addTab(m_repertoirePanel, tr("Repertoire"));
@@ -1777,6 +1783,7 @@ void MainWindow::showDocument() {
     const GameDocument* d = doc();
     orientBoard(*d);
     m_notation->setGame(&d->game, d->current);
+    showFileStart();
     m_info->setGame(&d->game,
                     d->file && RepertoireStore::kindOf(*d->file) == library::FileKind::Repertoire);
     showNode(d->current, false);
@@ -1786,6 +1793,7 @@ void MainWindow::refreshNotation() {
     m_notationRefresh.stop();
     if (const GameDocument* d = doc()) {
         m_notation->setGame(&d->game, d->current);
+        showFileStart(); // an edit may move where the file's lines part
     }
 }
 
@@ -1826,23 +1834,24 @@ void MainWindow::showNode(NodeId id, bool animate) {
     updateFork();
     updateNavigation();
     m_enginePanel->setPosition(m_board->position());
-    const bool repertoireFile =
-        d->file && RepertoireStore::kindOf(*d->file) == library::FileKind::Repertoire;
+    const std::optional<core::Color> practiceSide = repertoireSideOf(*d);
+    const bool repertoireFile = practiceSide.has_value();
     const core::Color viewSide = m_board->isFlipped() ? core::Color::Black : core::Color::White;
     m_repertoirePanel->setViewSide(viewSide);
     m_explorer->setPosition(&d->game, id, viewSide);
     if (repertoireFile) { // your mistakes in it (read once, then kept up to date)
-        const core::Color side = RepertoireStore::sideOf(*d->file);
+        const core::Color side = *practiceSide;
         bool& asked = m_mistakesAsked[side == core::Color::White ? 0 : 1];
         if (m_practiceStats->mistakes(side) == nullptr && !asked) {
             asked = true;
             m_practiceStats->load(side);
         }
     }
+    const NodeId start = fileStartNode(*d);
     m_repertoirePanel->setGame(
-        &d->game, id, repertoireFile,
-        d->file ? RepertoireStore::sideOf(*d->file) : core::Color::White,
-        repertoireFile ? m_practiceStats->mistakes(RepertoireStore::sideOf(*d->file)) : nullptr);
+        &d->game, id, repertoireFile, practiceSide.value_or(core::Color::White),
+        repertoireFile ? m_practiceStats->mistakes(*practiceSide) : nullptr,
+        start == core::kNoNode ? Game::root() : start, d->wholeRepertoire.has_value());
     updateMovesTitle();
 }
 
@@ -1992,6 +2001,79 @@ void MainWindow::jumpToLine(const QString& path, quint64 position) {
     }
 }
 
+namespace {
+
+bool isRepertoire(const GameDocument& d) {
+    return d.file && RepertoireStore::kindOf(*d.file) == library::FileKind::Repertoire;
+}
+
+} // namespace
+
+std::vector<core::Move> MainWindow::sharedLineOf(const GameDocument& d) const {
+    // The whole file as the store has it; not built yet: this chapter alone.
+    const RepertoireFile* built = m_repertoires->builtFile(d.file->path);
+    const RepertoireFile chapter{d.file, {d.game}, 0};
+    return RepertoireStore::trunkOf(built != nullptr ? *built : chapter);
+}
+
+NodeId MainWindow::fileStartNode(const GameDocument& d) const {
+    if (!isRepertoire(d)) {
+        return core::kNoNode;
+    }
+    // [StartsAt] as this tab has it (it changes here first), else where the lines part.
+    const RepertoireFile chapter{d.file, {d.game}, 0};
+    const auto chosen = RepertoireStore::chosenStartOf(chapter);
+    const std::vector<core::Move> start = chosen ? *chosen : sharedLineOf(d);
+    // Along the moves, as far as this chapter has them.
+    NodeId node = Game::root();
+    for (const core::Move& move : start) {
+        NodeId next = d.game.mainChild(node);
+        while (next != core::kNoNode && d.game.node(next).move != move) {
+            next = d.game.nextSibling(next);
+        }
+        if (next == core::kNoNode) {
+            break;
+        }
+        node = next;
+    }
+    return node;
+}
+
+void MainWindow::showFileStart() {
+    const GameDocument* d = doc();
+    if (d == nullptr) {
+        return;
+    }
+    const NodeId start = fileStartNode(*d);
+    m_notation->setStart(start == Game::root() ? core::kNoNode : start, isRepertoire(*d));
+}
+
+void MainWindow::goToFileStart() {
+    if (const GameDocument* d = doc()) {
+        if (const NodeId start = fileStartNode(*d); start != core::kNoNode) {
+            showNode(start, false);
+        }
+    }
+}
+
+void MainWindow::setFileStart(NodeId id) {
+    const GameDocument* d = doc();
+    if (d == nullptr || !isRepertoire(*d) || d->file->path.isEmpty()) {
+        return;
+    }
+    std::vector<core::Move> line;
+    if (id != Game::root()) {
+        for (const NodeId step : d->game.path(id)) {
+            if (step != Game::root()) {
+                line.push_back(d->game.node(step).move);
+            }
+        }
+    }
+    // Where the lines part is where it starts anyway: no header for that.
+    m_repertoires->setStart(d->file->path,
+                            line == sharedLineOf(*d) ? std::nullopt : std::optional(line));
+}
+
 void MainWindow::goToPosition(std::uint64_t position) {
     const std::optional<core::Move> play = std::exchange(m_playOnJump, std::nullopt);
     if (const GameDocument* d = doc()) {
@@ -2096,10 +2178,12 @@ GameDocument* MainWindow::practiceDocument() const {
 
 void MainWindow::startPractice(bool fromHere, int depth, bool mistakes) {
     const GameDocument* d = doc();
-    if (d == nullptr || !d->file) {
+    const std::optional<core::Color> practiceSide =
+        d != nullptr ? repertoireSideOf(*d) : std::nullopt;
+    if (!practiceSide) {
         return;
     }
-    const core::Color side = RepertoireStore::sideOf(*d->file);
+    const core::Color side = *practiceSide;
     // Mistakes: only the lines through positions you still get wrong (from the start, any depth).
     const std::unordered_set<std::uint64_t>* focus =
         mistakes ? m_practiceStats->mistakes(side) : nullptr;
@@ -2108,7 +2192,12 @@ void MainWindow::startPractice(bool fromHere, int depth, bool mistakes) {
         return;
     }
     if (!m_drill || m_drillDocument != d->id || mistakes) {
-        m_drillStart = fromHere && !mistakes ? d->current : Game::root();
+        // From where the file starts (its flag), unless "From Here" says otherwise.
+        const NodeId fileStart = fileStartNode(*d);
+        m_drillStart = fileStart == core::kNoNode ? Game::root() : fileStart;
+        if (fromHere && !mistakes) {
+            m_drillStart = d->current;
+        }
     }
     m_drillFromHere = fromHere && !mistakes;
     m_drillDepth = mistakes ? 0 : depth;
@@ -2138,6 +2227,61 @@ void MainWindow::startPractice(bool fromHere, int depth, bool mistakes) {
     showPracticeNode(m_drillStart, false);
     updatePracticeProgress();
     practiceStep();
+}
+
+std::optional<core::Color> MainWindow::repertoireSideOf(const GameDocument& d) {
+    if (d.wholeRepertoire) {
+        return d.wholeRepertoire;
+    }
+    if (d.file && RepertoireStore::kindOf(*d.file) == library::FileKind::Repertoire) {
+        return RepertoireStore::sideOf(*d.file);
+    }
+    return std::nullopt;
+}
+
+void MainWindow::practiceWholeRepertoire(int depth) {
+    const GameDocument* d = doc();
+    const std::optional<core::Color> side = d != nullptr ? repertoireSideOf(*d) : std::nullopt;
+    if (!side) {
+        return;
+    }
+    const BuiltRepertoire* built = m_repertoires->get(*side);
+    if (built == nullptr) {
+        statusBar()->showMessage(tr("Reading the repertoire…"), 3000);
+        return;
+    }
+    // Every chapter of every file of the side, merged in the background.
+    std::vector<core::Game> games;
+    for (const RepertoireFile& file : built->files) {
+        games.insert(games.end(), file.games.begin(), file.games.end());
+    }
+    whenReady(this, QtConcurrent::run([games = std::move(games)] {
+                  return repertoire::mergeGames(games);
+              }),
+              [this, side = *side, depth](const core::Game& merged) {
+                  // One tab per side: an earlier one gets the repertoire as it is now.
+                  GameDocument* existing = nullptr;
+                  for (int tab = 0; tab < m_tabs->count(); ++tab) {
+                      if (GameDocument* other = docAt(tab);
+                          other != nullptr && other->wholeRepertoire == side) {
+                          existing = other;
+                          m_tabs->setCurrentIndex(tab);
+                      }
+                  }
+                  if (existing != nullptr) {
+                      stopPractice();
+                      existing->game = merged;
+                      existing->current = Game::root();
+                      showDocument();
+                  } else {
+                      auto document = std::make_unique<GameDocument>();
+                      document->game = merged;
+                      document->wholeRepertoire = side;
+                      addDocument(std::move(document));
+                  }
+                  showSection(Section::Board);
+                  startPractice(false, depth);
+              });
 }
 
 void MainWindow::stopPractice() {

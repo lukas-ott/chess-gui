@@ -63,6 +63,12 @@ struct Stats {
     int depth = 0;             ///< the longest line, in full moves
 };
 
+/// Several games as one, for practising a whole repertoire: their moves merged into one tree
+/// (the same move from the same node once), the first game's lines first, so where games
+/// disagree the first one's main move stays the main one. A move keeps the first comment,
+/// annotations and arrows found for it. Games that start from another position are left out.
+[[nodiscard]] core::Game mergeGames(std::span<const core::Game> games);
+
 class Tree {
 public:
     /// An empty repertoire for `side` (the side whose moves are "ours").

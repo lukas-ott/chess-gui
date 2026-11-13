@@ -437,3 +437,86 @@ TEST(RepertoireTheory, GroupsWhereGamesLeftTheBookAndWhoLeftIt) {
         repertoire::checkTheory(white, repertoire::Tree(core::Color::Black), games);
     EXPECT_EQ(whiteOnly.checked, 6U);
 }
+
+TEST(RepertoireGaps, TheTrunkIsTheLineEveryGameBeginsWith) {
+    // Black, Caro-Kann: 1. e4 c6 2. d4 d5, then 3. e5 or 3. Nc3. A side variation of ours
+    // (2... g6, an alternative) doesn't branch it.
+    repertoire::Tree caro(core::Color::Black);
+    caro.add(game("1. e4 c6 2. d4 d5 (2... g6) 3. e5 (3. Nc3 dxe4) 3... Bf5 *"), 0, 0);
+    EXPECT_EQ(repertoire::lineText(repertoire::trunk(caro)), "1. e4 c6 2. d4 d5");
+    // It answers 2. Nc3 as well: the trunk ends after 1... c6.
+    caro.add(game("1. e4 c6 2. Nc3 d5 *"), 0, 1);
+    EXPECT_EQ(repertoire::lineText(repertoire::trunk(caro)), "1. e4 c6");
+    // One line, never branching: no trunk (the check starts at the start).
+    repertoire::Tree single(core::Color::Black);
+    single.add(game("1. e4 c5 2. Nf3 d6 *"), 0, 0);
+    EXPECT_TRUE(repertoire::trunk(single).empty());
+    bool toTheEnd = false;
+    EXPECT_EQ(repertoire::lineText(repertoire::sharedLine(single, &toTheEnd)),
+              "1. e4 c5 2. Nf3 d6");
+    EXPECT_TRUE(toTheEnd);
+    EXPECT_EQ(repertoire::lineText(repertoire::sharedLine(caro, &toTheEnd)), "1. e4 c6");
+    EXPECT_FALSE(toTheEnd);
+    EXPECT_TRUE(repertoire::trunk(repertoire::Tree(core::Color::White)).empty());
+}
+
+TEST(RepertoireGaps, LinesAreWrittenAndReadBack) {
+    const auto line = repertoire::parseLine("1. e4 c6 2. d4 d5");
+    ASSERT_TRUE(line.has_value());
+    EXPECT_EQ(line->size(), 4U);
+    EXPECT_EQ(repertoire::lineText(*line), "1. e4 c6 2. d4 d5");
+    EXPECT_EQ(repertoire::parseLine("1.e4 1...c6 2.d4"), repertoire::parseLine("e4 c6 d4"));
+    EXPECT_TRUE(repertoire::parseLine("")->empty());
+    EXPECT_FALSE(repertoire::parseLine("1. e4 e4").has_value()); // not legal
+}
+
+TEST(RepertoireGaps, TheCheckStartsWhereItIsTold) {
+    // A Caro-Kann file: from the start, 1. d4 would be a gap; from 1. e4 c6 it isn't.
+    repertoire::Tree caro(core::Color::Black);
+    caro.add(game("1. e4 c6 2. d4 d5 3. e5 (3. Nc3 dxe4) 3... Bf5 *"), 0, 0);
+    FakeExplorer explorer;
+    explorer.played[""] = {{"e4", 500}, {"d4", 400}};
+    explorer.played["e4 c6"] = {{"d4", 600}, {"Nc3", 200}};
+    explorer.played["e4 c6 d4 d5"] = {{"e5", 300}, {"Nc3", 300}, {"exd5", 200}};
+    const auto fromStart = repertoire::findGaps(caro, explorer.function());
+    ASSERT_FALSE(fromStart.gaps.empty());
+    EXPECT_EQ(fromStart.gaps[0].san, "d4");
+
+    repertoire::GapOptions options;
+    options.start = *repertoire::parseLine("1. e4 c6");
+    explorer.asked.clear();
+    const auto fromCaro = repertoire::findGaps(caro, explorer.function(), options);
+    EXPECT_EQ(std::count(explorer.asked.begin(), explorer.asked.end(), ""), 0);
+    // 2. Nc3 (25%) and 3. exd5 (25%); the lines keep the moves before the start.
+    ASSERT_EQ(fromCaro.gaps.size(), 2U);
+    EXPECT_EQ(fromCaro.gaps[0].san, "Nc3");
+    EXPECT_EQ(repertoire::lineText(fromCaro.gaps[0].line), "1. e4 c6");
+    EXPECT_EQ(fromCaro.gaps[1].san, "exd5");
+    EXPECT_EQ(repertoire::lineText(fromCaro.gaps[1].line), "1. e4 c6 2. d4 d5");
+}
+
+TEST(RepertoireMerge, GamesBecomeOneTree) {
+    const std::vector<core::Game> games{
+        game("1. e4 {Best by test} e5 (1... c5 2. Nf3) 2. Nf3 *"),
+        game("1. e4 c5 2. Nc3 {Closed} *"), // 2. Nc3 against the Sicilian: a second answer
+        game("1. d4 d5 2. c4 *"),           // another first move
+        game("[FEN \"8/8/8/8/8/8/8/K1k5 w - - 0 1\"]\n\n1. Ka2 *"), // another start: left out
+    };
+    const core::Game merged = repertoire::mergeGames(games);
+    // From the start: 1. e4 (main, first file) and 1. d4.
+    const auto first = merged.children(core::Game::root());
+    ASSERT_EQ(first.size(), 2U);
+    EXPECT_EQ(merged.node(first[0]).san, "e4");
+    EXPECT_EQ(merged.node(first[0]).comment, "Best by test");
+    EXPECT_EQ(merged.node(first[1]).san, "d4");
+    // 1. e4: e5 first, c5 once (not twice), with 2. Nf3 still the main answer and 2. Nc3 after.
+    const auto replies = merged.children(first[0]);
+    ASSERT_EQ(replies.size(), 2U);
+    EXPECT_EQ(merged.node(replies[1]).san, "c5");
+    const auto answers = merged.children(replies[1]);
+    ASSERT_EQ(answers.size(), 2U);
+    EXPECT_EQ(merged.node(answers[0]).san, "Nf3");
+    EXPECT_EQ(merged.node(answers[1]).san, "Nc3");
+    EXPECT_EQ(merged.node(answers[1]).comment, "Closed");
+    EXPECT_EQ(merged.nodeCount(), 10U); // the root and e4 e5 Nf3 c5 Nf3 Nc3 d4 d5 c4
+}

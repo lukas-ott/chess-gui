@@ -32,6 +32,8 @@ struct GameDocument {
     std::shared_ptr<PgnFile> file; ///< where it came from; null for a new game
     int gameIndex = -1;            ///< which game of `file` it is; -1 for a new game
     bool modified = false;         ///< changed since it was opened or saved
+    /// A side's whole repertoire, all its files merged, to practise (not a file of its own).
+    std::optional<core::Color> wholeRepertoire;
 
     /// The tab title: "White – Black" when the players are known, else the file name, else
     /// "New game". A leading "• " marks unsaved changes.

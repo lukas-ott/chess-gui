@@ -86,6 +86,8 @@ public:
     [[nodiscard]] EngineRegistry& engines() { return *m_engineRegistry; }
     void showSection(Section section);
     [[nodiscard]] Section section() const noexcept { return m_section; }
+    /// The game of the tab shown, or null (tests).
+    [[nodiscard]] const GameDocument* document() const { return doc(); }
     /// Keeps the eval bar beside the board when the board's size changes.
     bool eventFilter(QObject* watched, QEvent* event) override;
 
@@ -181,6 +183,18 @@ private:
     /// Opens a game (from a database) in a new tab, not tied to a file.
     void openGameCopy(const core::Game& game);
     void goToPosition(std::uint64_t position);
+    /// A repertoire file just opened: to where it starts (RepertoireStore::startOf).
+    void goToFileStart();
+    /// The side a tab's repertoire is for: a repertoire file's, or a whole repertoire's.
+    [[nodiscard]] static std::optional<core::Color> repertoireSideOf(const GameDocument& d);
+    /// Every repertoire file of the shown one's side, merged in a tab of its own, practised.
+    void practiceWholeRepertoire(int depth);
+    /// Where the shown repertoire file starts, flagged in the move list.
+    void showFileStart();
+    /// "Starting Position" on a move: the file starts after it (saved as [StartsAt]).
+    void setFileStart(core::NodeId id);
+    [[nodiscard]] core::NodeId fileStartNode(const GameDocument& d) const;
+    [[nodiscard]] std::vector<core::Move> sharedLineOf(const GameDocument& d) const;
     void stopPractice();
     /// The status line; `mood` > 0 right (a tick), < 0 wrong (a cross), 0 neither.
     void setPracticeStatus(const QString& text, int mood);

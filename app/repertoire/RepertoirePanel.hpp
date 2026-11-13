@@ -37,9 +37,11 @@ public:
 
     /// The game shown and its current move. `repertoireFile`: it is a repertoire for `side`.
     /// The game must outlive the panel or the next call (null: no game).
-    /// `mistakes`: as setMistakes().
+    /// `mistakes`: as setMistakes(). `start`: where the file starts (practice begins there at the
+    /// earliest). `whole`: it is the side's whole repertoire, merged, not one file.
     void setGame(const core::Game* game, core::NodeId current, bool repertoireFile,
-                 core::Color side, const std::unordered_set<std::uint64_t>* mistakes = nullptr);
+                 core::Color side, const std::unordered_set<std::uint64_t>* mistakes = nullptr,
+                 core::NodeId start = core::Game::root(), bool whole = false);
 
     /// The side the board is viewed from: the check is for that side's repertoire.
     void setViewSide(core::Color side);
@@ -65,6 +67,8 @@ signals:
     void practiceRequested(bool fromHere, int depth);
     /// Practise only the lines through the positions you got wrong.
     void mistakesRequested();
+    /// Practise every repertoire file of the side together, up to `depth`.
+    void wholeRepertoireRequested(int depth);
 
 private:
     void refresh();
@@ -77,6 +81,8 @@ private:
     core::NodeId m_current = core::Game::root();
     bool m_repertoireFile = false;
     core::Color m_side = core::Color::White;
+    core::NodeId m_start = core::Game::root(); ///< where the file starts
+    bool m_whole = false;                      ///< the whole repertoire, merged
     core::Color m_viewSide = core::Color::White;
 
     QStackedWidget* m_pages = nullptr; ///< 0 = nothing to check, 1 = the check, 2 = practice
@@ -106,6 +112,7 @@ private:
     QLabel* m_practiceCount = nullptr;
     Stepper* m_depth = nullptr;
     QPushButton* m_practiceAll = nullptr;
+    QPushButton* m_practiceRepertoire = nullptr; ///< every file of the side together
     QPushButton* m_practiceHere = nullptr;
     QPushButton* m_practiceMistakes = nullptr;
     const std::unordered_set<std::uint64_t>* m_mistakes = nullptr;

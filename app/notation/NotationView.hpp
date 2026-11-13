@@ -43,6 +43,10 @@ public:
     /// Pieces as symbols (♘f3) instead of letters (Nf3).
     void setFigurines(bool figurines);
     [[nodiscard]] bool rows() const noexcept { return m_rows; }
+    /// A repertoire file: where it starts, marked with a flag (kNoNode: nowhere), and whether
+    /// the right-click menu offers "Start Here".
+    void setStart(core::NodeId start, bool offered);
+    [[nodiscard]] core::NodeId start() const noexcept { return m_start; }
 
     /// The text as shown, one paragraph per line (for tests and copying).
     [[nodiscard]] QString plainText() const;
@@ -58,6 +62,8 @@ signals:
     void nagToggled(kiebitz::core::NodeId id, std::uint8_t nag);
     void nagsCleared(kiebitz::core::NodeId id);
     void commentEditRequested(kiebitz::core::NodeId id);
+    /// "Starting Position": the file starts after this move (the root: at the very start).
+    void startRequested(kiebitz::core::NodeId id);
 
 protected:
     void paintEvent(QPaintEvent* event) override;
@@ -96,6 +102,7 @@ private:
         Kind kind = Kind::Comment;
         Join join = Join::Space;
         bool small = false; ///< in a variation paragraph (smaller font)
+        bool flag = false;  ///< where the file starts: a flag before the move
         qreal x = 0;        ///< laid out: left edge, relative to the view's content
         qreal width = 0;
         int line = 0; ///< laid out: index into m_lines
@@ -155,6 +162,8 @@ private:
 
     core::NodeId m_pressed = core::kNoNode; ///< a click goes to the move it started on
     int m_hovered = -1;                     ///< the move word under the mouse
+    core::NodeId m_start = core::kNoNode;   ///< the move the file starts after (flagged)
+    bool m_startOffered = false;            ///< "Start Here" in the menu (repertoire files)
     bool m_rows = false;                    ///< the rows view
     bool m_figurines = false;               ///< ♘f3 instead of Nf3
 };

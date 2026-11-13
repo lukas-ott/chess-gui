@@ -788,8 +788,13 @@ TEST_F(DocumentsTest, GamesAreCheckedAgainstEveryRepertoireFile) {
     EXPECT_EQ(panel->statusText(core::Color::White),
               QStringLiteral("2… d6 isn't covered yet · Open Games"));
     emit panel->addLineRequested(core::Color::White);
-    QTest::qWait(200); // the write runs in the background
-    EXPECT_TRUE(panel->statusText(core::Color::White).startsWith(u"In book · Open Games"));
+    // The write runs in the background: wait for it (slow under a full parallel test run).
+    ASSERT_TRUE(QTest::qWaitFor(
+        [&] {
+            return panel->statusText(core::Color::White).startsWith(u"In book · Open Games") &&
+                   readFile(path("Open Games.pgn")).find("d6") != std::string::npos;
+        },
+        10000));
     const auto saved = pgn::parseGame(readFile(path("Open Games.pgn")));
     ASSERT_TRUE(saved.ok());
     kiebitz::repertoire::Tree check(core::Color::White);
@@ -895,9 +900,60 @@ TEST_F(DocumentsTest, PracticingARepertoireFile) {
     EXPECT_EQ(readFile(path("rep.pgn")).find("d4"), std::string::npos);
 }
 
+TEST_F(DocumentsTest, PracticeStartsWhereTheFileDoesOrTakesTheWholeRepertoire) {
+    // Black: a Caro-Kann file (its lines part after 1. e4 c6) and a Nimzo file.
+    writeFile(path("caro.pgn"), "[FileType \"Repertoire\"]\n[Orientation \"black\"]\n\n"
+                                "1. e4 c6 2. d4 (2. Nc3 d5) 2... d5 *\n");
+    writeFile(path("nimzo.pgn"), "[FileType \"Repertoire\"]\n[Orientation \"black\"]\n\n"
+                                 "1. d4 Nf6 2. c4 e6 3. Nc3 Bb4 *\n");
+    scanLibrary();
+    open(path("caro.pgn"));
+    auto* panel = window.findChild<kiebitz::app::RepertoirePanel*>();
+    ASSERT_NE(panel, nullptr);
+    // Counted from where it starts: 2... d5 after 2. d4 and after 2. Nc3.
+    EXPECT_EQ(panel->practiceText(), QStringLiteral("2 positions to practice"));
+    const auto* status = window.findChild<QLabel*>(QStringLiteral("practiceStatus"));
+    if (const QString dir = qEnvironmentVariable("KIEBITZ_SNAPSHOT_DIR"); !dir.isEmpty()) {
+        window.resize(1200, 760);
+        panel->show();
+        QTest::qWait(100);
+        panel->grab().save(QDir(dir).filePath(QStringLiteral("repertoire-practice.png")));
+    }
+
+    // Practice begins after 1. e4 c6: the opponent's 2nd move comes first, then yours.
+    emit panel->practiceRequested(false, 0);
+    ASSERT_TRUE(QTest::qWaitFor([&] { return fen().find(" b ") != std::string::npos; }, 3000));
+    EXPECT_TRUE(fen().find("2p5") != std::string::npos) << fen(); // 1... c6 already there
+    EXPECT_EQ(board->position().fullmoveNumber(), 2);
+    QTest::mouseClick(window.findChild<QPushButton*>(QStringLiteral("practiceStop")),
+                      Qt::LeftButton);
+
+    // The whole Black repertoire: both files together, in a tab of its own, from the start.
+    emit panel->wholeRepertoireRequested(0);
+    ASSERT_TRUE(QTest::qWaitFor(
+        [&] {
+            const auto* d = window.document();
+            return d != nullptr && d->wholeRepertoire == core::Color::Black;
+        },
+        5000));
+    const auto* whole = window.document();
+    EXPECT_EQ(whole->title(), QStringLiteral("Black Repertoire"));
+    EXPECT_EQ(whole->game.children(core::Game::root()).size(), 2U); // 1. e4 and 1. d4
+    EXPECT_TRUE(status->isVisible());
+    // The opponent's first move (1. e4 or 1. d4), then it's yours.
+    ASSERT_TRUE(QTest::qWaitFor([&] { return fen().find(" b ") != std::string::npos; }, 3000));
+    EXPECT_EQ(board->position().fullmoveNumber(), 1);
+    QTest::mouseClick(window.findChild<QPushButton*>(QStringLiteral("practiceStop")),
+                      Qt::LeftButton);
+    // Nothing was written anywhere.
+    EXPECT_EQ(readFile(path("caro.pgn")).find("Nf6"), std::string::npos);
+}
+
 TEST_F(DocumentsTest, MistakesAreRememberedAndPractisedAgain) {
-    // Black, so earlier tests' White mistakes (same statistics file) don't count here.
-    writeFile(path("kid.pgn"), "[FileType \"Repertoire\"]\n[Orientation \"black\"]\n\n"
+    // Black, so earlier tests' White mistakes (same statistics file) don't count here. It
+    // starts at the very beginning (else after 1. d4 Nf6, where its lines part).
+    writeFile(path("kid.pgn"), "[FileType \"Repertoire\"]\n[Orientation \"black\"]\n"
+                               "[StartsAt \"\"]\n\n"
                                "1. d4 Nf6 2. c4 (2. Nf3 g6) g6 *\n");
     scanLibrary();
     open(path("kid.pgn"));
@@ -1350,6 +1406,9 @@ TEST_F(DocumentsTest, TheGapCheckListsUnansweredMovesAndOpensOne) {
     EXPECT_EQ(view->repertoireGaps(), (QStringList{QStringLiteral("1. d4  40%  40% of games"),
                                                    QStringLiteral("2. c3  25%  15% of games")}));
     EXPECT_TRUE(view->gapsStatus().startsWith(u"2 gaps against Test games"));
+    // One line, never parting: it starts at the start.
+    EXPECT_EQ(window.findChild<QLabel*>(QStringLiteral("repertoireStartLine"))->text(),
+              QStringLiteral("The starting position"));
     if (const QString dir = qEnvironmentVariable("KIEBITZ_SNAPSHOT_DIR"); !dir.isEmpty()) {
         window.resize(1200, 760);
         QTest::qWait(100);
@@ -1362,6 +1421,100 @@ TEST_F(DocumentsTest, TheGapCheckListsUnansweredMovesAndOpensOne) {
     ASSERT_TRUE(opened.wait(5000));
     QApplication::processEvents();
     EXPECT_EQ(fen(), "rnbqkbnr/pp1ppppp/8/2p5/4P3/2P5/PP1P1PPP/RNBQKBNR b KQkq - 0 2");
+}
+
+TEST_F(DocumentsTest, TheGapCheckStartsWhereTheFileDoes) {
+    // A Caro-Kann file: every line begins 1. e4 c6, then 2. d4 or 2. Nc3.
+    writeFile(path("caro.pgn"), "[FileType \"Repertoire\"]\n[Orientation \"black\"]\n\n"
+                                "1. e4 c6 2. d4 (2. Nc3 d5) 2... d5 *\n");
+    scanLibrary();
+    auto* view = window.findChild<kiebitz::app::LibraryView*>();
+    ASSERT_NE(view, nullptr);
+    // From the start 1. d4 would be a gap; after 1. e4 c6, 2. c4 is.
+    view->setGapSource([] {
+        kiebitz::app::GapSource source;
+        source.name = QStringLiteral("Test games");
+        source.explore = [](std::span<const core::Move> line) {
+            core::Position position;
+            for (const core::Move move : line) {
+                position.play(move);
+            }
+            std::vector<kiebitz::repertoire::MoveCount> moves;
+            const auto add = [&](const char* san, std::uint64_t games) {
+                moves.push_back({position.parseSan(san).value(), games});
+            };
+            if (line.empty()) {
+                add("e4", 600);
+                add("d4", 400);
+            } else if (line.size() == 2) {
+                add("d4", 500);
+                add("Nc3", 300);
+                add("c4", 200);
+            }
+            return moves;
+        };
+        return source;
+    });
+    auto* tree = window.findChild<QTreeWidget*>(QStringLiteral("libraryFiles"));
+    tree->setCurrentItem(
+        tree->findItems(QStringLiteral("caro"), Qt::MatchExactly | Qt::MatchRecursive).value(0));
+    // Beside the openings: where it starts, where its lines part.
+    auto* startLine = window.findChild<QLabel*>(QStringLiteral("repertoireStartLine"));
+    auto* startBoard =
+        window.findChild<kiebitz::app::BoardView*>(QStringLiteral("repertoireStartBoard"));
+    ASSERT_NE(startLine, nullptr);
+    ASSERT_NE(startBoard, nullptr);
+    ASSERT_TRUE(QTest::qWaitFor([&] { return startLine->text() == u"1. e4 c6"; }, 5000));
+    const std::string afterC6 = "rnbqkbnr/pp1ppppp/2p5/8/4P3/8/PPPP1PPP/RNBQKBNR w KQkq - 0 2";
+    EXPECT_EQ(startBoard->position().fen(), afterC6);
+    EXPECT_TRUE(startBoard->isFlipped()); // Black's file, Black's side
+
+    QSignalSpy checked(view, &kiebitz::app::LibraryView::gapsChecked);
+    view->checkGaps();
+    ASSERT_TRUE(checked.wait(5000));
+    EXPECT_EQ(view->repertoireGaps(), QStringList{QStringLiteral("2. c4  20%  20% of games")});
+    if (const QString dir = qEnvironmentVariable("KIEBITZ_SNAPSHOT_DIR"); !dir.isEmpty()) {
+        window.resize(1200, 760);
+        QTest::qWait(100);
+        window.grab().save(QDir(dir).filePath(QStringLiteral("library-start.png")));
+    }
+
+    // Opened, the file shows where it starts, and the move list flags it.
+    QSignalSpy opened(&window, &MainWindow::fileOpened);
+    window.openFile(path("caro.pgn"));
+    ASSERT_TRUE(opened.wait(5000));
+    QApplication::processEvents();
+    EXPECT_EQ(fen(), afterC6);
+    auto* notation = window.findChild<kiebitz::app::NotationView*>();
+    ASSERT_NE(notation, nullptr);
+    const core::NodeId c6 = notation->start();
+    ASSERT_NE(c6, core::kNoNode);
+    EXPECT_EQ(window.document()->game.node(c6).san, "c6");
+    if (const QString dir = qEnvironmentVariable("KIEBITZ_SNAPSHOT_DIR"); !dir.isEmpty()) {
+        window.grab().save(QDir(dir).filePath(QStringLiteral("notation-start.png")));
+    }
+
+    // "Start From the Beginning" (the move list's menu): kept in the file, the flag goes, and
+    // 1. d4 is a gap now.
+    emit notation->startRequested(core::Game::root());
+    ASSERT_TRUE(QTest::qWaitFor(
+        [&] { return readFile(path("caro.pgn")).find("[StartsAt \"\"]") != std::string::npos; },
+        5000));
+    ASSERT_TRUE(QTest::qWaitFor([&] { return notation->start() == core::kNoNode; }, 5000));
+    window.showSection(MainWindow::Section::Library);
+    ASSERT_TRUE(
+        QTest::qWaitFor([&] { return startLine->text() == u"The starting position"; }, 5000));
+    view->checkGaps();
+    ASSERT_TRUE(checked.wait(5000));
+    EXPECT_EQ(view->repertoireGaps().value(0), QStringLiteral("1. d4  40%  40% of games"));
+
+    // "Start Here" on 1... c6, where its lines part anyway: the header goes again.
+    window.showSection(MainWindow::Section::Board);
+    emit notation->startRequested(
+        window.document()->game.mainChild(window.document()->game.mainChild(core::Game::root())));
+    ASSERT_TRUE(QTest::qWaitFor(
+        [&] { return readFile(path("caro.pgn")).find("StartsAt") == std::string::npos; }, 5000));
+    ASSERT_TRUE(QTest::qWaitFor([&] { return notation->start() != core::kNoNode; }, 5000));
 }
 
 TEST_F(DocumentsTest, LibraryGamesSortByAnyColumnAndFilterByDate) {

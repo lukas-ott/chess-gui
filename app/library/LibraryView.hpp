@@ -200,6 +200,9 @@ private:
     // The gap check
     std::function<GapSource()> m_gapSource;
     QPushButton* m_checkGaps = nullptr;
+    BoardView* m_startBoard = nullptr; ///< where the repertoire file starts
+    QLabel* m_startLine = nullptr;     ///< ... and the moves to get there
+    void showStart();
     QLabel* m_gapsStatus = nullptr;
     QTreeWidget* m_gaps = nullptr;
     std::vector<repertoire::Gap> m_gapList;

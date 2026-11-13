@@ -129,6 +129,20 @@ void NotationView::updateFonts() {
     }
 }
 
+namespace {
+
+constexpr qreal kFlagWidth = 13; ///< room for the start flag before a move
+
+} // namespace
+
+void NotationView::setStart(NodeId start, bool offered) {
+    m_startOffered = offered;
+    if (start != m_start) {
+        m_start = start;
+        rebuild();
+    }
+}
+
 qreal NotationView::widthOf(const Word& word) {
     auto& cache = m_widths[static_cast<std::size_t>(fontIndex(word.kind, word.small))];
     if (const auto it = cache.constFind(word.text); it != cache.constEnd()) {
@@ -177,6 +191,13 @@ void NotationView::rebuild() {
         m_words.push_back(std::move(word));
         spaceOwed = true;
         nbspOwed = false;
+    };
+    // The move the file starts after: a flag before it, in the room made here.
+    const auto flagStart = [&](NodeId id) {
+        if (id == m_start) {
+            m_words.back().flag = true;
+            m_words.back().width += kFlagWidth;
+        }
     };
     // A new paragraph, unless the current one is still empty (then it just changes style).
     const auto paragraph = [&](bool isVariation, Style style = Style::Flow) {
@@ -231,6 +252,7 @@ void NotationView::rebuild() {
         // The game itself stands out (heavier, full colour); alternatives are quieter.
         m_moveWord[id] = static_cast<int>(m_words.size());
         add(std::move(san), mainLine ? Kind::MainMove : Kind::SideMove, id);
+        flagStart(id);
         return comment(node.comment); // after a comment the next move shows its number
     };
 
@@ -295,6 +317,7 @@ void NotationView::rebuild() {
             }
             m_moveWord[node] = static_cast<int>(m_words.size());
             add(std::move(san), Kind::MainMove, node);
+            flagStart(node);
             if (note(n.comment)) {
                 rowOpen = false;
             }
@@ -554,8 +577,22 @@ void NotationView::paintEvent(QPaintEvent* event) {
                 color = c.text;
             }
             painter.setFont(m_fonts[static_cast<std::size_t>(fontIndex(word.kind, word.small))]);
+            qreal x = word.x;
+            if (word.flag) { // a small pennant on a pole, in the accent colour
+                const qreal top = baseline - (word.small ? 9 : 10.5);
+                const qreal height = word.small ? 9 : 10.5;
+                painter.setPen(QPen(c.accent, 1.4, Qt::SolidLine, Qt::RoundCap));
+                painter.drawLine(QPointF(x + 2, top), QPointF(x + 2, top + height));
+                QPainterPath pennant;
+                pennant.moveTo(x + 2.6, top);
+                pennant.lineTo(x + 9, top + (height * 0.27));
+                pennant.lineTo(x + 2.6, top + (height * 0.55));
+                pennant.closeSubpath();
+                painter.fillPath(pennant, c.accent);
+                x += kFlagWidth;
+            }
             painter.setPen(color);
-            painter.drawText(QPointF(word.x, baseline), word.text);
+            painter.drawText(QPointF(x, baseline), word.text);
         }
     }
 }
@@ -575,7 +612,7 @@ void NotationView::changeEvent(QEvent* event) {
     if (event->type() == QEvent::FontChange) {
         updateFonts();
         for (Word& word : m_words) {
-            word.width = widthOf(word);
+            word.width = widthOf(word) + (word.flag ? kFlagWidth : 0);
         }
         layoutWords();
         viewport()->update();
@@ -682,6 +719,16 @@ void NotationView::contextMenuEvent(QContextMenuEvent* event) {
         ->setEnabled(!nags.empty());
     menu.addSeparator();
     menu.addAction(tr("Edit Comment…"), this, [this, id] { emit commentEditRequested(id); });
+    if (m_startOffered) {
+        // A repertoire file: where it starts (the gap check begins there, it opens there).
+        // Ticked on the flagged move; untick it and the file starts at the very beginning.
+        menu.addSeparator();
+        auto* start = menu.addAction(tr("Starting Position"));
+        start->setCheckable(true);
+        start->setChecked(id == m_start);
+        connect(start, &QAction::triggered, this,
+                [this, id](bool on) { emit startRequested(on ? id : core::Game::root()); });
+    }
     menu.exec(event->globalPos());
 }
 
