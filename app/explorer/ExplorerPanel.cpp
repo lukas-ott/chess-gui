@@ -1,6 +1,7 @@
 #include "ExplorerPanel.hpp"
 
 #include "LichessExplorer.hpp"
+#include "Tablebase.hpp"
 #include "databases/DatabaseManager.hpp"
 #include "profiles/LichessLogin.hpp"
 #include "profiles/ProfileStore.hpp"
@@ -96,6 +97,7 @@ ExplorerPanel::ExplorerPanel(DatabaseManager& databases, ProfileStore& profiles,
     : QWidget(parent), m_databases(databases), m_profiles(profiles), m_repertoires(repertoires),
       m_lichess(lichess), m_online(new LichessExplorer(lichess, this)), m_style(style) {
     setObjectName(QStringLiteral("explorerPanel"));
+    m_tablebase = new Tablebase(this);
     auto* outer = new QVBoxLayout(this);
     outer->setContentsMargins(12, 10, 12, 10);
     m_pages = new QStackedWidget;
@@ -220,7 +222,36 @@ ExplorerPanel::ExplorerPanel(DatabaseManager& databases, ProfileStore& profiles,
             emit movePlayed(*move);
         }
     });
-    lists->addWidget(m_moves);
+    // From 7 pieces the tablebase's moves take the moves list's place: same spot, same look.
+    m_tablebaseList = new QTreeWidget;
+    m_tablebaseList->setObjectName(QStringLiteral("explorerTablebase"));
+    m_tablebaseList->setColumnCount(4);
+    m_tablebaseList->setHeaderLabels({tr("MOVE"), tr("RESULT"), tr("DTZ"), tr("DTM")});
+    m_tablebaseList->setRootIsDecorated(false);
+    m_tablebaseList->setUniformRowHeights(true);
+    m_tablebaseList->setFrameShape(QFrame::NoFrame);
+    m_tablebaseList->setFocusPolicy(Qt::NoFocus);
+    m_tablebaseList->header()->setStretchLastSection(false);
+    m_tablebaseList->header()->setSectionResizeMode(0, QHeaderView::ResizeToContents);
+    m_tablebaseList->header()->setSectionResizeMode(1, QHeaderView::Stretch);
+    m_tablebaseList->header()->setSectionResizeMode(2, QHeaderView::ResizeToContents);
+    m_tablebaseList->header()->setSectionResizeMode(3, QHeaderView::ResizeToContents);
+    m_tablebaseList->header()->setDefaultAlignment(Qt::AlignLeft | Qt::AlignVCenter);
+    m_tablebaseList->headerItem()->setTextAlignment(2, Qt::AlignRight | Qt::AlignVCenter);
+    m_tablebaseList->headerItem()->setTextAlignment(3, Qt::AlignRight | Qt::AlignVCenter);
+    m_tablebaseList->headerItem()->setToolTip(
+        2, tr("Plies (half-moves) until the next capture or pawn move, with best play"));
+    m_tablebaseList->headerItem()->setToolTip(3, tr("Plies (half-moves) until mate"));
+    connect(m_tablebaseList, &QTreeWidget::itemClicked, this, [this](QTreeWidgetItem* item) {
+        if (const auto move =
+                core::Move::fromUci(item->data(0, kMoveRole).toString().toStdString())) {
+            emit movePlayed(*move);
+        }
+    });
+    m_movesPages = new QStackedWidget;
+    m_movesPages->addWidget(m_moves);
+    m_movesPages->addWidget(m_tablebaseList);
+    lists->addWidget(m_movesPages);
 
     m_games = new QTreeWidget;
     m_games->setObjectName(QStringLiteral("explorerGames"));
@@ -402,6 +433,15 @@ std::shared_ptr<const gamedb::Database> ExplorerPanel::sourceDatabase() const {
 
 void ExplorerPanel::refresh() {
     const int request = ++m_request;
+    // 7 pieces or fewer: the tablebase knows (also for a game from a set-up position).
+    if (const core::Position position =
+            m_game != nullptr ? m_game->positionAt(m_current) : core::Position();
+        Tablebase::covers(position)) {
+        showTablebase(position, request);
+        return;
+    }
+    m_movesPages->setCurrentIndex(0);
+    m_summary->setToolTip({});
     const std::shared_ptr<const gamedb::Database> db = sourceDatabase();
     if (!db && !onlineSource()) {
         m_pages->setCurrentIndex(0);
@@ -498,6 +538,121 @@ void ExplorerPanel::refresh() {
         return Answer{db->explore(line, filter), db->gamesAt(line, 20, filter)};
     }));
 } // NOLINT(clang-analyzer-cplusplus.NewDeleteLeaks)
+
+void ExplorerPanel::showTablebase(const core::Position& position, int request) {
+    m_pages->setCurrentIndex(1);
+    m_signIn->hide();
+    m_movesPages->setCurrentIndex(1);
+    m_games->clear();
+    m_onlineIds.clear();
+    m_summary->setText(tr("Asking the tablebase…"));
+    const core::Color mover = position.sideToMove();
+    m_tablebase->ask(position, [this, request, mover](const Tablebase::Answer& answer) {
+        if (request != m_request) {
+            return; // the board has moved on
+        }
+        using Outcome = Tablebase::Outcome;
+        const QString moverName = mover == core::Color::White ? tr("White") : tr("Black");
+        const QString otherName = mover == core::Color::White ? tr("Black") : tr("White");
+        // Who wins, in the summary; the bar in the winner's colour (grey for a draw).
+        QString verdict;
+        bool whiteWins = false;
+        bool blackWins = false;
+        if (answer.checkmate) {
+            verdict = tr("Checkmate");
+            (mover == core::Color::White ? blackWins : whiteWins) = true;
+        } else if (answer.stalemate) {
+            verdict = tr("Stalemate");
+        } else {
+            switch (answer.outcome) {
+            case Outcome::Win:
+            case Outcome::MaybeWin:
+                verdict = tr("%1 wins").arg(moverName);
+                (mover == core::Color::White ? whiteWins : blackWins) = true;
+                break;
+            case Outcome::Loss:
+            case Outcome::MaybeLoss:
+                verdict = tr("%1 wins").arg(otherName);
+                (mover == core::Color::White ? blackWins : whiteWins) = true;
+                break;
+            case Outcome::CursedWin:
+                verdict = tr("Cursed win for %1").arg(moverName);
+                break;
+            case Outcome::BlessedLoss:
+                verdict = tr("Cursed win for %1").arg(otherName);
+                break;
+            case Outcome::Draw:
+                verdict = tr("Draw");
+                break;
+            case Outcome::Unknown:
+                verdict = tr("Not in the tablebase");
+                break;
+            }
+            const bool decided = whiteWins || blackWins;
+            if (decided && answer.dtm && *answer.dtm > 0) {
+                verdict += QStringLiteral("  ·  ") + tr("mate in %1").arg((*answer.dtm + 1) / 2);
+            }
+        }
+        m_summary->setText(answer.error.isEmpty()
+                               ? tr("Tablebase") + QStringLiteral("  ·  ") + verdict
+                               : answer.error);
+        m_summary->setToolTip(Tablebase::explanation(answer.outcome));
+        if (!answer.error.isEmpty()) {
+            m_total->setResults(0, 0, 0);
+        } else {
+            m_total->setResults(whiteWins ? 1 : 0, whiteWins || blackWins ? 0 : 1,
+                                blackWins ? 1 : 0);
+        }
+        m_tablebaseList->clear();
+        const auto& c = m_style.colors();
+        const auto number = [](std::optional<int> plies) {
+            return plies ? QString::number(*plies) : QStringLiteral("–");
+        };
+        for (const Tablebase::MoveResult& result : answer.moves) {
+            auto* item = new QTreeWidgetItem(m_tablebaseList);
+            item->setText(0, QString::fromStdString(result.san));
+            QString name = Tablebase::name(result.outcome);
+            if (result.checkmate) {
+                name = tr("Checkmate");
+            } else if (result.stalemate) {
+                name = tr("Stalemate");
+            }
+            item->setText(1, name);
+            item->setToolTip(1, Tablebase::explanation(result.outcome));
+            const bool draw = result.outcome == Outcome::Draw ||
+                              result.outcome == Outcome::CursedWin ||
+                              result.outcome == Outcome::BlessedLoss || result.stalemate;
+            if (result.outcome == Outcome::Win || result.outcome == Outcome::MaybeWin) {
+                item->setForeground(1, c.good);
+            } else if (result.outcome == Outcome::Loss || result.outcome == Outcome::MaybeLoss) {
+                item->setForeground(1, c.bad);
+            } else {
+                item->setForeground(1, c.muted);
+            }
+            item->setText(2, draw ? QStringLiteral("–") : number(result.dtz));
+            item->setText(3, draw ? QStringLiteral("–") : number(result.dtm));
+            item->setTextAlignment(2, Qt::AlignRight | Qt::AlignVCenter);
+            item->setTextAlignment(3, Qt::AlignRight | Qt::AlignVCenter);
+            item->setForeground(2, c.muted);
+            item->setForeground(3, c.muted);
+            item->setData(0, kMoveRole, QString::fromStdString(result.move.uci()));
+        }
+        emit updated();
+    });
+}
+
+QStringList ExplorerPanel::tablebaseTexts() const {
+    QStringList texts;
+    if (m_movesPages->currentWidget() != m_tablebaseList) {
+        return texts;
+    }
+    for (int i = 0; i < m_tablebaseList->topLevelItemCount(); ++i) {
+        const auto* item = m_tablebaseList->topLevelItem(i);
+        texts << QStringLiteral("%1 %2 %3 %4")
+                     .arg(item->text(0), item->text(1), item->text(2), item->text(3));
+    }
+    return texts;
+}
 
 GapSource ExplorerPanel::gapSource() {
     GapSource source;

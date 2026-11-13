@@ -115,6 +115,10 @@ Piece Position::pieceAt(Square square) const noexcept {
             piece.color() == chess::Color::WHITE ? Color::White : Color::Black};
 }
 
+int Position::pieceCount() const noexcept {
+    return m_impl->board.occ().count();
+}
+
 CastlingRights Position::castlingRights() const noexcept {
     using Side = chess::Board::CastlingRights::Side;
     const auto rights = m_impl->board.castlingRights();

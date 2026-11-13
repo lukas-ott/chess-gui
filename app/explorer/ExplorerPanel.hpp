@@ -27,6 +27,7 @@ namespace kiebitz::app {
 class AppStyle;
 class DatabaseManager;
 class LichessExplorer;
+class Tablebase;
 class LichessLogin;
 class ProfileStore;
 class RepertoireStore;
@@ -49,12 +50,16 @@ public:
 
     /// For tests: Lichess's explorer.
     [[nodiscard]] LichessExplorer& lichessExplorer() { return *m_online; }
+    /// The endgame tablebase it asks from 7 pieces (tests point it at a fake server).
+    [[nodiscard]] Tablebase& tablebase() { return *m_tablebase; }
 
     /// The game and move shown (null: none). The game must outlive the panel or the next call.
     void setPosition(const core::Game* game, core::NodeId current, core::Color viewSide);
 
     /// For tests: the moves listed ("e4  3  …"), once the explorer has answered.
     [[nodiscard]] QStringList moveTexts() const;
+    /// The tablebase's moves as shown: "Kd6 Win 13 25" (tests); empty unless it's showing.
+    [[nodiscard]] QStringList tablebaseTexts() const;
 
 signals:
     void movePlayed(kiebitz::core::Move move);
@@ -76,6 +81,8 @@ private:
     /// The database of the chosen source (a database, a profile, or a part of one), or null.
     [[nodiscard]] std::shared_ptr<const gamedb::Database> sourceDatabase() const;
     void refresh();
+    /// From 7 pieces: the tablebase's moves in the moves list's place.
+    void showTablebase(const core::Position& position, int request);
     /// The Lichess or masters explorer is chosen (not a database or profile).
     [[nodiscard]] bool onlineSource() const;
     /// Puts an answer in the lists; `repertoire`: your moves here, marked.
@@ -103,6 +110,9 @@ private:
     ResultBar* m_total = nullptr;
     QTreeWidget* m_moves = nullptr;
     QTreeWidget* m_games = nullptr;
+    QStackedWidget* m_movesPages = nullptr; ///< m_moves, or m_tablebaseList from 7 pieces
+    QTreeWidget* m_tablebaseList = nullptr;
+    Tablebase* m_tablebase = nullptr;
     gamedb::ExploreFilter m_filter;
     QPushButton* m_filterTab = nullptr; ///< "Filter", with a dot while one is set
     QWidget* m_sideRow = nullptr;       ///< "Played as": only for profiles

@@ -11,6 +11,9 @@
 #include "engine/EnginePanel.hpp"
 #include "engine/EngineRegistry.hpp"
 #include "engine/EngineSection.hpp"
+#include "explorer/ExplorerPanel.hpp"
+#include "explorer/Tablebase.hpp"
+#include "fake_server.hpp"
 #include "library/Library.hpp"
 #include "profiles/ProfileStore.hpp"
 #include "profiles/ProfilesView.hpp"
@@ -307,6 +310,37 @@ TEST_F(LayoutTest, TheExplorerStaysPutAcrossSourcesFiltersAndViews) {
     }
     choose(source->findData(QStringLiteral("db:"), Qt::MatchStartsWith));
     QSettings().remove(QStringLiteral("explorer/source"));
+}
+
+TEST_F(LayoutTest, TheExplorerStaysPutWhenTheTablebaseTakesOver) {
+    addDatabase();
+    // Eight pieces, then a capture: seven, and the tablebase answers in the moves' place.
+    test::FakeServer server;
+    server.pages["/standard"] =
+        R"({"category":"draw","dtz":0,"dtm":null,"moves":[{"uci":"g3f3","san":"Kf3",)"
+        R"("category":"draw","dtz":0,"dtm":null}]})";
+    auto* explorer = window->findChild<app::ExplorerPanel*>(QStringLiteral("explorerPanel"));
+    ASSERT_NE(explorer, nullptr);
+    explorer->tablebase().setServer(server.url());
+    auto* panels = window->findChild<QTabWidget*>(QStringLiteral("panels"));
+    panels->setCurrentWidget(explorer);
+    open("ending.pgn", "[FEN \"4k3/pp6/8/8/8/8/PP6/4K2r w - - 0 1\"]\n[SetUp \"1\"]\n\n"
+                       "1. Kf2 Rh2+ 2. Kg3 Rxb2 *\n");
+    for (int k = 0; k < 3; ++k) {
+        QTest::keyClick(board, Qt::Key_Right);
+    }
+    const Layout eight = now();
+    QTest::keyClick(board, Qt::Key_Right); // 2... Rxb2: seven pieces
+    ASSERT_TRUE(QTest::qWaitFor([&] { return !explorer->tablebaseTexts().isEmpty(); }, 5000));
+    const Layout seven = now();
+    if (const QString dir = qEnvironmentVariable("KIEBITZ_SNAPSHOT_DIR"); !dir.isEmpty()) {
+        window->grab().save(QDir(dir).filePath(QStringLiteral("explorer-tablebase.png")));
+    }
+    const QStringList lists{QStringLiteral("explorerMoves"), QStringLiteral("explorerTablebase")};
+    EXPECT_TRUE(moved(eight, seven, lists).isEmpty()) << text(moved(eight, seven, lists));
+    QTest::keyClick(board, Qt::Key_Left);
+    const Layout back = now();
+    EXPECT_TRUE(moved(seven, back, lists).isEmpty()) << text(moved(seven, back, lists));
 }
 
 // ---- The Library -------------------------------------------------------------------------------

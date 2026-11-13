@@ -47,6 +47,8 @@ public:
     [[nodiscard]] Color sideToMove() const noexcept;
     [[nodiscard]] Piece pieceAt(Square square) const noexcept;
     [[nodiscard]] CastlingRights castlingRights() const noexcept;
+    /// How many pieces are on the board, kings and pawns included.
+    [[nodiscard]] int pieceCount() const noexcept;
     [[nodiscard]] std::optional<Square> enPassantSquare() const noexcept;
     [[nodiscard]] int halfmoveClock() const noexcept;
     [[nodiscard]] int fullmoveNumber() const noexcept;

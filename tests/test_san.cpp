@@ -181,4 +181,14 @@ TEST(PositionState, HashDependsOnPositionNotHistory) {
     EXPECT_NE(a.hash(), b.hash());
 }
 
+TEST(PositionState, CountsThePiecesOnTheBoard) {
+    Position start;
+    EXPECT_EQ(start.pieceCount(), 32);
+    start.play(*start.parseSan("e4"));
+    start.play(*start.parseSan("d5"));
+    start.play(*start.parseSan("exd5")); // a capture
+    EXPECT_EQ(start.pieceCount(), 31);
+    EXPECT_EQ(Position::fromFen("8/8/8/8/4k3/8/3QK3/8 w - - 0 1")->pieceCount(), 3);
+}
+
 } // namespace

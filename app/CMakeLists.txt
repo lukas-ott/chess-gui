@@ -36,6 +36,8 @@ qt_add_library(kiebitz_ui STATIC
     explorer/ExplorerPanel.hpp
     explorer/LichessExplorer.cpp
     explorer/LichessExplorer.hpp
+    explorer/Tablebase.cpp
+    explorer/Tablebase.hpp
     document/GameDocument.hpp
     document/PgnIo.cpp
     document/PgnIo.hpp

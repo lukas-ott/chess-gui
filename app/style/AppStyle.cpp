@@ -622,20 +622,24 @@ QPushButton[role="chip"]:checked { background: @accentTint; color: @accent; bord
 
 /* Explorer: the moves and the top games, like the Library's lists; the profile's theory check
    looks the same */
-QTreeWidget#explorerMoves, QTreeWidget#explorerGames, QTreeWidget#profileTheory {
+QTreeWidget#explorerMoves, QTreeWidget#explorerGames, QTreeWidget#explorerTablebase,
+QTreeWidget#profileTheory {
     background: transparent;
     color: @text;
     outline: none;
 }
-QTreeWidget#explorerMoves::item, QTreeWidget#explorerGames::item, QTreeWidget#profileTheory::item {
+QTreeWidget#explorerMoves::item, QTreeWidget#explorerGames::item,
+QTreeWidget#explorerTablebase::item, QTreeWidget#profileTheory::item {
     padding: 5px 4px;
     border: none;
 }
-QTreeWidget#explorerMoves QHeaderView, QTreeWidget#profileTheory QHeaderView {
+QTreeWidget#explorerMoves QHeaderView, QTreeWidget#explorerTablebase QHeaderView,
+QTreeWidget#profileTheory QHeaderView {
     background: transparent;
     border: none;
 }
-QTreeWidget#explorerMoves QHeaderView::section, QTreeWidget#profileTheory QHeaderView::section {
+QTreeWidget#explorerMoves QHeaderView::section, QTreeWidget#explorerTablebase QHeaderView::section,
+QTreeWidget#profileTheory QHeaderView::section {
     background: transparent;
     color: @muted;
     border: none;
@@ -646,10 +650,12 @@ QTreeWidget#explorerMoves QHeaderView::section, QTreeWidget#profileTheory QHeade
     font-weight: 600;
 }
 QTreeWidget#explorerMoves::item:hover, QTreeWidget#explorerGames::item:hover,
+QTreeWidget#explorerTablebase::item:hover,
 QTreeWidget#profileTheory::item:hover {
     background: @raised;
 }
 QTreeWidget#explorerMoves::item:selected, QTreeWidget#explorerGames::item:selected,
+QTreeWidget#explorerTablebase::item:selected,
 QTreeWidget#profileTheory::item:selected {
     background: @accentTint;
     color: @accent;
