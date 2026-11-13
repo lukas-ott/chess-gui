@@ -15,5 +15,8 @@ inline constexpr QMargins kCard{16, 16, 16, 16};
 inline constexpr int kCardSpacing = 10;
 /// Every button, text field, spin box and combo box is this tall (the style sheet agrees).
 inline constexpr int kControlHeight = 32;
+/// A status beside a list's search ("Searching…", "The first 10,000 are shown"): a slot this
+/// wide, so the text coming and going moves nothing.
+inline constexpr int kStatusWidth = 220;
 
 } // namespace kiebitz::app::layout

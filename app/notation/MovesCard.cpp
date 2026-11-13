@@ -12,13 +12,21 @@
 #include <QLabel>
 #include <QPlainTextEdit>
 #include <QPushButton>
+#include <QScrollArea>
 #include <QVBoxLayout>
 
+#include <algorithm>
 #include <tuple>
 #include <utility>
 
 namespace kiebitz::app {
 namespace {
+
+/// The move list's own minimum: a few lines of moves, always.
+constexpr int kNotationMin = 112;
+/// The most the continuations take (the hint and three moves; more scroll). Their room is part
+/// of the card's minimum height, so showing them never pushes the panels below.
+constexpr int kContinuationsMax = 132;
 
 /// "12… Nf6": a move as the move list numbers it.
 QString numbered(const core::Game& game, core::NodeId id) {
@@ -66,12 +74,37 @@ MovesCard::MovesCard(AppStyle& style, QWidget* parent) : QFrame(parent), m_style
     titleRow->addWidget(views);
     layout->addLayout(titleRow);
 
+    // The moves, and under them (at a branch point) the continuations to choose from (↑ ↓ to
+    // choose, → to play). They share one area, so the continuations only take the move list's
+    // room: the comment box, the buttons and the panels below stay where they are.
+    auto* movesArea = new QWidget;
+    movesArea->setObjectName(QStringLiteral("movesArea"));
+    auto* areaLayout = new QVBoxLayout(movesArea);
+    areaLayout->setContentsMargins(0, 0, 0, 0);
+    areaLayout->setSpacing(layout::kCardSpacing);
     m_notation = new NotationView(m_style);
-    m_notation->setMinimumHeight(200); // always room for a good few lines of moves
+    m_notation->setMinimumHeight(kNotationMin);
     m_notation->setRows(rows);
     connect(m_views, &QButtonGroup::idClicked, this,
             [](int id) { Settings::instance().setValue(Settings::kNotationRows, id == 1); });
-    layout->addWidget(m_notation, 1);
+    areaLayout->addWidget(m_notation, 1);
+    m_forkPanel = new QWidget;
+    m_forkPanel->setObjectName(QStringLiteral("continuationsContent"));
+    m_forkLayout = new QVBoxLayout(m_forkPanel);
+    m_forkLayout->setContentsMargins(0, 0, 0, 0);
+    m_forkLayout->setSpacing(4);
+    m_forkPanel->setAutoFillBackground(false);
+    m_forkScroll = new QScrollArea;
+    m_forkScroll->setObjectName(QStringLiteral("continuations"));
+    m_forkScroll->setWidget(m_forkPanel);
+    m_forkScroll->setWidgetResizable(true);
+    m_forkScroll->setFrameShape(QFrame::NoFrame);
+    m_forkScroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    m_forkScroll->viewport()->setAutoFillBackground(false);
+    m_forkScroll->hide();
+    areaLayout->addWidget(m_forkScroll);
+    movesArea->setMinimumHeight(kNotationMin + layout::kCardSpacing + kContinuationsMax);
+    layout->addWidget(movesArea, 1);
 
     // The current move's comment, edited in place, under a header naming the move.
     m_commentTitle = ui::label(QString(), "cardTitle");
@@ -83,14 +116,6 @@ MovesCard::MovesCard(AppStyle& style, QWidget* parent) : QFrame(parent), m_style
     connect(m_commentBox, &QPlainTextEdit::textChanged, this,
             [this] { emit commentEdited(m_commentBox->toPlainText()); });
     layout->addWidget(m_commentBox);
-
-    // At a branch point: the continuations to choose from (↑ ↓ to choose, → to play).
-    m_forkPanel = new QWidget;
-    m_forkLayout = new QVBoxLayout(m_forkPanel);
-    m_forkLayout->setContentsMargins(0, 0, 0, 0);
-    m_forkLayout->setSpacing(4);
-    m_forkPanel->hide();
-    layout->addWidget(m_forkPanel);
 
     // Start / back / forward / end; each mirrors a Game menu action. Icons: restyle().
     auto* buttons = new QHBoxLayout;
@@ -145,13 +170,14 @@ void MovesCard::showContinuations(const core::Game* game, core::NodeId at, int c
     }
     const auto children = game != nullptr ? game->children(at) : std::vector<core::NodeId>{};
     if (game == nullptr || children.size() < 2) {
-        m_forkPanel->hide();
+        m_forkScroll->hide();
         return;
     }
     if (hint) {
         m_forkLayout->addWidget(
             ui::label(tr("↑ ↓ to choose a continuation, → to play it"), "hint"));
     }
+    QPushButton* chosen = nullptr;
     for (std::size_t i = 0; i < children.size(); ++i) {
         const core::NodeId child = children[i];
         auto* button = new QPushButton(numbered(*game, child));
@@ -161,8 +187,16 @@ void MovesCard::showContinuations(const core::Game* game, core::NodeId at, int c
         connect(button, &QPushButton::clicked, this,
                 [this, child] { emit continuationClicked(child); });
         m_forkLayout->addWidget(button);
+        if (std::cmp_equal(i, choice)) {
+            chosen = button;
+        }
     }
-    m_forkPanel->show();
+    // As tall as the moves need, up to the room kept for them; the rest scrolls.
+    m_forkScroll->setFixedHeight(std::min(m_forkLayout->sizeHint().height(), kContinuationsMax));
+    m_forkScroll->show();
+    if (chosen != nullptr) {
+        m_forkScroll->ensureWidgetVisible(chosen, 0, 0);
+    }
 }
 
 void MovesCard::setNavigation(bool atStart, bool atEnd) {

@@ -305,6 +305,7 @@ QTabWidget#panels > QTabBar::tab:selected { color: @text; border-bottom-color: @
 QTabWidget#panels > QTabBar::tab:hover:!selected { color: @text; }
 
 QScrollArea#infoScroll, QScrollArea#infoScroll > QWidget > QWidget { background: transparent; }
+QScrollArea#continuations, QWidget#continuationsContent { background: transparent; }
 
 /* Move list */
 QAbstractScrollArea#moveList { background: transparent; border: none; color: @text; }

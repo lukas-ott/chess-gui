@@ -32,6 +32,7 @@ if(KIEBITZ_BUILD_APP)
         ui/test_databases.cpp
         ui/test_documents.cpp
         ui/test_engine.cpp
+        ui/test_layout.cpp
         ui/test_main_window.cpp
         ui/test_migration.cpp
         ui/test_piece_set.cpp

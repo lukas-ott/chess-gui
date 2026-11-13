@@ -8,6 +8,7 @@ class QButtonGroup;
 class QLabel;
 class QPlainTextEdit;
 class QPushButton;
+class QScrollArea;
 class QVBoxLayout;
 
 namespace kiebitz::app {
@@ -55,7 +56,8 @@ private:
     NotationView* m_notation = nullptr;
     QLabel* m_commentTitle = nullptr;
     QPlainTextEdit* m_commentBox = nullptr;
-    QWidget* m_forkPanel = nullptr;
+    QScrollArea* m_forkScroll = nullptr; ///< the continuations, under the moves
+    QWidget* m_forkPanel = nullptr;      ///< in m_forkScroll
     QVBoxLayout* m_forkLayout = nullptr;
     QPushButton* m_startButton = nullptr;
     QPushButton* m_backButton = nullptr;

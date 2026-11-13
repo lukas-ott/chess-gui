@@ -7,6 +7,7 @@
 #include "style/Layout.hpp"
 #include "style/PageHeader.hpp"
 #include "widgets/DateRange.hpp"
+#include "widgets/ElidedLabel.hpp"
 #include "widgets/Message.hpp"
 
 #include <QAbstractTableModel>
@@ -124,10 +125,14 @@ DatabasesView::DatabasesView(DatabaseManager& manager, const AppStyle& style, QW
     m_dates = new DateRange(QStringLiteral("databaseDate"), m_style);
     connect(m_dates, &DateRange::changed, this,
             [this] { m_model->setDates(m_dates->from(), m_dates->to()); });
-    m_gamesStatus = label(QString(), "emptyHint");
+    // A slot of its own, so "Searching…" coming and going never moves the title or the search.
+    m_gamesStatus = new ElidedLabel;
+    m_gamesStatus->setProperty("role", "emptyHint");
     m_gamesStatus->setObjectName(QStringLiteral("databaseGamesStatus"));
+    m_gamesStatus->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
+    m_gamesStatus->setFixedWidth(layout::kStatusWidth);
     connect(m_model, &GamesModel::statusChanged, this,
-            [this] { m_gamesStatus->setText(m_model->status()); });
+            [this] { m_gamesStatus->setFullText(m_model->status()); });
     m_games = new QTableView;
     m_games->setObjectName(QStringLiteral("databaseGames"));
     m_games->setModel(m_model);

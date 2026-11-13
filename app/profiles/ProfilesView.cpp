@@ -311,7 +311,11 @@ ProfilesView::ProfilesView(ProfileStore& store, LichessLogin& lichess, Repertoir
     auto* titles = new QVBoxLayout;
     titles->setSpacing(2);
     titles->addLayout(nameRow);
-    titles->addWidget(m_summary);
+    // While a sync runs, its status takes the summary's place: no line comes and goes.
+    m_summaryLine = new QStackedWidget;
+    m_summaryLine->addWidget(m_summary);
+    m_summaryLine->addWidget(m_status);
+    titles->addWidget(m_summaryLine);
     auto* top = new QHBoxLayout;
     top->setSpacing(6);
     top->addLayout(titles, 1);
@@ -471,10 +475,14 @@ ProfilesView::ProfilesView(ProfileStore& store, LichessLogin& lichess, Repertoir
     m_dates = new DateRange(QStringLiteral("profileDate"), m_style);
     connect(m_dates, &DateRange::changed, this,
             [this] { m_model->setDates(m_dates->from(), m_dates->to()); });
-    m_gamesStatus = label(QString(), "emptyHint");
+    // A slot of its own, so "Searching…" coming and going never squeezes the search.
+    m_gamesStatus = new ElidedLabel;
+    m_gamesStatus->setProperty("role", "emptyHint");
     m_gamesStatus->setObjectName(QStringLiteral("profileGamesStatus"));
+    m_gamesStatus->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
+    m_gamesStatus->setFixedWidth(layout::kStatusWidth);
     connect(m_model, &GamesModel::statusChanged, this,
-            [this] { m_gamesStatus->setText(m_model->status()); });
+            [this] { m_gamesStatus->setFullText(m_model->status()); });
     m_games = new QTableView;
     m_games->setObjectName(QStringLiteral("profileGames"));
     m_games->setModel(m_model);
@@ -606,7 +614,6 @@ ProfilesView::ProfilesView(ProfileStore& store, LichessLogin& lichess, Repertoir
     box->setContentsMargins(layout::kCard);
     box->setSpacing(layout::kCardSpacing);
     box->addLayout(top);
-    box->addWidget(m_status);
     box->addSpacing(4);
     box->addLayout(body, 1);
 
@@ -659,8 +666,7 @@ ProfilesView::ProfilesView(ProfileStore& store, LichessLogin& lichess, Repertoir
     connect(&m_store, &ProfileStore::progress, this, [this](const QString& id) {
         if (id == m_current) {
             const QString status = m_store.status(id);
-            m_status->setText(status);
-            m_status->setVisible(!status.isEmpty());
+            showStatus(status);
             m_sync->setEnabled(status.isEmpty());
         }
     });
@@ -777,8 +783,7 @@ void ProfilesView::showProfile() {
     m_summary->setText(summary.join(QStringLiteral("  ·  ")));
     m_remove->setVisible(!profile->main);
     const QString status = m_store.status(m_current);
-    m_status->setText(status);
-    m_status->setVisible(!status.isEmpty());
+    showStatus(status);
     m_sync->setEnabled(status.isEmpty() && !profile->accounts.empty());
     showAccounts(*profile);
     showParts(*profile);
@@ -1454,14 +1459,12 @@ void ProfilesView::addAccount() {
     const QString typed = dialog.username();
     const QString siteName =
         site == AccountSite::Lichess ? QStringLiteral("Lichess") : QStringLiteral("chess.com");
-    m_status->setText(tr("Looking up %1 on %2…").arg(typed, siteName));
-    m_status->show();
+    showStatus(tr("Looking up %1 on %2…").arg(typed, siteName));
     m_store.checkAccount(
         site, typed,
         [this, site, typed, siteName, profileId = m_current](const QString& name,
                                                              const QString& error) {
-            m_status->setText(m_store.status(m_current));
-            m_status->setVisible(!m_status->text().isEmpty());
+            showStatus(m_store.status(m_current));
             if (!error.isEmpty()) {
                 notice(this, tr("Add Account"), error);
                 return;
@@ -1490,6 +1493,11 @@ void ProfilesView::addOtbGames() {
     if (!files.isEmpty()) {
         m_store.addOtbGames(m_current, files);
     }
+}
+
+void ProfilesView::showStatus(const QString& status) {
+    m_status->setText(status);
+    m_summaryLine->setCurrentWidget(status.isEmpty() ? m_summary : m_status);
 }
 
 } // namespace kiebitz::app

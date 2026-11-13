@@ -19,6 +19,8 @@ class Database;
 
 namespace kiebitz::app {
 
+class ElidedLabel;
+
 class AppStyle;
 class DatabaseManager;
 class DateRange;
@@ -58,7 +60,7 @@ private:
     QLabel* m_subtitle = nullptr;
     QLineEdit* m_search = nullptr;
     DateRange* m_dates = nullptr;
-    QLabel* m_gamesStatus = nullptr; ///< "Searching…", "The first 10,000 are shown"
+    ElidedLabel* m_gamesStatus = nullptr; ///< "Searching…", "The first 10,000 are shown"
     QTableView* m_games = nullptr;
     GamesModel* m_model = nullptr;
     QString m_shown; ///< the folder of the database shown

@@ -23,6 +23,8 @@ class QTableView;
 
 namespace kiebitz::app {
 
+class ElidedLabel;
+
 class ActivityChart;
 class AppStyle;
 class DateRange;
@@ -65,6 +67,8 @@ signals:
     void theoryChecked();
 
 private:
+    /// A sync's or lookup's status in the summary's place; empty: the summary again.
+    void showStatus(const QString& status);
     void refreshList();
     void showProfile();
     void showAccounts(const Profile& profile);
@@ -95,6 +99,7 @@ private:
     QPushButton* m_info = nullptr; ///< "i": the profile's FIDE player
     QLabel* m_summary = nullptr;
     QLabel* m_status = nullptr;
+    QStackedWidget* m_summaryLine = nullptr; ///< m_summary, or m_status while there is one
     QPushButton* m_sync = nullptr;
     QPushButton* m_rename = nullptr;
     QPushButton* m_remove = nullptr;
@@ -132,7 +137,7 @@ private:
     [[nodiscard]] QString theoryFingerprint(const Profile& profile) const;
     QLineEdit* m_search = nullptr;
     DateRange* m_dates = nullptr;
-    QLabel* m_gamesStatus = nullptr;
+    ElidedLabel* m_gamesStatus = nullptr;
     QTableView* m_games = nullptr;
     GamesModel* m_model = nullptr;
     std::shared_ptr<const gamedb::Database> m_db; ///< the games shown
