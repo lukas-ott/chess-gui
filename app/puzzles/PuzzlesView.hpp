@@ -113,7 +113,6 @@ private:
     void setPrompt(const QString& text, const char* mood);
     void showDetails();
     void showNode(core::NodeId id, bool animate);
-    void playSound(const core::Game& game, core::NodeId id);
     void refreshStats();
     void fillList();
     void updateClock();

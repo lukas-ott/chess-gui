@@ -46,4 +46,7 @@ struct GameDocument {
     [[nodiscard]] bool isPristine() const { return !file && !modified && game.nodeCount() == 1; }
 };
 
+/// The moves from the start to `id`.
+[[nodiscard]] std::vector<core::Move> lineTo(const core::Game& game, core::NodeId id);
+
 } // namespace kiebitz::app

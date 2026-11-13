@@ -133,6 +133,24 @@ void Sounds::release() {
     m_volume = -1;
 }
 
+void Sounds::playMove(const core::Game& game, core::NodeId id) {
+    if (id == core::Game::root()) {
+        return;
+    }
+    const core::Move move = game.node(id).move;
+    const core::Position before = game.positionAt(game.parent(id));
+    // A capture: a piece on the target square, or a pawn moving aside to an empty one.
+    const core::Piece moved = before.pieceAt(move.from);
+    const bool captures =
+        !before.pieceAt(move.to).isNone() ||
+        (moved.type == core::PieceType::Pawn && move.from.file() != move.to.file());
+    Kind kind = captures ? Kind::Capture : Kind::Move;
+    if (game.positionAt(id).inCheck()) {
+        kind = Kind::Check;
+    }
+    play(kind);
+}
+
 void Sounds::play(Kind kind) {
     const Settings& settings = Settings::instance();
     const int volume = settings.number(Settings::kVolume);

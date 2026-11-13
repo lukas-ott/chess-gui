@@ -8,40 +8,30 @@
 #include <array>
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <vector>
 
 class QAction;
 class QActionGroup;
 class QButtonGroup;
-class QKeySequence;
-class QLabel;
 class QMenu;
-class QPlainTextEdit;
-class QProgressBar;
-class QPushButton;
-class QShortcut;
-class QSplitter;
 class QStackedWidget;
-class QTabBar;
-class QTabWidget;
-class QVBoxLayout;
-
-namespace kiebitz::repertoire {
-class Drill;
-} // namespace kiebitz::repertoire
 
 namespace kiebitz::app {
 
 class AppStyle;
+class BoardPage;
 class BoardView;
+class Documents;
 class EnginePanel;
 class EngineRegistry;
 class EnginesView;
 class DatabaseManager;
 class DatabasesView;
-class EvalBar;
 class LichessLogin;
 class LichessPuzzles;
+class MovesCard;
+class Practice;
 class ProfileStore;
 class ProfilesView;
 class SettingsView;
@@ -58,17 +48,16 @@ class PuzzlesView;
 class RepertoirePanel;
 class RepertoireStore;
 
-/// The main window. Document tabs along the top: the Library (always first) and one tab per
-/// open game. A game tab shows the board on the left and, on the right, the moves (notation,
-/// comment box, navigation) above the panels (Engine, Explorer, Repertoire, Info).
+/// The main window: a sidebar of sections (the board with its game tabs, the Library, Puzzles,
+/// ...) and the page of the section chosen. It ties the pieces together: the open games
+/// (Documents), the board page (BoardPage, MovesCard and the panels) and practice (Practice).
 ///
-/// Each game tab owns a GameDocument. Moves played on the board are added to its tree (as a
-/// new variation when they differ from what's there); edits mark it modified until saved.
+/// Building the window, its pages and menus, and applying settings: MainWindowSetup.cpp.
 class MainWindow : public QMainWindow {
     Q_OBJECT
 
 public:
-    /// The sidebar's sections: the board with its game tabs, the Library, the Engines page.
+    /// The sidebar's sections, in the order of their pages.
     enum class Section : std::uint8_t {
         Board,
         Library,
@@ -99,8 +88,6 @@ public:
     [[nodiscard]] Section section() const noexcept { return m_section; }
     /// The game of the tab shown, or null (tests).
     [[nodiscard]] const GameDocument* document() const { return doc(); }
-    /// Keeps the eval bar beside the board when the board's size changes.
-    bool eventFilter(QObject* watched, QEvent* event) override;
 
 signals:
     /// A file was opened or saved (or failed): for tests and the status bar.
@@ -115,54 +102,36 @@ protected:
     void dropEvent(QDropEvent* event) override;
 
 private:
-    // Building
+    // Building (MainWindowSetup.cpp)
     void buildMenus();
     void buildFileMenu();
     void buildEditMenu();
     void buildGameMenu();
     void buildViewMenu(QMenu* menu);
     void buildLayout();
-    [[nodiscard]] QWidget* buildAnalysisPage();
-    [[nodiscard]] QWidget* buildMovesCard();
+    void buildPages();
+    [[nodiscard]] QWidget* buildSidebar();
+    [[nodiscard]] QWidget* buildBoardPage();
     [[nodiscard]] QWidget* buildPanelsCard();
     void restoreState();
-    void fitBoardColumn();
-    /// Puts the eval bar beside the board: as tall as its squares, centred in the gap.
-    void placeEvalBar();
     /// A setting changed (or at the start): applied wherever it shows.
     void applySetting(const QString& key);
-    /// The sound for a move just shown: a capture, a check, or a plain move.
-    void playMoveSound(const core::Game& game, core::NodeId id);
     /// The Settings page's Folders section: where the library, databases, ... are.
     void showFolders();
-    /// The players' clocks above and below the board, from the [%clk] comments up to the
-    /// current move; hidden for games without clocks.
-    void refreshClocks();
     void showAbout();
     void chooseCustomColors();
     void chooseLibraryFolder();
 
-    // Documents and tabs
+    // Pages and tabs
+    /// The current tab's game while the board is the page shown; else null.
     [[nodiscard]] GameDocument* doc() const;
-    [[nodiscard]] GameDocument* docAt(int tab) const;
-    void addDocument(std::unique_ptr<GameDocument> document);
-    /// Shows what the current section and tab say: the game, the Library or the Engines page.
+    /// Shows what the current section and tab say: the game or another page.
     void updatePage();
     void updateSidebarIcons();
-    void closeTab(int tab);
-    /// Before a game from a file closes: saves it right away (it autosaves anyway) and waits.
-    /// False if it couldn't be written (it says why). Games not in a file: nothing to do.
-    bool saveNow(GameDocument& document);
-    /// Writes every changed game that lives in a file (autosave; ⌘S does it at once). Games of
-    /// the same file go into its text one after another, then the file is written once.
-    void autosave();
-    [[nodiscard]] static bool inFile(const GameDocument& document);
-    void save();
-    void saveAs();
-    void writeDocument(GameDocument& document, const QString& path, std::string text,
-                       const std::shared_ptr<PgnFile>& newFile);
+    void updateWindowTitle();
     void setModified();
-    void updateTitles();
+    /// A message in the status bar; `ms` 0: until the next one.
+    void showStatus(const QString& text, int ms);
 
     // Clipboard
     void copyPgn();
@@ -171,63 +140,50 @@ private:
     /// Sends a key to the focused text field, if any. False if no text field has focus.
     static bool forwardToTextField(int key, Qt::KeyboardModifiers modifiers);
     void setUpPosition();
-    void openFromText(const QString& text);
 
     /// File › New File: a name, a type and maybe PGN; created in the Library and opened.
     /// `folder`: where (absolute); empty = the Library folder.
     void newFile(const QString& folder = {});
-    /// Writes a new file into `folder` (empty = the Library folder; a free name) and opens it.
-    /// Empty on success, else the error.
-    QString createFile(const QString& name, const std::string& text, const QString& folder = {});
+    /// Opens a game (from a database) in a new tab, not tied to a file.
+    void openGameCopy(const core::Game& game);
 
     // Repertoires
     /// Adds a line to a side's repertoire; asks before adding a second answer. False if
     /// cancelled.
     bool addLineAsking(core::Color side, const std::vector<core::Move>& line);
-
-    // Practice (a repertoire file: the app plays the opponent, you play your moves)
-    [[nodiscard]] QWidget* buildPracticeCard();
-    /// `mistakes`: only the lines through the positions you still get wrong.
-    void startPractice(bool fromHere, int depth, bool mistakes = false);
     /// Jump to Line: opens a repertoire file at a position (its hash).
     void jumpToLine(const QString& path, quint64 position);
-    /// Opens a game (from a database) in a new tab, not tied to a file.
-    void openGameCopy(const core::Game& game);
     void goToPosition(std::uint64_t position);
     /// A repertoire file just opened: to where it starts (RepertoireStore::startOf).
     void goToFileStart();
     /// The side a tab's repertoire is for: a repertoire file's, or a whole repertoire's.
     [[nodiscard]] static std::optional<core::Color> repertoireSideOf(const GameDocument& d);
-    /// Every repertoire file of the shown one's side, merged in a tab of its own, practised.
-    void practiceWholeRepertoire(int depth);
     /// Where the shown repertoire file starts, flagged in the move list.
     void showFileStart();
     /// "Starting Position" on a move: the file starts after it (saved as [StartsAt]).
     void setFileStart(core::NodeId id);
     [[nodiscard]] core::NodeId fileStartNode(const GameDocument& d) const;
     [[nodiscard]] std::vector<core::Move> sharedLineOf(const GameDocument& d) const;
-    void stopPractice();
-    /// The status line; `mood` > 0 right (a tick), < 0 wrong (a cross), 0 neither.
-    void setPracticeStatus(const QString& text, int mood);
-    void setPracticeWhy(const QString& text);
-    /// After a move in practice: the opponent's reply, the end of a line, or the end.
-    void practiceStep();
-    void showPracticeNode(core::NodeId id, bool animate, std::vector<core::Arrow> arrows = {});
-    void updatePracticeProgress();
-    [[nodiscard]] GameDocument* practiceDocument() const;
-    /// A file changed under open games (the repertoire store edited it): they reload from it.
-    void reloadGamesOf(const QString& path, const std::shared_ptr<PgnFile>& file);
-    /// The moves from the start to `id`.
-    [[nodiscard]] static std::vector<core::Move> lineTo(const core::Game& game, core::NodeId id);
     void updateMovesTitle();
     /// The board from the side a game's [Orientation] header names (repertoires and studies
     /// have one); other games keep the side the user chose last.
     void orientBoard(const GameDocument& document);
 
+    // Practice (Practice does the practising; these start it and show it)
+    /// `mistakes`: only the lines through the positions you still get wrong.
+    void startPractice(bool fromHere, int depth, bool mistakes = false);
+    /// Every repertoire file of the shown one's side, merged in a tab of its own, practised.
+    void practiceWholeRepertoire(int depth);
+    void onPracticeStarted(core::Color side);
+    void onPracticeStopped();
+
     // Showing the game
     void showNode(core::NodeId id, bool animate);
     void showDocument();
     void refreshNotation(); ///< after the tree changed
+    /// The players' clocks above and below the board, from the [%clk] comments up to the
+    /// current move; hidden for games without clocks.
+    void refreshClocks();
     void onMoveMade(core::Move move);
     /// Plays moves from the current position (a line clicked in the engine panel), as a new
     /// variation where they aren't in the game yet.
@@ -250,90 +206,64 @@ private:
     void toggleNag(core::NodeId id, std::uint8_t nag);
     void clearNags(core::NodeId id);
     void editComment(core::NodeId id);
-    void onCommentEdited();
+    void onCommentEdited(const QString& text);
     void onHeaderEdited(const QString& name, const QString& value);
 
     AppStyle& m_style;
     Library* m_library = nullptr;
-    std::vector<std::unique_ptr<GameDocument>> m_documents;
+    Documents* m_documents = nullptr; ///< the open games and their tabs
+    Section m_section = Section::Board;
 
-    QTabBar* m_tabs = nullptr;
-    QStackedWidget* m_pages = nullptr; ///< 0 = Library, 1 = a game
+    // Pages
+    QStackedWidget* m_pages = nullptr; ///< one per section, in Section order
+    QButtonGroup* m_sidebar = nullptr; ///< one button per section, ids = Section
     LibraryView* m_libraryView = nullptr;
     DatabaseManager* m_databases = nullptr;
     DatabasesView* m_databasesView = nullptr;
     LichessPuzzles* m_lichessPuzzles = nullptr;
     PuzzleStats* m_puzzleStats = nullptr;
     PuzzlesView* m_puzzlesView = nullptr;
-    ExplorerPanel* m_explorer = nullptr;
     LichessLogin* m_lichess = nullptr; ///< signed in: Lichess explorer, faster downloads
     ProfileStore* m_profiles = nullptr;
     ProfilesView* m_profilesView = nullptr;
     SettingsView* m_settingsView = nullptr;
-    Sounds* m_sounds = nullptr;              ///< the board's move sounds
-    QButtonGroup* m_notationViews = nullptr; ///< Text | Rows over the move list
-    QAction* m_coordinatesAction = nullptr;
-    int m_wheel = 0; ///< wheel turned over the board, not yet a whole step (1/8°)
-    Section m_section = Section::Board;
-    QButtonGroup* m_sidebar = nullptr; ///< one button per section, ids = Section
     EngineRegistry* m_engineRegistry = nullptr;
     EnginesView* m_enginesView = nullptr;
-    BoardView* m_board = nullptr;
-    EvalBar* m_evalBar = nullptr;      ///< beside the board while the engine runs
-    std::array<QLabel*, 2> m_clocks{}; ///< above and below the board (float like the eval bar)
+    Sounds* m_sounds = nullptr; ///< the board's move sounds
+
+    // The board page
+    BoardPage* m_boardPage = nullptr;
+    BoardView* m_board = nullptr; ///< m_boardPage's
+    MovesCard* m_moves = nullptr;
+    NotationView* m_notation = nullptr; ///< m_moves's
     EnginePanel* m_enginePanel = nullptr;
-    NotationView* m_notation = nullptr;
+    ExplorerPanel* m_explorer = nullptr;
     RepertoireStore* m_repertoires = nullptr;
     RepertoirePanel* m_repertoirePanel = nullptr; ///< the Repertoire tab beside a game
-    QAction* m_flipAction = nullptr;
-    QLabel* m_movesTitle = nullptr;         ///< "MOVES · Sicilian Defense: Najdorf Variation"
-    QStackedWidget* m_movesStack = nullptr; ///< 0 = the moves, 1 = practice
-    std::unique_ptr<repertoire::Drill> m_drill;
-    int m_drillDocument = -1; ///< the id of the document being practised
-    int m_drillRun = 0;       ///< bumped on every start and stop: late timers see it changed
-    bool m_drillFromHere = false;
-    int m_drillDepth = 0;
-    QString m_practiceOnOpen;     ///< a file to practise as soon as its tab has opened
-    bool m_drillMistakes = false; ///< practising only your mistakes
+    GameInfoPanel* m_info = nullptr;
+    QTimer m_notationRefresh; ///< typing a comment re-renders the notation after a pause
+    int m_choice = 0;         ///< chosen continuation at a branch point (index into the children)
+
+    // Practice
+    Practice* m_practice = nullptr;
     PracticeStats* m_practiceStats = nullptr;
+    QString m_practiceOnOpen;              ///< a file to practise as soon as its tab has opened
     std::array<bool, 2> m_mistakesAsked{}; ///< White, Black: their mistakes are being read
     /// A repertoire file to show at a position (hash) as soon as its tab has opened.
     std::optional<std::pair<QString, std::uint64_t>> m_jumpOnOpen;
     std::optional<core::Move> m_playOnJump; ///< a gap's move: played once the jump is done
-    core::NodeId m_drillStart = core::Game::root();
-    QLabel* m_practiceTitle = nullptr;
-    QLabel* m_practiceMark = nullptr; ///< a tick or a cross
-    QLabel* m_practiceStatus = nullptr;
-    QLabel* m_practiceWhy = nullptr; ///< the file's comment on the move you missed
-    QProgressBar* m_practiceBar = nullptr;
-    QLabel* m_practiceProgress = nullptr;
-    QLabel* m_practiceSummary = nullptr;
-    QPushButton* m_practiceAgain = nullptr;
-    QPlainTextEdit* m_commentBox = nullptr;
-    QLabel* m_commentTitle = nullptr;
-    GameInfoPanel* m_info = nullptr;
-    QSplitter* m_mainSplitter = nullptr;
-    QSplitter* m_sideSplitter = nullptr;
-    bool m_defaultSideSplit = false; ///< no saved layout: keep the moves at two thirds
-    QWidget* m_forkPanel = nullptr;
-    QVBoxLayout* m_forkLayout = nullptr;
-    QTimer m_notationRefresh; ///< typing a comment re-renders the notation after a pause
-    QTimer m_autosave;        ///< a second after the last change, changed games are saved
-    QStringList m_writing;    ///< files being written now (the next autosave waits for them)
-    int m_choice = 0;         ///< chosen continuation at a branch point (index into the children)
 
+    // Menus
     QAction* m_backAction = nullptr;
     QAction* m_forwardAction = nullptr;
     QAction* m_startAction = nullptr;
     QAction* m_endAction = nullptr;
+    QAction* m_upAction = nullptr;   ///< ↑: the previous continuation (not in a menu)
+    QAction* m_downAction = nullptr; ///< ↓: the next one
+    QAction* m_flipAction = nullptr;
+    QAction* m_coordinatesAction = nullptr;
     std::vector<QAction*> m_gameActions; ///< only make sense on a game tab
     Shortcuts* m_shortcuts = nullptr;    ///< every command's key, and ← → ↑ ↓ for the game
-    QAction* m_upAction = nullptr;       ///< ↑: the previous continuation (not in a menu)
-    QAction* m_downAction = nullptr;     ///< ↓: the next one
-    QPushButton* m_backButton = nullptr;
-    QPushButton* m_forwardButton = nullptr;
-    QPushButton* m_startButton = nullptr;
-    QPushButton* m_endButton = nullptr;
     QActionGroup* m_themeGroup = nullptr;
     QAction* m_customColorsAction = nullptr;
     QActionGroup* m_piecesGroup = nullptr;

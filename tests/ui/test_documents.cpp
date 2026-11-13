@@ -925,8 +925,14 @@ TEST_F(DocumentsTest, PracticeStartsWhereTheFileDoesOrTakesTheWholeRepertoire) {
         panel->grab().save(QDir(dir).filePath(QStringLiteral("repertoire-practice.png")));
     }
 
-    // Practice begins after 1. e4 c6: the opponent's 2nd move comes first, then yours.
+    // The file opens where it starts, a branch point: its two continuations show as arrows.
+    EXPECT_EQ(board->candidates().size(), 2U);
+
+    // Practice begins after 1. e4 c6: the opponent's 2nd move comes first, then yours. The
+    // continuations' arrows go: they'd give the answers away and belong to another position.
     emit panel->practiceRequested(false, 0);
+    EXPECT_TRUE(board->candidates().empty());
+    EXPECT_TRUE(board->engineMoves().empty());
     ASSERT_TRUE(QTest::qWaitFor([&] { return fen().find(" b ") != std::string::npos; }, 3000));
     EXPECT_TRUE(fen().find("2p5") != std::string::npos) << fen(); // 1... c6 already there
     EXPECT_EQ(board->position().fullmoveNumber(), 2);

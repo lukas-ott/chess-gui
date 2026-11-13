@@ -1,5 +1,7 @@
 #pragma once
 
+#include "kiebitz/core/game.hpp"
+
 #include <QByteArray>
 #include <QObject>
 #include <QString>
@@ -32,6 +34,8 @@ public:
     /// Plays one, if sounds are on (Settings). Several within a moment (stepping through a game
     /// with the arrow keys): only the first.
     void play(Kind kind);
+    /// The sound for a move of a game just shown: a capture, a check, or a plain move.
+    void playMove(const core::Game& game, core::NodeId id);
 
     /// A set's sound as a WAV file (16-bit mono), at a volume in percent: for a check, the move's
     /// if the set has none; empty for a set there isn't.

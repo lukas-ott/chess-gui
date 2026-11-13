@@ -817,25 +817,8 @@ void PuzzlesView::showNode(core::NodeId id, bool animate) {
         id == core::Game::root() ? std::nullopt : std::optional(game.node(id).move);
     m_board->setPosition(game.positionAt(id), lastMove, animate);
     if (animate) {
-        playSound(game, id);
+        m_sounds.playMove(game, id);
     }
-}
-
-void PuzzlesView::playSound(const core::Game& game, core::NodeId id) {
-    if (id == core::Game::root()) {
-        return;
-    }
-    const core::Move move = game.node(id).move;
-    const core::Position before = game.positionAt(game.parent(id));
-    const core::Piece moved = before.pieceAt(move.from);
-    const bool captures =
-        !before.pieceAt(move.to).isNone() ||
-        (moved.type == core::PieceType::Pawn && move.from.file() != move.to.file());
-    Sounds::Kind kind = captures ? Sounds::Kind::Capture : Sounds::Kind::Move;
-    if (game.positionAt(id).inCheck()) {
-        kind = Sounds::Kind::Check;
-    }
-    m_sounds.play(kind);
 }
 
 void PuzzlesView::onMove(core::Move move) {
@@ -862,7 +845,7 @@ void PuzzlesView::onMove(core::Move move) {
     }
     case Verdict::Right: {
         showNode(solve.node(), false);
-        playSound(solve.game(), solve.node());
+        m_sounds.playMove(solve.game(), solve.node());
         setPrompt(tr("Right! Keep going."), "good");
         m_board->setInteractive(false);
         const int run = m_run;
@@ -875,7 +858,7 @@ void PuzzlesView::onMove(core::Move move) {
     }
     case Verdict::Solved:
         showNode(solve.node(), false);
-        playSound(solve.game(), solve.node());
+        m_sounds.playMove(solve.game(), solve.node());
         finish(true);
         break;
     }

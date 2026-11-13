@@ -66,16 +66,6 @@ QString fileNames(const QStringList& paths) {
                              : QObject::tr("%1 and %2 more").arg(first).arg(paths.size() - 1);
 }
 
-std::vector<core::Move> lineTo(const core::Game& game, core::NodeId id) {
-    std::vector<core::Move> line;
-    for (const core::NodeId node : game.path(id)) {
-        if (node != core::Game::root()) {
-            line.push_back(game.node(node).move);
-        }
-    }
-    return line;
-}
-
 } // namespace
 
 RepertoirePanel::RepertoirePanel(RepertoireStore& store, const AppStyle& style, QWidget* parent)

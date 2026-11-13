@@ -49,6 +49,9 @@ public:
     [[nodiscard]] const std::vector<core::Move>& engineMoves() const noexcept {
         return m_engineMoves;
     }
+    [[nodiscard]] const std::vector<core::Move>& candidates() const noexcept {
+        return m_candidates;
+    }
     [[nodiscard]] const core::Position& position() const noexcept { return m_position; }
     [[nodiscard]] const std::vector<core::Arrow>& arrows() const noexcept { return m_arrows; }
     [[nodiscard]] const std::vector<core::SquareMark>& squareMarks() const noexcept {

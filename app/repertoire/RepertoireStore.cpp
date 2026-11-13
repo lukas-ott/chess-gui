@@ -3,9 +3,9 @@
 #include "document/PgnIo.hpp"
 #include "kiebitz/repertoire/gaps.hpp"
 #include "library/Library.hpp"
+#include "util/WhenReady.hpp"
 
 #include <QFile>
-#include <QFutureWatcher>
 #include <QtConcurrent/QtConcurrentRun>
 
 #include <algorithm>
@@ -22,18 +22,6 @@ std::size_t hashOf(const std::string& text) {
 QString toQString(std::string_view text) {
     return QString::fromUtf8(text.data(), static_cast<qsizetype>(text.size()));
 }
-
-/// Runs `done` with the result on the UI thread (the watcher deletes itself).
-template <typename T, typename Done>
-void whenDone(QObject* context, const QFuture<T>& future, const Done& done) {
-    auto* watcher =
-        new QFutureWatcher<T>(context); // NOLINT(clang-analyzer-cplusplus.NewDeleteLeaks)
-    QObject::connect(watcher, &QFutureWatcher<T>::finished, context, [watcher, done] {
-        watcher->deleteLater();
-        done(watcher->result());
-    });
-    watcher->setFuture(future);
-} // NOLINT(clang-analyzer-cplusplus.NewDeleteLeaks)
 
 void parseGames(RepertoireFile& file) {
     file.games.clear();
@@ -200,33 +188,33 @@ void RepertoireStore::rebuild(core::Color side) {
     data.building = true;
     emit changed(side);
     const QStringList paths = data.files;
-    whenDone(this, QtConcurrent::run([side, paths] {
-                 auto built = std::make_shared<BuiltRepertoire>();
-                 built->side = side;
-                 for (const QString& path : paths) {
-                     built->files.push_back(readFile(path));
-                 }
-                 built->tree = treeOf(side, built->files);
-                 return built;
-             }),
-             [this, side, generation](std::shared_ptr<BuiltRepertoire> built) {
-                 Side& current = sideData(side);
-                 if (generation != current.generation) {
-                     return; // an edit or a newer build came after
-                 }
-                 // Keep the file objects tabs may share: same identity, new text.
-                 for (auto& file : built->files) {
-                     if (const auto shared = sharedFile(file.file->path)) {
-                         shared->text = std::move(file.file->text);
-                         shared->games = std::move(file.file->games);
-                         shared->hasText = true;
-                         file.file = shared;
-                     }
-                 }
-                 current.built = std::move(built);
-                 current.building = false;
-                 emit changed(side);
-             });
+    whenReady(this, QtConcurrent::run([side, paths] {
+                  auto built = std::make_shared<BuiltRepertoire>();
+                  built->side = side;
+                  for (const QString& path : paths) {
+                      built->files.push_back(readFile(path));
+                  }
+                  built->tree = treeOf(side, built->files);
+                  return built;
+              }),
+              [this, side, generation](std::shared_ptr<BuiltRepertoire> built) {
+                  Side& current = sideData(side);
+                  if (generation != current.generation) {
+                      return; // an edit or a newer build came after
+                  }
+                  // Keep the file objects tabs may share: same identity, new text.
+                  for (auto& file : built->files) {
+                      if (const auto shared = sharedFile(file.file->path)) {
+                          shared->text = std::move(file.file->text);
+                          shared->games = std::move(file.file->games);
+                          shared->hasText = true;
+                          file.file = shared;
+                      }
+                  }
+                  current.built = std::move(built);
+                  current.building = false;
+                  emit changed(side);
+              });
 }
 
 void RepertoireStore::catchUp(BuiltRepertoire& built) {
@@ -247,26 +235,26 @@ void RepertoireStore::loadOpenings() {
         return;
     }
     m_openingsLoading = true;
-    whenDone(this, QtConcurrent::run([] {
-                 QFile in(QStringLiteral(":/openings/openings.tsv"));
-                 const QByteArray bytes =
-                     in.open(QIODevice::ReadOnly) ? in.readAll() : QByteArray();
-                 return std::make_shared<const repertoire::OpeningNames>(
-                     repertoire::OpeningNames::fromTsv(std::string_view(
-                         bytes.constData(), static_cast<std::size_t>(bytes.size()))));
-             }),
-             [this](std::shared_ptr<const repertoire::OpeningNames> names) {
-                 m_openings = std::move(names);
-                 m_openingsLoading = false;
-                 emit openingsReady();
-             });
+    whenReady(this, QtConcurrent::run([] {
+                  QFile in(QStringLiteral(":/openings/openings.tsv"));
+                  const QByteArray bytes =
+                      in.open(QIODevice::ReadOnly) ? in.readAll() : QByteArray();
+                  return std::make_shared<const repertoire::OpeningNames>(
+                      repertoire::OpeningNames::fromTsv(std::string_view(
+                          bytes.constData(), static_cast<std::size_t>(bytes.size()))));
+              }),
+              [this](std::shared_ptr<const repertoire::OpeningNames> names) {
+                  m_openings = std::move(names);
+                  m_openingsLoading = false;
+                  emit openingsReady();
+              });
 }
 
 // ---- Editing -----------------------------------------------------------------------------------
 
 void RepertoireStore::write(const std::shared_ptr<PgnFile>& file) {
     ++m_pendingWrites;
-    whenDone(this, pgnio::write(file->path, file->text), [this](const QString& error) {
+    whenReady(this, pgnio::write(file->path, file->text), [this](const QString& error) {
         --m_pendingWrites;
         if (!error.isEmpty()) {
             emit failed(error);
@@ -427,41 +415,41 @@ void RepertoireStore::editHeaders(const QStringList& paths,
                                                             : std::nullopt);
     }
     ++m_pendingWrites;
-    whenDone(this, QtConcurrent::run([jobs, change] {
-                 std::vector<std::shared_ptr<PgnFile>> results;
-                 for (const auto& [path, known] : jobs) {
-                     auto file = std::make_shared<PgnFile>();
-                     file->path = path;
-                     if (known) {
-                         file->text = *known;
-                     } else {
-                         QFile in(path);
-                         if (!in.open(QIODevice::ReadOnly)) {
-                             continue;
-                         }
-                         const QByteArray bytes = in.readAll();
-                         file->text.assign(bytes.constData(),
-                                           static_cast<std::size_t>(bytes.size()));
-                     }
-                     file->text = change(file->text);
-                     file->games = pgn::indexGames(file->text);
-                     results.push_back(std::move(file));
-                 }
-                 return results;
-             }),
-             [this](const std::vector<std::shared_ptr<PgnFile>>& files) {
-                 --m_pendingWrites;
-                 for (const auto& file : files) {
-                     std::shared_ptr<PgnFile> target = file;
-                     if (const auto shared = sharedFile(file->path)) { // keep what tabs share
-                         shared->text = file->text;
-                         shared->games = file->games;
-                         target = shared;
-                     }
-                     write(target);
-                     emit fileEdited(target->path, target);
-                 }
-             });
+    whenReady(this, QtConcurrent::run([jobs, change] {
+                  std::vector<std::shared_ptr<PgnFile>> results;
+                  for (const auto& [path, known] : jobs) {
+                      auto file = std::make_shared<PgnFile>();
+                      file->path = path;
+                      if (known) {
+                          file->text = *known;
+                      } else {
+                          QFile in(path);
+                          if (!in.open(QIODevice::ReadOnly)) {
+                              continue;
+                          }
+                          const QByteArray bytes = in.readAll();
+                          file->text.assign(bytes.constData(),
+                                            static_cast<std::size_t>(bytes.size()));
+                      }
+                      file->text = change(file->text);
+                      file->games = pgn::indexGames(file->text);
+                      results.push_back(std::move(file));
+                  }
+                  return results;
+              }),
+              [this](const std::vector<std::shared_ptr<PgnFile>>& files) {
+                  --m_pendingWrites;
+                  for (const auto& file : files) {
+                      std::shared_ptr<PgnFile> target = file;
+                      if (const auto shared = sharedFile(file->path)) { // keep what tabs share
+                          shared->text = file->text;
+                          shared->games = file->games;
+                          target = shared;
+                      }
+                      write(target);
+                      emit fileEdited(target->path, target);
+                  }
+              });
 }
 
 } // namespace kiebitz::app

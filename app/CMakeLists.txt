@@ -5,10 +5,14 @@ qt_standard_project_setup()
 qt_add_library(kiebitz_ui STATIC
     MainWindow.cpp
     MainWindow.hpp
+    MainWindowKeys.hpp
+    MainWindowSetup.cpp
     Migration.cpp
     Migration.hpp
     board/BoardGeometry.cpp
     board/BoardGeometry.hpp
+    board/BoardPage.cpp
+    board/BoardPage.hpp
     board/BoardTheme.cpp
     board/BoardTheme.hpp
     board/BoardView.cpp
@@ -26,6 +30,8 @@ qt_add_library(kiebitz_ui STATIC
     databases/GamesModel.cpp
     databases/GamesModel.hpp
     document/GameDocument.cpp
+    document/Documents.cpp
+    document/Documents.hpp
     explorer/ExplorerPanel.cpp
     explorer/ExplorerPanel.hpp
     explorer/LichessExplorer.cpp
@@ -58,6 +64,8 @@ qt_add_library(kiebitz_ui STATIC
     library/NewFileDialog.hpp
     notation/NotationView.cpp
     notation/NotationView.hpp
+    notation/MovesCard.cpp
+    notation/MovesCard.hpp
     panels/GameInfoPanel.cpp
     panels/GameInfoPanel.hpp
     repertoire/RepertoireStore.cpp
@@ -82,6 +90,8 @@ qt_add_library(kiebitz_ui STATIC
     profiles/ProfilesView.hpp
     repertoire/PracticeStats.cpp
     repertoire/PracticeStats.hpp
+    repertoire/Practice.cpp
+    repertoire/Practice.hpp
     repertoire/GapSource.hpp
     repertoire/RepertoirePanel.cpp
     repertoire/RepertoirePanel.hpp
@@ -104,6 +114,7 @@ qt_add_library(kiebitz_ui STATIC
     style/PageHeader.hpp
     widgets/ActivityChart.cpp
     widgets/ActivityChart.hpp
+    widgets/Card.hpp
     widgets/DateRange.cpp
     widgets/DateRange.hpp
     widgets/ElidedLabel.hpp
@@ -120,6 +131,7 @@ qt_add_library(kiebitz_ui STATIC
     widgets/Stepper.cpp
     widgets/Toggle.cpp
     widgets/Toggle.hpp
+    util/WhenReady.hpp
     widgets/Stepper.hpp)
 target_include_directories(kiebitz_ui PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")
 target_link_libraries(kiebitz_ui PUBLIC Qt6::Widgets Qt6::Svg Qt6::Concurrent Qt6::Network

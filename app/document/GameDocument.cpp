@@ -27,4 +27,14 @@ QString GameDocument::title() const {
     return modified ? QStringLiteral("• ") + name : name;
 }
 
+std::vector<core::Move> lineTo(const core::Game& game, core::NodeId id) {
+    std::vector<core::Move> line;
+    for (const core::NodeId node : game.path(id)) {
+        if (node != core::Game::root()) {
+            line.push_back(game.node(node).move);
+        }
+    }
+    return line;
+}
+
 } // namespace kiebitz::app
