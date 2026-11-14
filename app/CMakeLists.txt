@@ -135,6 +135,7 @@ qt_add_library(kiebitz_ui STATIC
     widgets/DateRange.cpp
     widgets/DateRange.hpp
     widgets/ElidedLabel.hpp
+    widgets/VerticalScrollArea.hpp
     widgets/EmptyState.cpp
     widgets/EmptyState.hpp
     widgets/Message.cpp

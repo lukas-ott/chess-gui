@@ -48,6 +48,7 @@
 #include <QApplication>
 #include <QButtonGroup>
 #include <QColorDialog>
+#include <QDesktopServices>
 #include <QFileDialog>
 #include <QFrame>
 #include <QHBoxLayout>
@@ -60,6 +61,7 @@
 #include <QTabBar>
 #include <QTabWidget>
 #include <QToolButton>
+#include <QUrl>
 #include <QVBoxLayout>
 
 #include <algorithm>
@@ -162,6 +164,19 @@ void MainWindow::buildMenus() {
     buildGameMenu();
     buildViewMenu(menuBar()->addMenu(tr("&View")));
     auto* helpMenu = menuBar()->addMenu(tr("&Help"));
+    auto* keysAction = helpMenu->addAction(tr("&Keyboard Shortcuts"), this, [this] {
+        showSection(Section::Settings);
+        m_settingsView->showSection(tr("Keyboard"));
+    });
+    keysAction->setObjectName(QStringLiteral("helpKeyboard"));
+    helpMenu->addSeparator();
+    helpMenu->addAction(tr("Kiebitz on &GitHub"), this, [] {
+        QDesktopServices::openUrl(QUrl(QStringLiteral("https://github.com/lukas-ott/kiebitz")));
+    });
+    helpMenu->addAction(tr("&Report a Problem…"), this, [] {
+        QDesktopServices::openUrl(
+            QUrl(QStringLiteral("https://github.com/lukas-ott/kiebitz/issues/new")));
+    });
     auto* aboutAction = helpMenu->addAction(tr("&About Kiebitz"), this, &MainWindow::showAbout);
     aboutAction->setMenuRole(QAction::AboutRole);
 }
@@ -288,21 +303,29 @@ void MainWindow::buildGameMenu() {
 }
 
 void MainWindow::buildViewMenu(QMenu* menu) {
-    // Appearance of the whole app: follow macOS, or always light / dark.
-    auto* appearanceMenu = menu->addMenu(tr("&Appearance"));
-    m_appearanceGroup = new QActionGroup(this);
-    for (const auto& [appearance, text] :
-         {std::pair{AppStyle::Appearance::System, tr("Same as System")},
-          std::pair{AppStyle::Appearance::Light, tr("Light")},
-          std::pair{AppStyle::Appearance::Dark, tr("Dark")}}) {
-        auto* action = appearanceMenu->addAction(text);
+    // The app's theme: the dark ones, then the light ones; one of them chosen.
+    auto* appThemeMenu = menu->addMenu(tr("&Theme"));
+    m_appThemeGroup = new QActionGroup(this);
+    bool dark = true;
+    for (const AppStyle::Theme& theme : AppStyle::themes()) {
+        if (theme.dark != dark) {
+            appThemeMenu->addSeparator();
+            dark = theme.dark;
+        }
+        auto* action = appThemeMenu->addAction(theme.name);
+        action->setData(theme.id);
         action->setCheckable(true);
-        action->setChecked(m_style.appearance() == appearance);
-        m_appearanceGroup->addAction(action);
-        connect(action, &QAction::triggered, this, [appearance] {
-            Settings::instance().setValue(Settings::kAppearance, AppStyle::toString(appearance));
-        });
+        m_appThemeGroup->addAction(action);
+        connect(action, &QAction::triggered, this,
+                [id = theme.id] { Settings::instance().setValue(Settings::kAppTheme, id); });
     }
+    const auto showTheme = [this] {
+        for (QAction* action : m_appThemeGroup->actions()) {
+            action->setChecked(action->data().toString() == m_style.theme().id);
+        }
+    };
+    showTheme();
+    connect(&m_style, &AppStyle::changed, m_appThemeGroup, showTheme); // macOS switched
     menu->addSeparator();
 
     auto* flipAction = menu->addAction(tr("&Flip Board"));
@@ -638,6 +661,10 @@ void MainWindow::buildPages() {
                                 : tr("That was the last part of today's plan."));
     });
     connect(m_training, &TrainingSession::ended, this, [this] {
+        if (m_trainingFilter) { // the openings part's filter on the Library goes too
+            m_trainingFilter = false;
+            m_libraryView->showAllTypes();
+        }
         showSection(Section::Training);
         m_trainingView->activate();
     });
@@ -647,42 +674,51 @@ void MainWindow::buildPages() {
 }
 
 QWidget* MainWindow::buildSidebar() {
-    // One icon per section.
+    // One button per section: its icon, and its name under it.
+    constexpr int kWidth = 76;
     auto* sidebar = new QFrame;
     sidebar->setObjectName(QStringLiteral("sidebar"));
-    sidebar->setFixedWidth(52);
+    sidebar->setFixedWidth(kWidth);
     auto* sideLayout = new QVBoxLayout(sidebar);
     sideLayout->setContentsMargins(0, 8, 0, 8);
     sideLayout->setSpacing(4);
     m_sidebar = new QButtonGroup(this);
-    const auto addButton = [this](Section section, const char* name, const QString& tip) {
+    const auto addButton = [this](Section section, const char* name, const QString& text,
+                                  const QString& tip) {
         auto* button = new QToolButton;
         button->setObjectName(QString::fromLatin1(name));
         button->setProperty("role", "sideNav");
+        button->setText(text);
         button->setToolTip(tip);
+        button->setToolButtonStyle(Qt::ToolButtonTextUnderIcon);
         button->setCheckable(true);
         button->setFocusPolicy(Qt::NoFocus);
-        button->setIconSize(QSize(22, 22));
-        button->setFixedSize(52, 44);
+        button->setIconSize(QSize(20, 20));
+        button->setFixedSize(kWidth, 52);
         m_sidebar->addButton(button, static_cast<int>(section));
         return button;
     };
-    for (const auto& [section, name, tip] :
-         {std::tuple{Section::Board, "sideBoard", tr("Board (⌘1)")},
-          std::tuple{Section::Library, "sideLibrary", tr("Library (⌘L)")},
-          std::tuple{Section::Training, "sideTraining", tr("Training (⇧⌘T)")},
-          std::tuple{Section::Puzzles, "sidePuzzles", tr("Puzzles (⇧⌘U)")},
-          std::tuple{Section::Databases, "sideDatabases", tr("Databases (⇧⌘D)")},
-          std::tuple{Section::Profiles, "sideProfiles", tr("Profiles (⇧⌘P)")},
-          std::tuple{Section::Engines, "sideEngines", tr("Engines (⇧⌘E)")}}) {
-        sideLayout->addWidget(addButton(section, name, tip));
+    for (const auto& [section, name, text, tip] :
+         {std::tuple{Section::Board, "sideBoard", tr("Board"), tr("Board (⌘1)")},
+          std::tuple{Section::Library, "sideLibrary", tr("Library"), tr("Library (⌘L)")},
+          std::tuple{Section::Training, "sideTraining", tr("Training"), tr("Training (⇧⌘T)")},
+          std::tuple{Section::Puzzles, "sidePuzzles", tr("Puzzles"), tr("Puzzles (⇧⌘U)")},
+          std::tuple{Section::Databases, "sideDatabases", tr("Databases"), tr("Databases (⇧⌘D)")},
+          std::tuple{Section::Profiles, "sideProfiles", tr("Profiles"), tr("Profiles (⇧⌘P)")},
+          std::tuple{Section::Engines, "sideEngines", tr("Engines"), tr("Engines (⇧⌘E)")}}) {
+        sideLayout->addWidget(addButton(section, name, text, tip));
     }
     sideLayout->addStretch();
     // Settings: at the bottom, apart from the sections.
-    sideLayout->addWidget(addButton(Section::Settings, "sideSettings", tr("Settings (⌘,)")));
+    sideLayout->addWidget(
+        addButton(Section::Settings, "sideSettings", tr("Settings"), tr("Settings (⌘,)")));
     m_sidebar->setExclusive(true);
-    connect(m_sidebar, &QButtonGroup::idClicked, this,
-            [this](int id) { showSection(static_cast<Section>(id)); });
+    // A button switched on (a click, the keyboard, VoiceOver's press): its section.
+    connect(m_sidebar, &QButtonGroup::idToggled, this, [this](int id, bool on) {
+        if (on && static_cast<Section>(id) != m_section) {
+            showSection(static_cast<Section>(id));
+        }
+    });
     connect(m_sidebar, &QButtonGroup::buttonToggled, this, &MainWindow::updateSidebarIcons);
     return sidebar;
 }
@@ -901,14 +937,8 @@ void MainWindow::applySetting(const QString& key) {
         m_moves->setRows(settings.flag(Settings::kNotationRows));
     } else if (is(Settings::kFigurines)) {
         m_notation->setFigurines(settings.flag(Settings::kFigurines));
-    } else if (is(Settings::kAppearance)) {
-        const auto appearance = AppStyle::fromString(settings.string(Settings::kAppearance));
-        m_style.setAppearance(appearance);
-        const QStringList names{tr("Same as System"), tr("Light"), tr("Dark")};
-        for (auto* action :
-             m_appearanceGroup != nullptr ? m_appearanceGroup->actions() : QList<QAction*>{}) {
-            action->setChecked(action->text() == names.value(static_cast<int>(appearance)));
-        }
+    } else if (is(Settings::kAppTheme)) {
+        m_style.setTheme(settings.string(Settings::kAppTheme)); // the menu follows the style
     } else if (is(Settings::kAccent)) {
         const QString accent = settings.string(Settings::kAccent);
         m_style.setAccent(accent.isEmpty() ? QColor() : QColor(accent));

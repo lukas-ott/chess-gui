@@ -171,6 +171,13 @@ TEST_F(DocumentsTest, TheSidebarSwitchesSectionsAndTheBoardAlwaysHasAGame) {
     QTest::mouseClick(board, Qt::LeftButton);
     EXPECT_EQ(window.section(), MainWindow::Section::Board);
     EXPECT_TRUE(board->isChecked());
+    // Checked without a click (VoiceOver's toggle action) switches too.
+    engines->setChecked(true);
+    EXPECT_EQ(window.section(), MainWindow::Section::Engines);
+    engines->setChecked(false); // an exclusive group keeps one checked: nothing changes
+    EXPECT_EQ(window.section(), MainWindow::Section::Engines);
+    board->setChecked(true);
+    EXPECT_EQ(window.section(), MainWindow::Section::Board);
     // Closing the last game leaves a fresh one, never an empty board page.
     action(window, QStringLiteral("Close Tab"))->trigger();
     EXPECT_EQ(tabs->count(), 1);
@@ -324,8 +331,10 @@ TEST_F(LibraryTreeTest, AFolderListsOnlyItsOwnFiles) {
         return texts;
     };
     tree->setCurrentItem(otb);
-    EXPECT_EQ(shown(),
-              (QStringList{QStringLiteral("OTB"), QStringLiteral("2 folders  ·  0 files")}));
+    // The second line counts everything below it, subfolders too.
+    EXPECT_EQ(shown(), (QStringList{QStringLiteral("OTB"),
+                                    QStringLiteral("2 folders  ·  0 files\n"
+                                                   "In it: 2 game files  ·  4 games")}));
     tree->setCurrentItem(item(QStringLiteral("b")));
     EXPECT_EQ(games->model()->rowCount(), 3); // b.pgn's games
     const auto* count = window.findChild<QLabel*>(QStringLiteral("libraryListCount"));
@@ -335,8 +344,9 @@ TEST_F(LibraryTreeTest, AFolderListsOnlyItsOwnFiles) {
     QSignalSpy scanned(&window.library(), &Library::scanned);
     ASSERT_TRUE(scanned.wait(5000));
     tree->setCurrentItem(item(QStringLiteral("OTB")));
-    EXPECT_EQ(shown(),
-              (QStringList{QStringLiteral("OTB"), QStringLiteral("2 folders  ·  1 file")}));
+    EXPECT_EQ(shown(), (QStringList{QStringLiteral("OTB"),
+                                    QStringLiteral("2 folders  ·  1 file\n"
+                                                   "In it: 3 game files  ·  5 games")}));
 }
 
 TEST_F(LibraryTreeTest, NewFoldersAndMovingFiles) {
@@ -755,7 +765,7 @@ TEST_F(DocumentsTest, RepertoireFileOpensWithItsTreeFromItsSide) {
     // The Repertoire tab is about practice here.
     auto* panel = window.findChild<kiebitz::app::RepertoirePanel*>();
     ASSERT_NE(panel, nullptr);
-    EXPECT_TRUE(panel->practiceText().contains(QStringLiteral("positions to practice")));
+    EXPECT_TRUE(panel->practiceText().contains(QStringLiteral("positions to practise")));
     // Info shows what a repertoire has: no players, but the side it is for.
     auto* white = window.findChild<QLineEdit*>(QStringLiteral("headerWhite"));
     auto* side = window.findChild<QComboBox*>(QStringLiteral("headerOrientation"));
@@ -863,7 +873,7 @@ TEST_F(DocumentsTest, PracticingARepertoireFile) {
     open(path("rep.pgn"));
     auto* panel = window.findChild<kiebitz::app::RepertoirePanel*>();
     ASSERT_NE(panel, nullptr);
-    EXPECT_EQ(panel->practiceText(), QStringLiteral("2 positions to practice"));
+    EXPECT_EQ(panel->practiceText(), QStringLiteral("2 positions to practise"));
     auto* status = window.findChild<QLabel*>(QStringLiteral("practiceStatus"));
     ASSERT_NE(status, nullptr);
 
@@ -916,7 +926,7 @@ TEST_F(DocumentsTest, PracticeStartsWhereTheFileDoesOrTakesTheWholeRepertoire) {
     auto* panel = window.findChild<kiebitz::app::RepertoirePanel*>();
     ASSERT_NE(panel, nullptr);
     // Counted from where it starts: 2... d5 after 2. d4 and after 2. Nc3.
-    EXPECT_EQ(panel->practiceText(), QStringLiteral("2 positions to practice"));
+    EXPECT_EQ(panel->practiceText(), QStringLiteral("2 positions to practise"));
     const auto* status = window.findChild<QLabel*>(QStringLiteral("practiceStatus"));
     if (const QString dir = qEnvironmentVariable("KIEBITZ_SNAPSHOT_DIR"); !dir.isEmpty()) {
         window.resize(1200, 760);
@@ -995,7 +1005,7 @@ TEST_F(DocumentsTest, MistakesAreRememberedAndPractisedAgain) {
                       Qt::LeftButton);
     // Remembered: the file offers its mistakes (the position after 1. d4).
     ASSERT_TRUE(QTest::qWaitFor([&] { return mistakes->isVisibleTo(panel); }, 3000));
-    EXPECT_EQ(mistakes->text(), QStringLiteral("Practice Mistakes (1)"));
+    EXPECT_EQ(mistakes->text(), QStringLiteral("Practise Mistakes (1)"));
     QTest::mouseClick(mistakes, Qt::LeftButton);
     EXPECT_TRUE(title->text().startsWith(u"PRACTICE MISTAKES"));
     answer("", "Nf6"); // through the mistake: both lines, then done

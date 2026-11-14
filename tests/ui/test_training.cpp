@@ -269,10 +269,25 @@ TEST_F(TrainingTest, OpeningsShowsOneSidesRepertoireFilesInTheirFolders) {
     }
     EXPECT_EQ(shown, (QStringList{QStringLiteral("White"), QStringLiteral("e4"),
                                   QStringLiteral("italian")}));
+    // The filter goes with the part: back to every file once training ends.
+    const auto* filter = window->findChild<QComboBox*>(QStringLiteral("libraryTypeFilter"));
+    EXPECT_NE(filter->currentIndex(), 0);
     session->stop();
-    // Back to every file afterwards.
+    EXPECT_EQ(filter->currentIndex(), 0);
+}
+
+TEST_F(TrainingTest, TheOpeningsFilterGoesWithTheNextPart) {
+    for (const Part part : {Part::Middlegame, Part::Endgames, Part::SelfStudy}) {
+        row(part)->findChild<app::Toggle*>()->click();
+    }
+    click("trainingStart");
+    EXPECT_EQ(window->section(), MainWindow::Section::Library);
     auto* filter = window->findChild<QComboBox*>(QStringLiteral("libraryTypeFilter"));
-    filter->setCurrentIndex(0);
+    ASSERT_NE(filter, nullptr);
+    EXPECT_NE(filter->currentIndex(), 0); // repertoire files only
+    session->next();                      // tactics
+    EXPECT_EQ(window->section(), MainWindow::Section::Puzzles);
+    EXPECT_EQ(filter->currentIndex(), 0);
 }
 
 TEST_F(TrainingTest, TheYearsAreAChoiceOnceThereAreSeveral) {

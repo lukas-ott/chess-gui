@@ -27,6 +27,8 @@
 #include <QNetworkReply>
 #include <QPainter>
 #include <QPushButton>
+#include <QScrollArea>
+#include <QScrollBar>
 #include <QSettings>
 #include <QSignalSpy>
 #include <QTableView>
@@ -421,6 +423,50 @@ TEST(Fide, ReadsTheSearchAndRanksTheClosestNameFirst) {
     ASSERT_EQ(ranked.size(), 2U);
     EXPECT_EQ(ranked[0].id, 1503014);
     EXPECT_EQ(kiebitz::app::rankFideMatches(players, QStringLiteral("Hikaru Nakamura")).size(), 0U);
+}
+
+TEST_F(ProfilesTest, LongAccountNamesNeverMoveTheCardsSideways) {
+    const QString name = QStringLiteral("AVeryLongUsernameThatDoesNotFitAtAll");
+    server.pages["/api/games/user/AVeryLongUsernameThatDoesNotFitAtAll"] =
+        game("AVeryLongUsernameThatDoesNotFitAtAll", "bob", "1. e4");
+    server.pages["/api/user/AVeryLongUsernameThatDoesNotFitAtAll"] =
+        R"({"title":"GM","count":{"all":12345678},"perfs":{"blitz":{"games":120,)"
+        R"("rating":2210,"prov":false}}})";
+    const kiebitz::app::AppStyle style(*qApp);
+    ProfileStore store(folder.filePath(QStringLiteral("profiles")));
+    store.setServers(server.url(), server.url(), server.url());
+    kiebitz::app::LichessLogin lichess{kiebitz::app::LichessLogin::Storage{}};
+    kiebitz::app::Library library;
+    kiebitz::app::RepertoireStore repertoires(library);
+    kiebitz::app::ProfilesView view(store, lichess, repertoires, style);
+    view.resize(1180, 400); // short: the list scrolls, with its scroll bar
+    view.show();
+    const QString me = store.profiles()[0].id;
+    store.addAccount(me, AccountSite::Lichess, name);
+    waitFor(store, me);
+    auto* scroll = view.findChild<QScrollArea*>(QStringLiteral("profileAccounts"));
+    ASSERT_NE(scroll, nullptr);
+    ASSERT_TRUE(QTest::qWaitFor([&] {
+        QApplication::processEvents();
+        return scroll->widget()->width() == scroll->viewport()->width();
+    }));
+    EXPECT_EQ(scroll->horizontalScrollBar()->maximum(), 0);
+    // The name is cut short, in full as its tooltip, inside the list.
+    const auto nameLabel = [&]() -> const QLabel* {
+        for (const auto* label : scroll->widget()->findChildren<QLabel*>()) {
+            if (label->toolTip() == name && label->isVisible()) {
+                return label;
+            }
+        }
+        return nullptr;
+    };
+    ASSERT_TRUE(QTest::qWaitFor([&] {
+        const QLabel* label = nameLabel();
+        return label != nullptr && label->mapTo(scroll->widget(), label->rect().topRight()).x() <
+                                       scroll->viewport()->width();
+    })) << "the name reaches past the list";
+    EXPECT_TRUE(nameLabel()->text().endsWith(QStringLiteral("…")));
+    EXPECT_EQ(scroll->widget()->width(), scroll->viewport()->width());
 }
 
 TEST_F(ProfilesTest, AProfileFindsItsFidePlayerAndCanPickAnother) {

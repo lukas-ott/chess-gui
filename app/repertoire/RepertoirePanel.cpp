@@ -216,7 +216,7 @@ RepertoirePanel::RepertoirePanel(RepertoireStore& store, const AppStyle& style, 
         tr("The lines through positions you got wrong and haven't answered right twice since"));
     m_practiceMistakes->hide();
     connect(m_practiceMistakes, &QPushButton::clicked, this, &RepertoirePanel::mistakesRequested);
-    m_practiceRepertoire = new QPushButton(tr("Practice Whole Repertoire"));
+    m_practiceRepertoire = new QPushButton(tr("Practise Whole Repertoire"));
     m_practiceRepertoire->setObjectName(QStringLiteral("practiceRepertoire"));
     m_practiceRepertoire->setProperty("role", "secondary");
     m_practiceRepertoire->setFocusPolicy(Qt::NoFocus);
@@ -301,13 +301,13 @@ void RepertoirePanel::refreshPractice() {
     const repertoire::Drill here(*m_game, m_side, m_current, practiceDepth(), 0);
     const QLocale locale;
     m_practiceCount->setText(
-        all.trainable() == 1 ? tr("1 position to practice")
-                             : tr("%1 positions to practice")
+        all.trainable() == 1 ? tr("1 position to practise")
+                             : tr("%1 positions to practise")
                                    .arg(locale.toString(static_cast<qulonglong>(all.trainable()))));
-    m_practiceAll->setText(m_whole ? tr("Practice Whole Repertoire") : tr("Practice Whole File"));
+    m_practiceAll->setText(m_whole ? tr("Practise Whole Repertoire") : tr("Practise Whole File"));
     m_practiceRepertoire->setVisible(!m_whole);
     m_practiceAll->setEnabled(all.trainable() > 0);
-    m_practiceHere->setText(tr("Practice From Here (%1)")
+    m_practiceHere->setText(tr("Practise From Here (%1)")
                                 .arg(locale.toString(static_cast<qulonglong>(here.trainable()))));
     m_practiceHere->setEnabled(here.trainable() > 0 && m_current != core::Game::root());
     // Your mistakes in this file (any depth): only shown when there are some.
@@ -316,7 +316,7 @@ void RepertoirePanel::refreshPractice() {
         mistakes = repertoire::Drill(*m_game, m_side, m_start, 0, 0, m_mistakes).trainable();
     }
     m_practiceMistakes->setText(
-        tr("Practice Mistakes (%1)").arg(locale.toString(static_cast<qulonglong>(mistakes))));
+        tr("Practise Mistakes (%1)").arg(locale.toString(static_cast<qulonglong>(mistakes))));
     m_practiceMistakes->setVisible(mistakes > 0);
 }
 

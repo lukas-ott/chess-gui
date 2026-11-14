@@ -34,4 +34,9 @@ bool renameFolderCase(const QString& parent, const QString& from, const QString&
 /// Renames it and points the engine list at it.
 void capitalizeEngineFolder();
 
+/// Up to 0.3 the app had an appearance ("system", "light", "dark"); now it has a theme. Light
+/// becomes Daylight and dark Graphite (unless a theme is set already); system becomes no theme,
+/// which follows macOS as before. Removes the old setting; returns whether there was one.
+bool appearanceToTheme(QSettings& settings);
+
 } // namespace kiebitz::app::migration

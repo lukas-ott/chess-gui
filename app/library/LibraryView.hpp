@@ -70,6 +70,8 @@ public:
     /// Only the repertoire files (of one side, or of both), in their folders: training's
     /// openings part, to pick one to practise.
     void showRepertoires(std::optional<core::Color> side);
+    /// Every file again (after showRepertoires()).
+    void showAllTypes();
 
     /// The preview board uses the same colours and pieces as the main board.
     void setBoardLook(const BoardTheme& theme, const QString& pieceSet);

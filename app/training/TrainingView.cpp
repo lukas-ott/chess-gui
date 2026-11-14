@@ -15,6 +15,7 @@
 #include <QGridLayout>
 #include <QHBoxLayout>
 #include <QLabel>
+#include <QProgressBar>
 #include <QPushButton>
 #include <QSignalBlocker>
 #include <QStyle>
@@ -129,10 +130,8 @@ TrainingView::TrainingView(TrainingSession& session, TrainingHistory& stats, con
         texts->setSpacing(0);
         texts->addWidget(ui::label(TrainingSession::name(part), "checkHeadline"));
         if (part == Part::Openings) {
-            // Which repertoire files the Library shows.
-            auto* sideRow = new QHBoxLayout;
-            sideRow->setSpacing(6);
-            sideRow->addWidget(ui::label(description(part), "emptyHint"));
+            // Which repertoire files the Library shows: beside the minutes, with the controls.
+            texts->addWidget(ui::label(description(part), "emptyHint"));
             m_side = new QComboBox;
             m_side->setObjectName(QStringLiteral("trainingSide"));
             m_side->setFocusPolicy(Qt::NoFocus);
@@ -147,13 +146,13 @@ TrainingView::TrainingView(TrainingSession& session, TrainingHistory& stats, con
                 TrainingSession::setOpeningsSide(
                     static_cast<TrainingSession::Side>(m_side->currentData().toInt()));
             });
-            texts->addLayout(sideRow);
-            sideRow->addWidget(m_side);
-            sideRow->addStretch();
         } else {
             texts->addWidget(ui::label(description(part), "emptyHint"));
         }
         rowBox->addLayout(texts, 1);
+        if (part == Part::Openings) {
+            rowBox->addWidget(m_side);
+        }
         row.left = ui::label(QString(), "statCaption");
         row.left->setObjectName(QStringLiteral("trainingLeft"));
         row.left->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
@@ -199,6 +198,37 @@ TrainingView::TrainingView(TrainingSession& session, TrainingHistory& stats, con
     m_tiles[0]->setObjectName(QStringLiteral("trainingToday"));
     m_tiles[1]->setObjectName(QStringLiteral("trainingStreak"));
     progressBox->addLayout(tiles);
+    // Today, part by part: the minutes trained of the minutes planned.
+    progressBox->addSpacing(6);
+    progressBox->addWidget(ui::label(tr("TODAY"), "cardTitle"));
+    auto* parts = new QGridLayout;
+    parts->setHorizontalSpacing(10);
+    parts->setVerticalSpacing(8);
+    for (std::size_t k = 0; k < training::kParts; ++k) {
+        PartBar& bar = m_partBars[k];
+        bar.name = ui::label(TrainingSession::name(training::kAllParts[k]), "infoLabel");
+        bar.bar = new QProgressBar;
+        bar.bar->setObjectName(QStringLiteral("trainingPartBar"));
+        bar.bar->setTextVisible(false);
+        bar.bar->setFixedHeight(6);
+        bar.name->setObjectName(QStringLiteral("trainingPartName"));
+        bar.value = ui::label(QString(), "infoLabel");
+        bar.value->setObjectName(QStringLiteral("trainingPartValue"));
+        bar.value->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
+        // Its text never sizes the column (that's fixed below), so the bars keep their width.
+        bar.value->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
+        const int row = static_cast<int>(k);
+        parts->addWidget(bar.name, row, 0);
+        parts->addWidget(bar.bar, row, 1);
+        parts->addWidget(bar.value, row, 2);
+    }
+    parts->setColumnStretch(1, 1);
+    // As wide as the minutes get, in the labels' styled font.
+    m_partBars[0].value->ensurePolished();
+    parts->setColumnMinimumWidth(2, m_partBars[0].value->fontMetrics().horizontalAdvance(
+                                        tr("%1 / %2 min").arg(999).arg(999)) +
+                                        8);
+    progressBox->addLayout(parts);
     progressBox->addStretch();
 
     // Below, the whole width: the days you trained.
@@ -226,14 +256,14 @@ TrainingView::TrainingView(TrainingSession& session, TrainingHistory& stats, con
     activityBox->addLayout(activityTitle);
     m_grid = new ActivityGrid(m_style);
     activityBox->addWidget(m_grid);
-    activityBox->addStretch();
 
     auto* top = new QHBoxLayout;
     top->setSpacing(layout::kPageSpacing);
     top->addWidget(plan, 3);
     top->addWidget(progress, 2);
     layout->addLayout(top);
-    layout->addWidget(activity, 1);
+    layout->addWidget(activity);
+    layout->addStretch(1); // the cards as tall as what's in them
 
     connect(&m_session, &TrainingSession::changed, this, &TrainingView::showSession);
     connect(&m_stats, &TrainingHistory::loaded, this, &TrainingView::showStats);
@@ -318,6 +348,31 @@ void TrainingView::showStats(const TrainingHistory::Summary& summary) {
         tr("Today %1 of %2  ·  %3")
             .arg(minutesText(todayMinutes), minutesText(planned), tr("%1-day streak").arg(streak)));
     m_grid->setDays(summary.days, today);
+    // Today per part, of the plan; the part running counts its time not yet in the log.
+    const auto todaySeconds = summary.days.find(today);
+    const std::vector<training::Step> steps = TrainingSession::plan();
+    const training::Session* session = m_session.session();
+    for (std::size_t k = 0; k < training::kParts; ++k) {
+        const PartBar& bar = m_partBars[k];
+        int seconds = todaySeconds != summary.days.end() ? todaySeconds->second[k] : 0;
+        if (session != nullptr && session->part() == training::kAllParts[k]) {
+            seconds += m_session.unsavedSeconds();
+        }
+        const training::Step& step = steps[k];
+        const bool shown = step.on || seconds > 0;
+        for (QWidget* widget : {static_cast<QWidget*>(bar.name), static_cast<QWidget*>(bar.bar),
+                                static_cast<QWidget*>(bar.value)}) {
+            QSizePolicy keep = widget->sizePolicy();
+            keep.setRetainSizeWhenHidden(true); // switching a part off moves nothing
+            widget->setSizePolicy(keep);
+            widget->setVisible(shown);
+        }
+        const int partMinutes = step.on ? step.minutes : 0;
+        bar.bar->setRange(0, std::max(partMinutes * 60, 1));
+        bar.bar->setValue(std::min(seconds, std::max(partMinutes * 60, 1)));
+        bar.value->setText(partMinutes > 0 ? tr("%1 / %2 min").arg(seconds / 60).arg(partMinutes)
+                                           : tr("%1 min").arg(seconds / 60));
+    }
     // The years trained, newest first: a choice only once there are two.
     std::set<int> years;
     for (const auto& [day, seconds] : summary.days) {

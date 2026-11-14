@@ -349,8 +349,7 @@ void Documents::openFile(const QString& path) {
             bool ok = false;
             const QString choice = QInputDialog::getItem(
                 m_window, QFileInfo(path).fileName(),
-                tr("This file has %n game(s). Which one?", nullptr, static_cast<int>(items.size())),
-                items, 0, false, &ok);
+                tr("This file has %1 games. Which one?").arg(items.size()), items, 0, false, &ok);
             if (!ok) {
                 return;
             }

@@ -138,8 +138,8 @@
         <translation>%1 og %2 til</translation>
     </message>
     <message>
-        <source>Blue</source>
-        <translation>Blå</translation>
+        <source>The theme's own</source>
+        <translation>Temaets egen</translation>
     </message>
     <message>
         <source>Purple</source>
@@ -294,6 +294,41 @@
     <message>
         <source>Import</source>
         <translation>Importer</translation>
+    </message>
+</context>
+<context>
+    <name>kiebitz::app::AppStyle</name>
+    <message>
+        <source>Graphite</source>
+        <translation>Grafitt</translation>
+    </message>
+    <message>
+        <source>Midnight</source>
+        <translation>Midnatt</translation>
+    </message>
+    <message>
+        <source>Forest</source>
+        <translation>Skog</translation>
+    </message>
+    <message>
+        <source>Espresso</source>
+        <translation>Espresso</translation>
+    </message>
+    <message>
+        <source>High Contrast</source>
+        <translation>Høy kontrast</translation>
+    </message>
+    <message>
+        <source>Daylight</source>
+        <translation>Dagslys</translation>
+    </message>
+    <message>
+        <source>Paper</source>
+        <translation>Papir</translation>
+    </message>
+    <message>
+        <source>Lavender</source>
+        <translation>Lavendel</translation>
     </message>
 </context>
 <context>
@@ -518,9 +553,9 @@
         <source>No games</source>
         <translation>Ingen partier</translation>
     </message>
-    <message numerus="yes">
-        <source>This file has %n game(s). Which one?</source>
-        <translation><numerusform>Denne filen har %n parti. Hvilket?</numerusform><numerusform>Denne filen har %n partier. Hvilket?</numerusform></translation>
+    <message>
+        <source>This file has %1 games. Which one?</source>
+        <translation>Denne filen har %1 partier. Hvilket?</translation>
     </message>
     <message>
         <source>Couldn't read the game</source>
@@ -1242,8 +1277,8 @@
         <translation>Løs oppgavene i denne filen på siden Oppgaver</translation>
     </message>
     <message>
-        <source>Practice</source>
-        <translation>Øve</translation>
+        <source>Practise</source>
+        <translation>Øv</translation>
     </message>
     <message>
         <source>Positions to practise</source>
@@ -1308,6 +1343,34 @@
     <message>
         <source>%1 folders</source>
         <translation>%1 mapper</translation>
+    </message>
+    <message>
+        <source>1 repertoire</source>
+        <translation>1 repertoar</translation>
+    </message>
+    <message>
+        <source>%1 repertoires</source>
+        <translation>%1 repertoarer</translation>
+    </message>
+    <message>
+        <source>1 game file</source>
+        <translation>1 partifil</translation>
+    </message>
+    <message>
+        <source>%1 game files</source>
+        <translation>%1 partifiler</translation>
+    </message>
+    <message>
+        <source>1 other file</source>
+        <translation>1 annen fil</translation>
+    </message>
+    <message>
+        <source>%1 other files</source>
+        <translation>%1 andre filer</translation>
+    </message>
+    <message>
+        <source>In it: %1</source>
+        <translation>I den: %1</translation>
     </message>
     <message>
         <source>%1 chapters</source>
@@ -1658,6 +1721,18 @@
         <translation>&amp;Hjelp</translation>
     </message>
     <message>
+        <source>&amp;Keyboard Shortcuts</source>
+        <translation>&amp;Hurtigtaster</translation>
+    </message>
+    <message>
+        <source>Kiebitz on &amp;GitHub</source>
+        <translation>Kiebitz på &amp;GitHub</translation>
+    </message>
+    <message>
+        <source>&amp;Report a Problem…</source>
+        <translation>&amp;Rapporter et problem …</translation>
+    </message>
+    <message>
         <source>&amp;About Kiebitz</source>
         <translation>&amp;Om Kiebitz</translation>
     </message>
@@ -1810,20 +1885,8 @@
         <translation>Start / stopp &amp;motor</translation>
     </message>
     <message>
-        <source>&amp;Appearance</source>
-        <translation>&amp;Utseende</translation>
-    </message>
-    <message>
-        <source>Same as System</source>
-        <translation>Som systemet</translation>
-    </message>
-    <message>
-        <source>Light</source>
-        <translation>Lyst</translation>
-    </message>
-    <message>
-        <source>Dark</source>
-        <translation>Mørkt</translation>
+        <source>&amp;Theme</source>
+        <translation>&amp;Tema</translation>
     </message>
     <message>
         <source>&amp;Flip Board</source>
@@ -1902,6 +1965,10 @@
         <translation>Brett (⌘1)</translation>
     </message>
     <message>
+        <source>Board</source>
+        <translation>Brett</translation>
+    </message>
+    <message>
         <source>Library (⌘L)</source>
         <translation>Bibliotek (⌘L)</translation>
     </message>
@@ -1928,6 +1995,10 @@
     <message>
         <source>Settings (⌘,)</source>
         <translation>Innstillinger (⌘,)</translation>
+    </message>
+    <message>
+        <source>Settings</source>
+        <translation>Innstillinger</translation>
     </message>
     <message>
         <source>Engine</source>
@@ -2601,10 +2672,6 @@
         <translation>Brettpartiene dine, fra PGN-filer</translation>
     </message>
     <message>
-        <source>Add Account  +</source>
-        <translation>Legg til konto  +</translation>
-    </message>
-    <message>
         <source>LICHESS</source>
         <translation>LICHESS</translation>
     </message>
@@ -3015,27 +3082,27 @@
         <translation>Linjene gjennom stillinger du tok feil i og ikke har svart riktig på to ganger siden</translation>
     </message>
     <message>
-        <source>Practice Whole Repertoire</source>
+        <source>Practise Whole Repertoire</source>
         <translation>Øv hele repertoaret</translation>
     </message>
     <message>
-        <source>1 position to practice</source>
-        <translation>1 stilling å øve på</translation>
+        <source>1 position to practise</source>
+        <translation>1 stilling å øve</translation>
     </message>
     <message>
-        <source>%1 positions to practice</source>
-        <translation>%1 stillinger å øve på</translation>
+        <source>%1 positions to practise</source>
+        <translation>%1 stillinger å øve</translation>
     </message>
     <message>
-        <source>Practice Whole File</source>
+        <source>Practise Whole File</source>
         <translation>Øv hele filen</translation>
     </message>
     <message>
-        <source>Practice From Here (%1)</source>
+        <source>Practise From Here (%1)</source>
         <translation>Øv herfra (%1)</translation>
     </message>
     <message>
-        <source>Practice Mistakes (%1)</source>
+        <source>Practise Mistakes (%1)</source>
         <translation>Øv på feil (%1)</translation>
     </message>
     <message>
@@ -3297,20 +3364,16 @@
         <translation>App</translation>
     </message>
     <message>
-        <source>Light or dark, or as macOS is set.</source>
-        <translation>Lyst eller mørkt, eller slik macOS er satt.</translation>
+        <source>Dark themes</source>
+        <translation>Mørke temaer</translation>
+    </message>
+    <message>
+        <source>Light themes</source>
+        <translation>Lyse temaer</translation>
     </message>
     <message>
         <source>System</source>
         <translation>System</translation>
-    </message>
-    <message>
-        <source>Light</source>
-        <translation>Lyst</translation>
-    </message>
-    <message>
-        <source>Dark</source>
-        <translation>Mørkt</translation>
     </message>
     <message>
         <source>Language</source>
@@ -3756,6 +3819,14 @@
     <message>
         <source>Last 7 days</source>
         <translation>Siste 7 dager</translation>
+    </message>
+    <message>
+        <source>TODAY</source>
+        <translation>I DAG</translation>
+    </message>
+    <message>
+        <source>%1 / %2 min</source>
+        <translation>%1 / %2 min</translation>
     </message>
     <message>
         <source>ACTIVITY</source>

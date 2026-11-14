@@ -167,18 +167,24 @@ TEST_F(MainWindowTest, Snapshots) {
     QTest::keyClick(&window, Qt::Key_Left); // back to 4... Nf6: a branch point (5. O-O or 5. d3)
     QTest::keyClick(&window, Qt::Key_Down); // choose 5. d3
     const QString dir = qEnvironmentVariable("KIEBITZ_SNAPSHOT_DIR");
-    for (const auto appearance :
-         {kiebitz::app::AppStyle::Appearance::Dark, kiebitz::app::AppStyle::Appearance::Light}) {
-        style.setAppearance(appearance);
+    // The default dark and light themes, then every theme, to look at side by side.
+    const auto save = [&](const QString& name) {
         QApplication::processEvents();
         const QImage image = window.grab().toImage();
         EXPECT_FALSE(image.isNull());
         if (!dir.isEmpty()) {
-            image.save(QDir(dir).filePath(
-                QStringLiteral("window-%1.png").arg(kiebitz::app::AppStyle::toString(appearance))));
+            image.save(QDir(dir).filePath(name));
         }
+    };
+    style.setTheme(QStringLiteral("graphite"));
+    save(QStringLiteral("window-dark.png"));
+    style.setTheme(QStringLiteral("daylight"));
+    save(QStringLiteral("window-light.png"));
+    for (const auto& theme : kiebitz::app::AppStyle::themes()) {
+        style.setTheme(theme.id);
+        save(QStringLiteral("app-theme-%1.png").arg(theme.id));
     }
-    style.setAppearance(kiebitz::app::AppStyle::Appearance::System);
+    style.setTheme({});
 }
 
 /// The keys themselves, not just the menu items: on macOS plain-key menu shortcuts never fire,

@@ -18,6 +18,7 @@
 #include "widgets/ResultBar.hpp"
 #include "widgets/SortCycle.hpp"
 #include "widgets/SortableItem.hpp"
+#include "widgets/VerticalScrollArea.hpp"
 
 #include <QComboBox>
 #include <QCryptographicHash>
@@ -329,12 +330,9 @@ ProfilesView::ProfilesView(ProfileStore& store, LichessLogin& lichess, Repertoir
     m_accounts = new QVBoxLayout(accountsContent);
     m_accounts->setContentsMargins(0, 0, 6, 0);
     m_accounts->setSpacing(10);
-    auto* accountsScroll = new QScrollArea;
+    auto* accountsScroll = new VerticalScrollArea;
     accountsScroll->setObjectName(QStringLiteral("profileAccounts"));
     accountsScroll->setWidget(accountsContent);
-    accountsScroll->setWidgetResizable(true);
-    accountsScroll->setFrameShape(QFrame::NoFrame);
-    accountsScroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
     accountsScroll->setFixedWidth(kAccountsWidth);
 
     // Right: the games looked at (all, one account, over the board), as an overview or a list.
@@ -622,7 +620,7 @@ ProfilesView::ProfilesView(ProfileStore& store, LichessLogin& lichess, Repertoir
     splitter->addWidget(detail);
     splitter->setChildrenCollapsible(false);
     splitter->setStretchFactor(1, 1);
-    splitter->setSizes({230, 950});
+    splitter->setSizes({270, 910});
     layout->addWidget(splitter, 1);
 
     connect(&m_store, &ProfileStore::changed, this, &ProfilesView::refreshList);
@@ -801,7 +799,8 @@ void ProfilesView::showAccounts(const Profile& profile) {
         return found != profile.parts.end() ? found->second->gameCount() : 0;
     };
     // A card: a head (badge, name, a button), then rows of a caption and a value.
-    const auto newCard = [&](const QString& badge, const QString& name, QPushButton* action) {
+    const auto newCard = [&](const QString& badge, const QString& name, QPushButton* action,
+                             const QString& titled = {}) {
         auto* frame = new QFrame;
         frame->setProperty("statTile", true);
         frame->setProperty("accountCard", true);
@@ -813,8 +812,16 @@ void ProfilesView::showAccounts(const Profile& profile) {
         auto* siteBadge = label(badge, "siteBadge");
         siteBadge->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed);
         head->addWidget(siteBadge, 0, Qt::AlignVCenter);
-        auto* title = label(name, "databaseName");
-        title->setTextFormat(Qt::RichText);
+        // A FIDE title in the accent colour, then the name, cut short with "…" if need be.
+        if (!titled.isEmpty()) {
+            auto* prefix = label(titled, "databaseName");
+            prefix->setProperty("accented", true);
+            prefix->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Preferred);
+            head->addWidget(prefix);
+        }
+        auto* title = new ElidedLabel;
+        title->setProperty("role", "databaseName");
+        title->setFullText(name);
         head->addWidget(title, 1);
         if (action != nullptr) {
             head->addWidget(action);
@@ -869,12 +876,8 @@ void ProfilesView::showAccounts(const Profile& profile) {
                         m_store.removeAccount(m_current, id);
                     }
                 });
-        const QString name = account.title.isEmpty()
-                                 ? account.username.toHtmlEscaped()
-                                 : QStringLiteral("<span style=\"color:%1\">%2</span> %3")
-                                       .arg(c.accent.name(), account.title.toHtmlEscaped(),
-                                            account.username.toHtmlEscaped());
-        QVBoxLayout* box = newCard(siteText(account.site).toUpper(), name, remove);
+        QVBoxLayout* box =
+            newCard(siteText(account.site).toUpper(), account.username, remove, account.title);
         // The site's ratings, fastest first, with how each moved at the last sync.
         for (const auto& [speed, caption] :
              {std::pair{"bullet", tr("Bullet")}, std::pair{"blitz", tr("Blitz")},
@@ -898,7 +901,10 @@ void ProfilesView::showAccounts(const Profile& profile) {
         // "synced 2 h ago", and for Lichess: signed in or not, with what to do about it.
         auto* foot = new QHBoxLayout;
         foot->setSpacing(6);
-        foot->addWidget(label(ago(account.synced), "cardFoot"), 1);
+        auto* synced = new ElidedLabel;
+        synced->setProperty("role", "cardFoot");
+        synced->setFullText(ago(account.synced));
+        foot->addWidget(synced, 1);
         if (account.site == AccountSite::Lichess) {
             auto* action = new QPushButton;
             action->setProperty("role", "link");
@@ -936,7 +942,8 @@ void ProfilesView::showAccounts(const Profile& profile) {
     gamesRow(otb, partGames(QString::fromLatin1(kOtb)), 0);
     otb->addWidget(label(tr("Your tournament games, from PGN files"), "cardFoot"));
 
-    auto* addAccountButton = new QPushButton(tr("Add Account  +"));
+    auto* addAccountButton = new QPushButton(tr("Add Account"));
+    addAccountButton->setIcon(makeIcon(IconKind::Plus, c.text, c.dimmed, 14));
     addAccountButton->setObjectName(QStringLiteral("profileAddAccount"));
     addAccountButton->setProperty("role", "secondary");
     addAccountButton->setMinimumHeight(34);

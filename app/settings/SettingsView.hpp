@@ -7,6 +7,7 @@
 #include <utility>
 #include <vector>
 
+class QButtonGroup;
 class QLabel;
 class QListWidget;
 class QStackedWidget;
@@ -51,6 +52,8 @@ private:
     QWidget* boardSection();
     QWidget* movesSection();
     QWidget* appearanceSection();
+    /// The dark (or light) themes as previews, their buttons in `group` (one chosen of all).
+    QWidget* themePicker(QButtonGroup* group, bool dark);
     QWidget* enginesSection();
     QWidget* foldersSection();
     QWidget* repertoireSection();

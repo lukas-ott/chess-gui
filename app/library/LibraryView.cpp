@@ -789,7 +789,7 @@ LibraryView::LibraryView(Library& library, RepertoireStore& store, const AppStyl
             emit openGameRequested(m_file, 0);
         }
     });
-    auto* practice = new QPushButton(tr("Practice"));
+    auto* practice = new QPushButton(tr("Practise"));
     practice->setObjectName(QStringLiteral("libraryPractice"));
     practice->setProperty("role", "primary");
     connect(practice, &QPushButton::clicked, this, [this] {
@@ -930,6 +930,9 @@ LibraryView::LibraryView(Library& library, RepertoireStore& store, const AppStyl
     repBox->addLayout(gapsHeader);
     repBox->addWidget(m_gapsStatus);
     repBox->addWidget(m_gaps, 1);
+    // While there are no gaps to list, the spare height goes here: the header and the tiles
+    // keep their own size.
+    repBox->addStretch();
     m_detail->addWidget(repertoirePage);
     connect(&m_store, &RepertoireStore::changed, this, [this] {
         if (m_detail->currentIndex() == kRepertoirePage) {
@@ -1049,6 +1052,10 @@ void LibraryView::showRepertoires(std::optional<core::Color> side) {
     }
     m_fileSearch->clear();
     m_typeFilter->setCurrentIndex(m_typeFilter->findData(wanted)); // filtersChanged() follows
+}
+
+void LibraryView::showAllTypes() {
+    m_typeFilter->setCurrentIndex(0); // "All types"; filtersChanged() follows
 }
 
 void LibraryView::filtersChanged() {
@@ -1358,7 +1365,51 @@ void LibraryView::showFolder(const QTreeWidgetItem& item) {
         parts << (folders == 1 ? tr("1 folder") : tr("%1 folders").arg(folders));
     }
     parts << (files == 1 ? tr("1 file") : tr("%1 files").arg(files));
-    m_folderState->setText(item.text(0), parts.join(QStringLiteral("  ·  ")));
+    // What's in it, subfolders too: the kinds of files, and the games in them.
+    int repertoires = 0;
+    int gameFiles = 0;
+    int others = 0;
+    std::size_t games = 0;
+    const std::function<void(const QTreeWidgetItem&)> count = [&](const QTreeWidgetItem& folder) {
+        for (int i = 0; i < folder.childCount(); ++i) {
+            const QTreeWidgetItem& child = *folder.child(i);
+            if (child.isHidden()) {
+                continue;
+            }
+            if (child.data(0, kKindRole).toInt() != kFile) {
+                count(child);
+                continue;
+            }
+            const auto kind = static_cast<FileKind>(child.data(0, kFileKindRole).toInt());
+            if (kind == FileKind::Repertoire) {
+                ++repertoires;
+            } else if (kind == FileKind::Game) {
+                ++gameFiles;
+            } else {
+                ++others;
+            }
+            if (const auto file = fileOf(&child)) {
+                games += file->games.size();
+            }
+        }
+    };
+    count(item);
+    QStringList inside;
+    if (repertoires > 0) {
+        inside << (repertoires == 1 ? tr("1 repertoire") : tr("%1 repertoires").arg(repertoires));
+    }
+    if (gameFiles > 0) {
+        inside << (gameFiles == 1 ? tr("1 game file") : tr("%1 game files").arg(gameFiles));
+    }
+    if (others > 0) {
+        inside << (others == 1 ? tr("1 other file") : tr("%1 other files").arg(others));
+    }
+    QString text = parts.join(QStringLiteral("  ·  "));
+    if (!inside.isEmpty()) {
+        text += QLatin1Char('\n') + tr("In it: %1").arg(inside.join(QStringLiteral(", "))) +
+                QStringLiteral("  ·  ") + gamesText(static_cast<int>(games));
+    }
+    m_folderState->setText(item.text(0), text);
     m_detail->setCurrentIndex(kFolderPage);
 }
 

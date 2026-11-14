@@ -9,6 +9,8 @@
 #include <QTemporaryDir>
 #include <gtest/gtest.h>
 
+#include <utility>
+
 namespace {
 
 using namespace kiebitz::app;
@@ -30,6 +32,28 @@ TEST(Migration, CopiesMissingSettingsAndNeverOverwrites) {
     EXPECT_EQ(fresh.value(QStringLiteral("board/theme")).toString(), QStringLiteral("Green"));
     EXPECT_EQ(fresh.value(QStringLiteral("window/geometry")).toString(), QStringLiteral("new"));
     EXPECT_EQ(migration::copySettings(old, fresh), 0); // nothing left to copy
+}
+
+TEST(Migration, TheOldAppearanceBecomesATheme) {
+    const QTemporaryDir dir;
+    ASSERT_TRUE(dir.isValid());
+    QSettings settings(dir.filePath(QStringLiteral("s.ini")), QSettings::IniFormat);
+    const QString theme = QStringLiteral("app/colourTheme");
+    for (const auto& [appearance, expected] :
+         {std::pair{"light", "daylight"}, std::pair{"dark", "graphite"}, std::pair{"system", ""}}) {
+        settings.clear();
+        settings.setValue(QStringLiteral("app/appearance"), QString::fromLatin1(appearance));
+        EXPECT_TRUE(migration::appearanceToTheme(settings));
+        EXPECT_EQ(settings.value(theme).toString(), QString::fromLatin1(expected)) << appearance;
+        EXPECT_FALSE(settings.contains(QStringLiteral("app/appearance")));
+        EXPECT_FALSE(migration::appearanceToTheme(settings)); // once
+    }
+    // A theme chosen already stays.
+    settings.clear();
+    settings.setValue(QStringLiteral("app/appearance"), QStringLiteral("light"));
+    settings.setValue(theme, QStringLiteral("midnight"));
+    EXPECT_TRUE(migration::appearanceToTheme(settings));
+    EXPECT_EQ(settings.value(theme).toString(), QStringLiteral("midnight"));
 }
 
 TEST(Migration, MovesDownloadedEnginesAndTheirPaths) {

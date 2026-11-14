@@ -18,8 +18,12 @@
 #include <QSettings>
 #include <QShortcut>
 #include <QTest>
+#include <QToolButton>
 #include <QWheelEvent>
 #include <gtest/gtest.h>
+
+#include <algorithm>
+#include <cmath>
 
 namespace {
 
@@ -157,7 +161,7 @@ protected:
     void TearDown() override {
         // Settings are kept for the whole test process: leave the defaults for the next test.
         for (const char* key : {Settings::kCoordinates, Settings::kFigurines, Settings::kTextSize,
-                                Settings::kWheel, Settings::kAnimation}) {
+                                Settings::kWheel, Settings::kAnimation, Settings::kAppTheme}) {
             Settings::instance().reset(key);
         }
         QSettings().remove(QStringLiteral("shortcuts"));
@@ -223,6 +227,77 @@ TEST_F(SettingsPageTest, ChangesShowOnTheBoardTheMovesAndTheStyle) {
     EXPECT_EQ(style.textScale(), 120);
     QTest::mouseClick(find<QPushButton>(QStringLiteral("settingsTextSize:100")), Qt::LeftButton);
     EXPECT_EQ(style.textScale(), 100);
+}
+
+TEST_F(SettingsPageTest, OneThemeOfBothListsIsChosenAndTheAppIsDarkOrLightWithIt) {
+    using kiebitz::app::AppStyle;
+    openSettings(QStringLiteral("Appearance"));
+    // Nothing chosen yet: Graphite or Daylight, as macOS is set (offscreen: not light).
+    EXPECT_EQ(style.theme().id, QStringLiteral("graphite"));
+    EXPECT_TRUE(find<QToolButton>(QStringLiteral("settingsTheme:graphite"))->isChecked());
+
+    QTest::mouseClick(find<QToolButton>(QStringLiteral("settingsTheme:midnight")), Qt::LeftButton);
+    const AppStyle::Colors& midnight = AppStyle::find(QStringLiteral("midnight"))->colors;
+    EXPECT_EQ(style.colors().window, midnight.window);
+    EXPECT_EQ(qApp->palette().color(QPalette::Window), midnight.window);
+    EXPECT_TRUE(style.isDark());
+
+    // A light theme: the app turns light, and only that one is chosen, in both lists.
+    QTest::mouseClick(find<QToolButton>(QStringLiteral("settingsTheme:paper")), Qt::LeftButton);
+    EXPECT_EQ(style.colors().window, AppStyle::find(QStringLiteral("paper"))->colors.window);
+    EXPECT_FALSE(style.isDark());
+    int checked = 0;
+    for (const auto* tile : window.findChildren<QToolButton*>()) {
+        if (tile->objectName().startsWith(QStringLiteral("settingsTheme:")) && tile->isChecked()) {
+            ++checked;
+            EXPECT_EQ(tile->objectName(), QStringLiteral("settingsTheme:paper"));
+        }
+    }
+    EXPECT_EQ(checked, 1);
+    // The View menu shows the same.
+    for (const auto* action : window.findChildren<QAction*>()) {
+        if (action->data().toString() == QStringLiteral("paper")) {
+            EXPECT_TRUE(action->isChecked());
+        } else if (action->data().toString() == QStringLiteral("midnight")) {
+            EXPECT_FALSE(action->isChecked());
+        }
+    }
+    // Your accent still wins over the theme's.
+    Settings::instance().setValue(Settings::kAccent, QStringLiteral("#8b6cf0"));
+    EXPECT_EQ(style.colors().accent, QColor(QStringLiteral("#8b6cf0")));
+    Settings::instance().setValue(Settings::kAccent, QString());
+    EXPECT_EQ(style.colors().accent, AppStyle::find(QStringLiteral("paper"))->colors.accent);
+}
+
+TEST(AppThemes, TheDefaultsComeFirstAndEveryThemeIsReadable) {
+    using kiebitz::app::AppStyle;
+    EXPECT_EQ(AppStyle::find(QStringLiteral("graphite"))->colors.window,
+              AppStyle::darkColors().window);
+    EXPECT_EQ(AppStyle::find(QStringLiteral("daylight"))->colors.window,
+              AppStyle::lightColors().window);
+    EXPECT_EQ(AppStyle::find(QStringLiteral("gone")), nullptr);
+    QStringList ids;
+    for (const AppStyle::Theme& theme : AppStyle::themes()) {
+        EXPECT_FALSE(ids.contains(theme.id)) << theme.id.toStdString();
+        ids << theme.id;
+        // Readable: text and secondary text on the cards, text on the accent.
+        const auto contrast = [](const QColor& a, const QColor& b) {
+            const auto luminance = [](const QColor& colour) {
+                const auto channel = [](float v) {
+                    return v <= 0.03928F ? v / 12.92F : std::pow((v + 0.055F) / 1.055F, 2.4F);
+                };
+                return (0.2126F * channel(colour.redF())) + (0.7152F * channel(colour.greenF())) +
+                       (0.0722F * channel(colour.blueF()));
+            };
+            const float x = luminance(a);
+            const float y = luminance(b);
+            return (std::max(x, y) + 0.05F) / (std::min(x, y) + 0.05F);
+        };
+        const AppStyle::Colors& c = theme.colors;
+        EXPECT_GE(contrast(c.text, c.surface), 7.0F) << theme.id.toStdString();
+        EXPECT_GE(contrast(c.muted, c.surface), 4.5F) << theme.id.toStdString();
+        EXPECT_GE(contrast(c.accentText, c.accent), 3.0F) << theme.id.toStdString();
+    }
 }
 
 TEST_F(SettingsPageTest, TheWheelStepsThroughTheMovesWhenOn) {

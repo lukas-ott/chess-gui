@@ -25,6 +25,7 @@
 #include <QSignalBlocker>
 #include <QSlider>
 #include <QStackedWidget>
+#include <QToolButton>
 #include <QUrl>
 #include <QVBoxLayout>
 
@@ -62,9 +63,34 @@ QIcon themeIcon(const BoardTheme& theme) {
 }
 
 /// The accent colours offered (the first one: the theme's own blue).
+/// A small picture of a theme: its window, a card with two lines of text, and its accent.
+QIcon themePreview(const AppStyle::Colors& c) {
+    constexpr int kWidth = 76;
+    constexpr int kHeight = 48;
+    QPixmap pixmap(kWidth * 2, kHeight * 2);
+    pixmap.setDevicePixelRatio(2);
+    pixmap.fill(Qt::transparent);
+    QPainter painter(&pixmap);
+    painter.setRenderHint(QPainter::Antialiasing);
+    painter.setPen(QPen(c.border, 1));
+    painter.setBrush(c.window);
+    painter.drawRoundedRect(QRectF(0.5, 0.5, kWidth - 1, kHeight - 1), 6, 6);
+    painter.setBrush(c.surface);
+    painter.drawRoundedRect(QRectF(8.5, 8.5, kWidth - 17, kHeight - 17), 4, 4);
+    painter.setPen(Qt::NoPen);
+    painter.setBrush(c.text);
+    painter.drawRoundedRect(QRectF(15, 15, 30, 4), 2, 2);
+    painter.setBrush(c.muted);
+    painter.drawRoundedRect(QRectF(15, 23, 22, 3), 1.5, 1.5);
+    painter.setBrush(c.accent);
+    painter.drawRoundedRect(QRectF(kWidth - 32, kHeight - 22, 16, 7), 3.5, 3.5);
+    painter.end();
+    return {pixmap};
+}
+
 const std::vector<std::pair<QString, QString>>& accents() {
     static const std::vector<std::pair<QString, QString>> colours{
-        {QString(), QObject::tr("Blue")},
+        {QString(), QObject::tr("The theme's own")},
         {QStringLiteral("#8B6CF0"), QObject::tr("Purple")},
         {QStringLiteral("#E96CB5"), QObject::tr("Pink")},
         {QStringLiteral("#F0645E"), QObject::tr("Red")},
@@ -373,12 +399,21 @@ QWidget* SettingsView::appearanceSection() {
     box->setContentsMargins(24, 20, 24, 20);
     box->setSpacing(6);
     QVBoxLayout* look = group(box, tr("App"));
-    look->addWidget(row(tr("Appearance"), tr("Light or dark, or as macOS is set."),
-                        segments(Settings::kAppearance,
-                                 {{QStringLiteral("system"), tr("System")},
-                                  {QStringLiteral("light"), tr("Light")},
-                                  {QStringLiteral("dark"), tr("Dark")}},
-                                 QStringLiteral("settingsAppearance"))));
+    // The themes, dark and light, one of them chosen; the app is dark or light with it.
+    auto* themes = new QButtonGroup(page);
+    themes->setExclusive(true);
+    look->addWidget(themePicker(themes, true));
+    look->addWidget(themePicker(themes, false));
+    const auto showTheme = [this, themes] {
+        const QString shown = QStringLiteral("settingsTheme:") + m_style.theme().id;
+        for (QAbstractButton* button : themes->buttons()) {
+            if (button->objectName() == shown) {
+                button->setChecked(true);
+            }
+        }
+    };
+    showTheme();
+    connect(&m_style, &AppStyle::changed, themes, showTheme); // macOS switched, if followed
     // The app's language (each language names itself); it changes on the next start.
     look->addWidget(row(tr("Language"), tr("As macOS is set, or one of these. After a restart."),
                         segments(Settings::kLanguage,
@@ -409,7 +444,16 @@ QWidget* SettingsView::appearanceSection() {
         button->setObjectName(QStringLiteral("settingsAccent:") + name);
         button->setProperty("role", "accentSwatch");
         button->setToolTip(name);
-        button->setIcon(swatch(value.isEmpty() ? AppStyle::darkColors().accent : QColor(value)));
+        if (value.isEmpty()) {
+            // The theme's own accent: drawn in the theme's colour, whichever is in use.
+            const auto drawTheme = [this, button, swatch] {
+                button->setIcon(swatch(m_style.theme().colors.accent));
+            };
+            drawTheme();
+            connect(&m_style, &AppStyle::changed, button, drawTheme);
+        } else {
+            button->setIcon(swatch(QColor(value)));
+        }
         button->setIconSize(QSize(22, 22));
         button->setCheckable(true);
         button->setFocusPolicy(Qt::NoFocus);
@@ -458,6 +502,39 @@ QWidget* SettingsView::appearanceSection() {
             QStringLiteral("settingsTextSize"))));
     box->addStretch();
     return page;
+}
+
+QWidget* SettingsView::themePicker(QButtonGroup* group, bool dark) {
+    // As a row, with the themes under its title: the previews need the width.
+    auto* frame = new QWidget;
+    frame->setObjectName(QStringLiteral("settingsRow"));
+    auto* box = new QVBoxLayout(frame);
+    box->setContentsMargins(0, 10, 0, 10);
+    box->setSpacing(8);
+    box->addWidget(label(dark ? tr("Dark themes") : tr("Light themes"), "databaseName"));
+    auto* tiles = new QHBoxLayout;
+    tiles->setSpacing(4);
+    for (const AppStyle::Theme& theme : AppStyle::themes()) {
+        if (theme.dark != dark) {
+            continue;
+        }
+        auto* button = new QToolButton;
+        button->setObjectName(QStringLiteral("settingsTheme:") + theme.id);
+        button->setProperty("role", "themeTile");
+        button->setToolButtonStyle(Qt::ToolButtonTextUnderIcon);
+        button->setText(theme.name);
+        button->setIcon(themePreview(theme.colors));
+        button->setIconSize(QSize(76, 48));
+        button->setCheckable(true);
+        button->setFocusPolicy(Qt::NoFocus);
+        group->addButton(button);
+        tiles->addWidget(button);
+        connect(button, &QToolButton::clicked, this,
+                [id = theme.id] { Settings::instance().setValue(Settings::kAppTheme, id); });
+    }
+    tiles->addStretch();
+    box->addLayout(tiles);
+    return frame;
 }
 
 QWidget* SettingsView::enginesSection() {

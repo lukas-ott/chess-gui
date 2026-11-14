@@ -68,7 +68,7 @@ private:
     QSplitter* m_mainSplitter = nullptr;
     QSplitter* m_sideSplitter = nullptr;
     QStackedWidget* m_movesStack = nullptr; ///< 0 = the moves, 1 = practice
-    bool m_defaultSideSplit = false;        ///< no saved layout: keep the moves at two thirds
+    bool m_defaultSideSplit = false;        ///< no saved layout: keep the moves at 55 %
     int m_wheel = 0; ///< wheel turned over the board, not yet a whole step (1/8°)
 };
 

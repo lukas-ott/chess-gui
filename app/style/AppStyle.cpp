@@ -25,13 +25,15 @@ namespace kiebitz::app {
 
 AppStyle::Colors AppStyle::darkColors() {
     return {
-        .window = QColor(0x1A, 0x1B, 0x1E),
-        .surface = QColor(0x25, 0x26, 0x2B),
-        .raised = QColor(0x2C, 0x2E, 0x33),
-        .border = QColor(0x37, 0x3A, 0x40),
-        .text = QColor(0xC1, 0xC2, 0xC5),
-        .muted = QColor(0x90, 0x92, 0x96),
-        .dimmed = QColor(0x5C, 0x5F, 0x66),
+        // Cards stand apart from the window (1.24:1) with a visible edge (1.41:1); text is near
+        // white (12:1) and secondary text clearly readable (6.2:1). Calm, but not murky.
+        .window = QColor(0x11, 0x12, 0x14),
+        .surface = QColor(0x24, 0x26, 0x2B),
+        .raised = QColor(0x2E, 0x30, 0x36),
+        .border = QColor(0x3B, 0x3E, 0x45),
+        .text = QColor(0xE4, 0xE5, 0xE8),
+        .muted = QColor(0xA3, 0xA6, 0xAD),
+        .dimmed = QColor(0x6C, 0x70, 0x78),
         .accent = QColor(0x4D, 0xAB, 0xF7),
         .accentText = QColor(0x10, 0x11, 0x13),
         // Wins and losses: a calm green leaning to teal and a soft red, apart in lightness as
@@ -47,13 +49,14 @@ AppStyle::Colors AppStyle::darkColors() {
 
 AppStyle::Colors AppStyle::lightColors() {
     return {
-        .window = QColor(0xF1, 0xF3, 0xF5),
+        // As in dark: white cards on a grey window (1.22:1), secondary text at 6:1.
+        .window = QColor(0xE6, 0xE9, 0xED),
         .surface = QColor(0xFF, 0xFF, 0xFF),
         .raised = QColor(0xF1, 0xF3, 0xF5),
-        .border = QColor(0xDE, 0xE2, 0xE6),
-        .text = QColor(0x21, 0x25, 0x29),
-        .muted = QColor(0x86, 0x8E, 0x96),
-        .dimmed = QColor(0xAD, 0xB5, 0xBD),
+        .border = QColor(0xD3, 0xD7, 0xDD),
+        .text = QColor(0x1D, 0x21, 0x25),
+        .muted = QColor(0x5D, 0x64, 0x6E),
+        .dimmed = QColor(0xA2, 0xA8, 0xB0),
         .accent = QColor(0x22, 0x8B, 0xE6),
         .accentText = QColor(0xFF, 0xFF, 0xFF),
         // As in dark, with draws the lightest of the three.
@@ -65,11 +68,73 @@ AppStyle::Colors AppStyle::lightColors() {
     };
 }
 
+namespace {
+
+/// A theme's colours: its own greys and accent, with the results' colours of its kind.
+AppStyle::Colors themed(AppStyle::Colors base, std::array<const char*, 9> hex) {
+    base.window = QColor(QLatin1String(hex[0]));
+    base.surface = QColor(QLatin1String(hex[1]));
+    base.raised = QColor(QLatin1String(hex[2]));
+    base.border = QColor(QLatin1String(hex[3]));
+    base.text = QColor(QLatin1String(hex[4]));
+    base.muted = QColor(QLatin1String(hex[5]));
+    base.dimmed = QColor(QLatin1String(hex[6]));
+    base.accent = QColor(QLatin1String(hex[7]));
+    base.accentText = QColor(QLatin1String(hex[8]));
+    return base;
+}
+
+} // namespace
+
+const std::vector<AppStyle::Theme>& AppStyle::themes() {
+    // Each like Graphite and Daylight: cards about 1.2:1 from the window, text 12:1 or more,
+    // secondary text 6:1 or more, and text on the accent 5:1 or more (High Contrast far above).
+    // Order: window, surface, raised, border, text, muted, dimmed, accent, text on the accent.
+    static const std::vector<Theme> all{
+        {QStringLiteral("graphite"), tr("Graphite"), true, darkColors()},
+        {QStringLiteral("midnight"), tr("Midnight"), true,
+         themed(darkColors(), {"#0A0D1A", "#181E33", "#212842", "#2E3753", "#E3E7F2", "#A0A9C0",
+                               "#626C88", "#82AAFF", "#0C1020"})},
+        {QStringLiteral("forest"), tr("Forest"), true,
+         themed(darkColors(), {"#0B100E", "#1B2420", "#24302A", "#324039", "#E2E9E5", "#A0B1A8",
+                               "#66776E", "#E2B35F", "#14110A"})},
+        {QStringLiteral("espresso"), tr("Espresso"), true,
+         themed(darkColors(), {"#100D0B", "#241F1A", "#2F2822", "#3E362E", "#EDE5DB", "#B3A698",
+                               "#786C5F", "#E8955A", "#17110C"})},
+        {QStringLiteral("contrast-dark"), tr("High Contrast"), true,
+         themed(darkColors(), {"#000000", "#141414", "#222222", "#7A7A7A", "#FFFFFF", "#D4D4D4",
+                               "#8C8C8C", "#6CC4FF", "#000000"})},
+        {QStringLiteral("daylight"), tr("Daylight"), false, lightColors()},
+        {QStringLiteral("paper"), tr("Paper"), false,
+         themed(lightColors(), {"#ECE6DA", "#FBF8F2", "#F3EEE5", "#D9D0C1", "#29241D", "#675D50",
+                                "#A99F90", "#A85A1F", "#FFFFFF"})},
+        {QStringLiteral("lavender"), tr("Lavender"), false,
+         themed(lightColors(), {"#E7E5F0", "#FFFFFF", "#F3F2F9", "#D5D2E3", "#211E2C", "#5D586F",
+                                "#A5A0B6", "#6450C8", "#FFFFFF"})},
+        {QStringLiteral("contrast-light"), tr("High Contrast"), false,
+         themed(lightColors(), {"#E8E8E8", "#FFFFFF", "#F2F2F2", "#6E6E6E", "#000000", "#2E2E2E",
+                                "#767676", "#0050B0", "#FFFFFF"})},
+    };
+    return all;
+}
+
+const AppStyle::Theme* AppStyle::find(const QString& id) {
+    const auto& all = themes();
+    const auto found =
+        std::find_if(all.begin(), all.end(), [&](const Theme& theme) { return theme.id == id; });
+    return found != all.end() ? &*found : nullptr;
+}
+
+void AppStyle::setTheme(const QString& id) {
+    m_themeId = id;
+    apply();
+}
+
 AppStyle::AppStyle(QApplication& app) : QObject(&app), m_app(app) {
     QApplication::setStyle(QStyleFactory::create(QStringLiteral("Fusion")));
     app.installEventFilter(this);
     connect(QGuiApplication::styleHints(), &QStyleHints::colorSchemeChanged, this, [this] {
-        if (m_appearance == Appearance::System && !m_applying) {
+        if (find(m_themeId) == nullptr && !m_applying) { // following macOS
             apply();
         }
     });
@@ -107,33 +172,6 @@ bool AppStyle::eventFilter(QObject* watched, QEvent* event) {
     return QObject::eventFilter(watched, event);
 }
 
-void AppStyle::setAppearance(Appearance appearance) {
-    m_appearance = appearance;
-    apply();
-}
-
-QString AppStyle::toString(Appearance appearance) {
-    switch (appearance) {
-    case Appearance::Light:
-        return QStringLiteral("light");
-    case Appearance::Dark:
-        return QStringLiteral("dark");
-    case Appearance::System:
-        break;
-    }
-    return QStringLiteral("system");
-}
-
-AppStyle::Appearance AppStyle::fromString(const QString& text) {
-    if (text == QLatin1String("light")) {
-        return Appearance::Light;
-    }
-    if (text == QLatin1String("dark")) {
-        return Appearance::Dark;
-    }
-    return Appearance::System;
-}
-
 void AppStyle::setAccent(const QColor& accent) {
     m_accent = accent;
     apply();
@@ -145,28 +183,24 @@ void AppStyle::setTextScale(int percent) {
 }
 
 void AppStyle::apply() {
-    // First tell the system which appearance we want, so its own parts (title bar, menus,
-    // dialogs) match; with System, hand the choice back to macOS. This emits colorSchemeChanged,
-    // and the guard keeps that from re-entering apply().
+    // First tell the system whether the theme is dark or light, so its own parts (title bar,
+    // menus, dialogs) match; with no theme chosen, hand the choice back to macOS and take
+    // Graphite or Daylight by it (unknown counts as dark, the app's home look). Setting the
+    // scheme emits colorSchemeChanged; the guard keeps that from re-entering apply().
     auto* hints = QGuiApplication::styleHints();
+    const Theme* chosen = find(m_themeId);
     m_applying = true;
-    switch (m_appearance) {
-    case Appearance::Light:
-        hints->setColorScheme(Qt::ColorScheme::Light);
-        break;
-    case Appearance::Dark:
-        hints->setColorScheme(Qt::ColorScheme::Dark);
-        break;
-    case Appearance::System:
+    if (chosen != nullptr) {
+        hints->setColorScheme(chosen->dark ? Qt::ColorScheme::Dark : Qt::ColorScheme::Light);
+    } else {
         hints->unsetColorScheme();
-        break;
+        chosen = find(hints->colorScheme() == Qt::ColorScheme::Light ? QStringLiteral("daylight")
+                                                                     : QStringLiteral("graphite"));
     }
     m_applying = false;
-    // A forced choice is used as is; with System, ask macOS (unknown counts as dark, the app's
-    // home look).
-    m_dark = m_appearance == Appearance::Dark ||
-             (m_appearance == Appearance::System && hints->colorScheme() != Qt::ColorScheme::Light);
-    m_colors = m_dark ? darkColors() : lightColors();
+    m_theme = chosen;
+    m_dark = chosen->dark;
+    m_colors = chosen->colors;
     if (m_accent.isValid()) {
         // Your accent; the text on it light or dark, whichever reads better.
         m_colors.accent = m_accent;
@@ -267,6 +301,7 @@ QLabel[role="cardTitle"] {
     color: @muted;
     font-size: 11px;
     font-weight: 600;
+    letter-spacing: 0.6px;
 }
 QLabel[role="emptyTitle"] { color: @text; font-size: 15px; font-weight: 600; }
 QLabel[role="emptyHint"] { color: @muted; font-size: 12px; }
@@ -343,6 +378,9 @@ QLabel[role="hint"] { color: @muted; font-size: 12px; padding: 2px 2px 4px 2px; 
 QSplitter::handle { background: transparent; }
 QSplitter::handle:horizontal { width: 8px; }
 QSplitter::handle:vertical { height: 8px; }
+/* Hovered, a divider shows where it is, so it can be found and dragged */
+QSplitter::handle:horizontal:hover { background: @border; margin: 0 3px; border-radius: 1px; }
+QSplitter::handle:vertical:hover { background: @border; margin: 3px 0; border-radius: 1px; }
 
 /* Slim scroll bars */
 QScrollBar:vertical { background: transparent; width: 8px; margin: 2px; }
@@ -494,6 +532,8 @@ QLabel[role="quote"] {
 }
 QProgressBar#practiceBar { background: @raised; border: none; border-radius: 2px; }
 QProgressBar#practiceBar::chunk { background: @accent; border-radius: 2px; }
+QProgressBar#trainingPartBar { background: @raised; border: none; border-radius: 3px; }
+QProgressBar#trainingPartBar::chunk { background: @accent; border-radius: 3px; }
 QProgressBar#puzzleProgress { background: @raised; border: none; border-radius: 2px; }
 QProgressBar#puzzleProgress::chunk { background: @accent; border-radius: 2px; }
 
@@ -540,6 +580,7 @@ QPushButton[role="secondary"][compact="true"] {
 
 /* The date range: a button (accent while a range is set) and its picker's calendars */
 QPushButton[active="true"] { color: @accent; border-color: @accent; }
+QLabel[accented="true"] { color: @accent; }
 QCalendarWidget QWidget#qt_calendar_navigationbar { background: transparent; }
 QCalendarWidget QToolButton {
     color: @text;
@@ -592,6 +633,16 @@ QPushButton[role="swatch"] {
 }
 QPushButton[role="swatch"]:hover { border-color: @border; }
 QPushButton[role="swatch"]:checked { border-color: @accent; }
+QToolButton[role="themeTile"] {
+    background: transparent;
+    border: 2px solid transparent;
+    border-radius: 10px;
+    padding: 4px 4px 2px 4px;
+    color: @muted;
+    font-size: 11px;
+}
+QToolButton[role="themeTile"]:hover { border-color: @border; }
+QToolButton[role="themeTile"]:checked { border-color: @accent; color: @text; }
 QPushButton[role="accentSwatch"] {
     background: transparent;
     border: 2px solid transparent;
@@ -651,7 +702,7 @@ QTreeWidget#profileTheory QHeaderView::section {
     border-bottom: 1px solid @border;
     /* right: room for the sort arrow, so it never covers a right-aligned title */
     padding: 2px 14px 6px 4px;
-    font-size: 10px;
+    font-size: 11px;
     font-weight: 600;
 }
 QTreeWidget#explorerMoves::item:hover, QTreeWidget#explorerGames::item:hover,
@@ -687,7 +738,7 @@ QLabel[role="siteBadge"] {
     color: @muted;
     border-radius: 4px;
     padding: 2px 6px;
-    font-size: 10px;
+    font-size: 11px;
     font-weight: 700;
 }
 QLabel[role="ratingValue"] { color: @text; font-weight: 600; }
@@ -748,9 +799,12 @@ QToolButton[role="sideNav"] {
     border: none;
     border-left: 3px solid transparent;
     border-radius: 0;
+    color: @muted;
+    font-size: 10px;
+    padding-top: 4px;
 }
-QToolButton[role="sideNav"]:hover { background: @raised; }
-QToolButton[role="sideNav"]:checked { border-left-color: @accent; }
+QToolButton[role="sideNav"]:hover { background: @raised; color: @text; }
+QToolButton[role="sideNav"]:checked { border-left-color: @accent; color: @text; }
 
 /* Engines page */
 QFrame[engineCard="true"] { background: @raised; }

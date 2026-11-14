@@ -45,6 +45,10 @@ int main(int argc, char* argv[]) {
         kiebitz::app::migration::fromChessGui();
         kiebitz::app::migration::capitalizeEngineFolder();
     }
+    {
+        QSettings settings;
+        kiebitz::app::migration::appearanceToTheme(settings); // from 0.3
+    }
     QApplication::setApplicationVersion(QString::fromUtf8(
         kiebitz::core::version().data(), static_cast<qsizetype>(kiebitz::core::version().size())));
 
@@ -60,8 +64,7 @@ int main(int argc, char* argv[]) {
         style.setAccent(QColor(accent));
     }
     style.setTextScale(settings.number(kiebitz::app::Settings::kTextSize));
-    style.setAppearance(
-        kiebitz::app::AppStyle::fromString(settings.string(kiebitz::app::Settings::kAppearance)));
+    style.setTheme(settings.string(kiebitz::app::Settings::kAppTheme));
 
     kiebitz::app::MainWindow window(style);
     bool restart = false;

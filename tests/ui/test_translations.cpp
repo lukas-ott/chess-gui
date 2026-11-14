@@ -35,10 +35,10 @@ TEST(Translations, GermanAndNorwegianAreInTheApp) {
         EXPECT_FALSE(translator.isEmpty());
         EXPECT_EQ(translate(translator, "kiebitz::app::MainWindow", "&File"),
                   QString::fromUtf8(file));
-        EXPECT_EQ(translate(translator, "kiebitz::app::Documents",
-                            "This file has %n game(s). Which one?", 3)
-                      .replace(QStringLiteral("%n"), QStringLiteral("3")),
-                  QString::fromUtf8(open));
+        EXPECT_EQ(
+            translate(translator, "kiebitz::app::Documents", "This file has %1 games. Which one?")
+                .arg(3),
+            QString::fromUtf8(open));
     }
 }
 

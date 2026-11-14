@@ -816,6 +816,11 @@ void MainWindow::onTrainingPart(training::Part part) {
                        8000);
         });
     }
+    // The openings part's filter on the Library goes with it.
+    if (m_trainingFilter && part != training::Part::Openings) {
+        m_trainingFilter = false;
+        m_libraryView->showAllTypes();
+    }
     switch (part) {
     case training::Part::Openings: {
         // The Library with your repertoire files (one side's, or all), in their folders: you
@@ -827,6 +832,7 @@ void MainWindow::onTrainingPart(training::Part part) {
             side = core::Color::Black;
         }
         m_libraryView->showRepertoires(side);
+        m_trainingFilter = true;
         showSection(Section::Library);
         break;
     }

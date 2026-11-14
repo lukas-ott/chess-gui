@@ -172,9 +172,10 @@ void BoardPage::fit() {
                               total - (m_mainSplitter->height() - (2 * kClockRoom)) - bar);
     m_mainSplitter->setSizes({total - side, side});
     if (m_defaultSideSplit) {
-        // The moves are what you read: they get two thirds of the height, the panels the rest.
+        // The moves are what you read: they get a bit more than half the height, the panels
+        // (Explorer, engine) the rest.
         const int height = m_mainSplitter->height();
-        const int moves = (height * 2) / 3;
+        const int moves = (height * 11) / 20;
         m_sideSplitter->setSizes({moves, height - moves});
     }
     placeEvalBar();

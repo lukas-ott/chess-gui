@@ -138,8 +138,8 @@
         <translation>%1 und %2 weitere</translation>
     </message>
     <message>
-        <source>Blue</source>
-        <translation>Blau</translation>
+        <source>The theme's own</source>
+        <translation>Die des Themas</translation>
     </message>
     <message>
         <source>Purple</source>
@@ -294,6 +294,41 @@
     <message>
         <source>Import</source>
         <translation>Importieren</translation>
+    </message>
+</context>
+<context>
+    <name>kiebitz::app::AppStyle</name>
+    <message>
+        <source>Graphite</source>
+        <translation>Graphit</translation>
+    </message>
+    <message>
+        <source>Midnight</source>
+        <translation>Mitternacht</translation>
+    </message>
+    <message>
+        <source>Forest</source>
+        <translation>Wald</translation>
+    </message>
+    <message>
+        <source>Espresso</source>
+        <translation>Espresso</translation>
+    </message>
+    <message>
+        <source>High Contrast</source>
+        <translation>Hoher Kontrast</translation>
+    </message>
+    <message>
+        <source>Daylight</source>
+        <translation>Tageslicht</translation>
+    </message>
+    <message>
+        <source>Paper</source>
+        <translation>Papier</translation>
+    </message>
+    <message>
+        <source>Lavender</source>
+        <translation>Lavendel</translation>
     </message>
 </context>
 <context>
@@ -518,9 +553,9 @@
         <source>No games</source>
         <translation>Keine Partien</translation>
     </message>
-    <message numerus="yes">
-        <source>This file has %n game(s). Which one?</source>
-        <translation><numerusform>Diese Datei hat %n Partie. Welche?</numerusform><numerusform>Diese Datei hat %n Partien. Welche?</numerusform></translation>
+    <message>
+        <source>This file has %1 games. Which one?</source>
+        <translation>Diese Datei hat %1 Partien. Welche?</translation>
     </message>
     <message>
         <source>Couldn't read the game</source>
@@ -1242,7 +1277,7 @@
         <translation>Die Puzzles dieser Datei auf der Seite Puzzles lösen</translation>
     </message>
     <message>
-        <source>Practice</source>
+        <source>Practise</source>
         <translation>Üben</translation>
     </message>
     <message>
@@ -1308,6 +1343,34 @@
     <message>
         <source>%1 folders</source>
         <translation>%1 Ordner</translation>
+    </message>
+    <message>
+        <source>1 repertoire</source>
+        <translation>1 Repertoire</translation>
+    </message>
+    <message>
+        <source>%1 repertoires</source>
+        <translation>%1 Repertoires</translation>
+    </message>
+    <message>
+        <source>1 game file</source>
+        <translation>1 Partiedatei</translation>
+    </message>
+    <message>
+        <source>%1 game files</source>
+        <translation>%1 Partiedateien</translation>
+    </message>
+    <message>
+        <source>1 other file</source>
+        <translation>1 andere Datei</translation>
+    </message>
+    <message>
+        <source>%1 other files</source>
+        <translation>%1 andere Dateien</translation>
+    </message>
+    <message>
+        <source>In it: %1</source>
+        <translation>Darin: %1</translation>
     </message>
     <message>
         <source>%1 chapters</source>
@@ -1658,6 +1721,18 @@
         <translation>&amp;Hilfe</translation>
     </message>
     <message>
+        <source>&amp;Keyboard Shortcuts</source>
+        <translation>&amp;Tastaturkurzbefehle</translation>
+    </message>
+    <message>
+        <source>Kiebitz on &amp;GitHub</source>
+        <translation>Kiebitz auf &amp;GitHub</translation>
+    </message>
+    <message>
+        <source>&amp;Report a Problem…</source>
+        <translation>Problem &amp;melden …</translation>
+    </message>
+    <message>
         <source>&amp;About Kiebitz</source>
         <translation>&amp;Über Kiebitz</translation>
     </message>
@@ -1810,20 +1885,8 @@
         <translation>&amp;Engine starten / stoppen</translation>
     </message>
     <message>
-        <source>&amp;Appearance</source>
-        <translation>&amp;Erscheinungsbild</translation>
-    </message>
-    <message>
-        <source>Same as System</source>
-        <translation>Wie das System</translation>
-    </message>
-    <message>
-        <source>Light</source>
-        <translation>Hell</translation>
-    </message>
-    <message>
-        <source>Dark</source>
-        <translation>Dunkel</translation>
+        <source>&amp;Theme</source>
+        <translation>&amp;Thema</translation>
     </message>
     <message>
         <source>&amp;Flip Board</source>
@@ -1902,6 +1965,10 @@
         <translation>Brett (⌘1)</translation>
     </message>
     <message>
+        <source>Board</source>
+        <translation>Brett</translation>
+    </message>
+    <message>
         <source>Library (⌘L)</source>
         <translation>Bibliothek (⌘L)</translation>
     </message>
@@ -1928,6 +1995,10 @@
     <message>
         <source>Settings (⌘,)</source>
         <translation>Einstellungen (⌘,)</translation>
+    </message>
+    <message>
+        <source>Settings</source>
+        <translation>Einstellungen</translation>
     </message>
     <message>
         <source>Engine</source>
@@ -2601,10 +2672,6 @@
         <translation>Deine Turnierpartien, aus PGN-Dateien</translation>
     </message>
     <message>
-        <source>Add Account  +</source>
-        <translation>Konto hinzufügen  +</translation>
-    </message>
-    <message>
         <source>LICHESS</source>
         <translation>LICHESS</translation>
     </message>
@@ -3015,27 +3082,27 @@
         <translation>Die Varianten durch Stellungen, die du falsch hattest und seitdem nicht zweimal richtig beantwortet hast</translation>
     </message>
     <message>
-        <source>Practice Whole Repertoire</source>
+        <source>Practise Whole Repertoire</source>
         <translation>Ganzes Repertoire üben</translation>
     </message>
     <message>
-        <source>1 position to practice</source>
+        <source>1 position to practise</source>
         <translation>1 Stellung zum Üben</translation>
     </message>
     <message>
-        <source>%1 positions to practice</source>
+        <source>%1 positions to practise</source>
         <translation>%1 Stellungen zum Üben</translation>
     </message>
     <message>
-        <source>Practice Whole File</source>
+        <source>Practise Whole File</source>
         <translation>Ganze Datei üben</translation>
     </message>
     <message>
-        <source>Practice From Here (%1)</source>
+        <source>Practise From Here (%1)</source>
         <translation>Ab hier üben (%1)</translation>
     </message>
     <message>
-        <source>Practice Mistakes (%1)</source>
+        <source>Practise Mistakes (%1)</source>
         <translation>Fehler üben (%1)</translation>
     </message>
     <message>
@@ -3297,20 +3364,16 @@
         <translation>App</translation>
     </message>
     <message>
-        <source>Light or dark, or as macOS is set.</source>
-        <translation>Hell oder dunkel, oder wie macOS eingestellt ist.</translation>
+        <source>Dark themes</source>
+        <translation>Dunkle Themen</translation>
+    </message>
+    <message>
+        <source>Light themes</source>
+        <translation>Helle Themen</translation>
     </message>
     <message>
         <source>System</source>
         <translation>System</translation>
-    </message>
-    <message>
-        <source>Light</source>
-        <translation>Hell</translation>
-    </message>
-    <message>
-        <source>Dark</source>
-        <translation>Dunkel</translation>
     </message>
     <message>
         <source>Language</source>
@@ -3756,6 +3819,14 @@
     <message>
         <source>Last 7 days</source>
         <translation>Letzte 7 Tage</translation>
+    </message>
+    <message>
+        <source>TODAY</source>
+        <translation>HEUTE</translation>
+    </message>
+    <message>
+        <source>%1 / %2 min</source>
+        <translation>%1 / %2 Min.</translation>
     </message>
     <message>
         <source>ACTIVITY</source>

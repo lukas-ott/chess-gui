@@ -247,6 +247,7 @@ private:
     TrainingSession* m_training = nullptr;
     TrainingView* m_trainingView = nullptr;
     TrainingBar* m_trainingBar = nullptr; ///< the running session, in the status bar
+    bool m_trainingFilter = false;        ///< the openings part filtered the Library: undo it after
 
     // The board page
     BoardPage* m_boardPage = nullptr;
@@ -284,7 +285,7 @@ private:
     QActionGroup* m_themeGroup = nullptr;
     QAction* m_customColorsAction = nullptr;
     QActionGroup* m_piecesGroup = nullptr;
-    QActionGroup* m_appearanceGroup = nullptr;
+    QActionGroup* m_appThemeGroup = nullptr; ///< View › Theme
 };
 
 } // namespace kiebitz::app

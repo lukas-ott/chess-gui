@@ -9,6 +9,7 @@
 
 class QComboBox;
 class QLabel;
+class QProgressBar;
 class QPushButton;
 class QToolButton;
 
@@ -55,6 +56,12 @@ private:
     QComboBox* m_side = nullptr; ///< the openings part: which repertoire
     QLabel* m_total = nullptr;
     std::array<QLabel*, 4> m_tiles{}; ///< today, streak, best streak, the last 7 days
+    struct PartBar {
+        QLabel* name = nullptr;
+        QProgressBar* bar = nullptr;
+        QLabel* value = nullptr; ///< "8 / 15 min"
+    };
+    std::array<PartBar, training::kParts> m_partBars{}; ///< today, part by part
     ActivityGrid* m_grid = nullptr;
     QComboBox* m_year = nullptr; ///< the last 12 months, or a year (once there are several)
     TrainingHistory::Summary m_summary;

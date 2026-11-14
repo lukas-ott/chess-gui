@@ -109,4 +109,22 @@ void capitalizeEngineFolder() {
     }
 }
 
+bool appearanceToTheme(QSettings& settings) {
+    const QString oldKey = QStringLiteral("app/appearance");
+    const QString newKey = QStringLiteral("app/colourTheme"); // Settings::kAppTheme
+    if (!settings.contains(oldKey)) {
+        return false;
+    }
+    const QString appearance = settings.value(oldKey).toString();
+    settings.remove(oldKey);
+    if (settings.value(newKey).toString().isEmpty()) {
+        if (appearance == QLatin1String("light")) {
+            settings.setValue(newKey, QStringLiteral("daylight"));
+        } else if (appearance == QLatin1String("dark")) {
+            settings.setValue(newKey, QStringLiteral("graphite"));
+        }
+    }
+    return true;
+}
+
 } // namespace kiebitz::app::migration
