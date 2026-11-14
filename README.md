@@ -5,16 +5,16 @@ with Qt 6 Widgets.
 It opens instantly, keeps your PGN files as the source of truth, and focuses on building
 and training opening repertoires.
 
-Latest release: **[0.2.0](https://github.com/lukas-ott/kiebitz/releases/tag/v0.2.0)** (pre-release,
-Apple silicon).
+Latest release: **[0.3.0](https://github.com/lukas-ott/kiebitz/releases/tag/v0.3.0)** (pre-release,
+Apple silicon). In English, German and Norwegian.
 
 ## What it does
 
 - **Board and PGN editor:** games in tabs; variations, comments, NAGs, arrows and clocks, as
   flowing text or in rows. Changes save themselves.
 - **Library:** every PGN file in your library folder (`~/Documents/Kiebitz` by default) as a tree,
-  searchable (players, events, openings) and filterable by type: game, repertoire, tournament,
-  puzzle, other. A file shows its games with a preview; every list sorts by any column and
+  searchable (players, events, openings) and filterable by type: game, repertoire (also by
+  colour), tournament, puzzle, other. A file shows its games with a preview; every list sorts by any column and
   filters by date.
 - **Repertoires:** a repertoire file opens from its side and has a starting position (right-click
   a move). Practice the whole file, from any position, just the positions you got wrong, or
@@ -23,18 +23,24 @@ Apple silicon).
   through them.
 - **Gap check and theory check:** the common opponent moves a repertoire file doesn't answer yet,
   judged by the Explorer's games; and, on a profile, where its games left your repertoire.
+- **Training:** a plan of minutes for openings, middlegame, tactics, endgames and self-study,
+  run in order: each part opens its page (your repertoire files, or Lichess puzzles by theme),
+  the time shows on every page, and macOS tells you when a part is over. Today, your streak and
+  a GitHub-like grid of the days you trained.
 - **Puzzles:** the Lichess puzzle database (over 6 million puzzles, one download) by rating and
   theme, starting around your own rating, or the puzzle files of your Library. Hints, the
   solution, and stats for solved, clean, streak and time.
 - **Game databases and Explorer:** millions of games (Lumbra's Gigabase, Caissabase or your own
   PGN, also .7z/.zip); the Explorer shows what's played, how it scores and both sides' average
-  rating, filtered by rating, years, time control and players. Signed in to Lichess, it also
-  shows Lichess's and the masters' games.
+  rating, filtered by rating, years, time control and players (each source keeps its own
+  filter). Signed in to Lichess, it also shows Lichess's and the masters' games. With 7 pieces
+  or fewer, it shows Lichess's endgame tablebase: who wins, and every move's result, DTZ and DTM.
 - **Profiles:** you, friends and opponents, each with their Lichess and chess.com games and
   over-the-board PGNs as a database of their own, with ratings, results by colour and their
   FIDE player.
 - **Engine:** Stockfish (one-click download) or the Lichess cloud.
-- **Settings:** board, pieces, moves, appearance, sounds and your own keyboard shortcuts.
+- **Settings:** board, pieces, moves, appearance, language (English, Deutsch, Norsk), sounds
+  and your own keyboard shortcuts.
 
 ## Requirements (macOS)
 
@@ -96,6 +102,7 @@ core/     Pure C++ chess logic: positions, FEN, SAN, game tree, annotations. No 
 pgn/      Reading, indexing and writing PGN files (fast game index, round-trip safe). No Qt.
 engine/   The UCI protocol (engine output, scores, lines as moves) and picking the Stockfish
           download for this Mac. No Qt.
+sql/      Small SQLite helpers the modules below share. No Qt.
 library/  The library's cache of game indexes (SQLite), so unchanged files are never read
           again, and file types. No Qt.
 repertoire/ Repertoire trees (games merged by position), practice drills and opening names.
@@ -104,11 +111,14 @@ gamedb/   Game databases of millions of games: a compact store (one byte per mov
           streaming parallel PGN import and an opening explorer over it. No Qt.
 puzzles/  Tactics puzzles: solving one, the Lichess puzzle database (imported into one
           compact file, picked by rating and theme) and your puzzle history. No Qt.
+training/ The training plan run in order, and the minutes trained per day. No Qt.
 app/      Qt Widgets application: main window, board/ (board widget, themes, piece sets),
           library/ (library folder scan and Library tab), repertoire/ (repertoire files,
           practice, the Repertoire tab), puzzles/ (Puzzles page, the Lichess download),
           databases/ (Databases page, imports), explorer/ (Explorer tab), profiles/ (Profiles
           page, game downloads, the Lichess login), settings/ (Settings page, shortcuts),
+          training/ (Training page, the activity grid), net/ (talking to Lichess),
+          notify/ (macOS notifications), translations/ (German and Norwegian),
           document/ (open games, background file loading and saving), notation/ (move list
           editor), panels/ (game info),
           engine/ (engine processes, Lichess cloud, Stockfish download, Engines page and
@@ -125,8 +135,8 @@ cmake/    Compiler options and pinned dependencies.
 
 - **v1:** board, PGN viewer and editor, UCI engine analysis (done)
 - **v2:** repertoires, practice, game databases, Explorer, profiles, gap check, puzzles (done)
-- **Next:** an endgame tablebase in the Explorer, game review (your mistakes as puzzles), a
-  training plan, position search in big databases
+- **0.3:** the endgame tablebase in the Explorer, the training plan, German and Norwegian (done)
+- **Next:** game review (your own mistakes as puzzles), position search in big databases
 
 ## Why "Kiebitz"?
 
